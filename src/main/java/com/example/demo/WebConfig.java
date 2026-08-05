@@ -39,7 +39,7 @@ public class WebConfig implements WebMvcConfigurer {
 
 	@Override
 	public void addResourceHandlers(ResourceHandlerRegistry registry) {
-		registry.addResourceHandler(LOCAL_HANDLE)
-				.addResourceLocations(LOCAL_PATH);
+		registry.addResourceHandler(REAL_HANDLE)
+				.addResourceLocations(REAL_PATH);
 	}
 }
