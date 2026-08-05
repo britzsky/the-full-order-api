@@ -1,0 +1,567 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.MenuMapper">
+	
+	<select id="NowDateKey" resultType="String">
+		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
+	</select>
+	
+	<select id="MenuList" parameterType="map" resultType="hashmap">
+		SELECT T.menu_img,
+			   T.menu_id,
+			   T.menu_name,
+			   T.del_yn,
+			   T.food_type,
+			   T.food_type_reason,
+			   DATE_FORMAT(T.created_at, '%Y-%m-%d') as created_at,
+			   T.menu_type,
+			   T.menu_gubun
+		FROM the_full_order.tb_menu_master T
+	</select>
+	
+	<select id="DetailList" parameterType="map" resultType="hashmap">
+		SELECT
+			rd.recipe_id,
+		    rd.menu_id,															-- 메뉴 ID
+		    rd.ingredient_id,													-- 재료 ID
+		    -- 재료명
+		    -- ingredient_master에 표준 재료명이 있으면 그 값을 사용하고,
+		    -- 없으면 recipe_detail에 저장된 원본 재료명을 사용
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
+		    -- 1인분 기준 수량(숫자 부분)
+		    -- qty_unit과 함께 "1인분당 얼마나 필요한지"를 의미
+		    rd.qty_num AS per_person_qty,	
+		    rd.qty_unit AS recipe_unit,											-- 레시피 단위
+		    #{servingQty} AS serving_qty,										-- 조리할 인분 수
+		    ROUND(COALESCE(rd.qty_num, 0) * #{servingQty}, 3) AS required_qty,	-- 필요수량
+		    ROUND(COALESCE(SUM(ib.current_qty), 0), 3) AS current_qty,			-- 현재고
+		    ifnull(ib.location_id, 'L999') as location_id,						-- 보관방식
+		    ROUND(
+		        GREATEST((COALESCE(rd.qty_num, 0) * #{servingQty}) - COALESCE(SUM(ib.current_qty), 0), 0),
+		        3
+		    ) AS shortage_qty,													-- 부족수량 공식: 필요수량 - 현재고
+		    ROUND(
+		        GREATEST(
+		            (COALESCE(rd.qty_num, 0) * #{servingQty})
+		            + COALESCE(im.safe_stock_qty, 0)
+		            - COALESCE(SUM(ib.current_qty), 0),
+		            0
+		        ),
+		        3
+		    ) AS order_needed_qty,												-- 발주필요수량  공식: 필요수량 + 안전재고 - 현재고
+		    COALESCE(im.base_unit, rd.qty_unit) AS base_unit,					-- 기준단위   예: g, kg, ml, 개 등
+		    im.order_unit,														-- 발주단위   예: 박스, 포, EA, kg 등
+		    im.convert_value,													-- 환산값    예: 1박스 = 10kg 이면 convert_value = 10 같은 식
+		    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,					-- 안전재고   최소한 남겨두고 싶은 재고량
+		    MIN(rd.ingredient_seq) AS ingredient_seq							-- 재료 순번 
+		FROM the_full_order.tb_recipe_detail rd
+		-- 레시피 상세 테이블
+		-- 메뉴별 재료 구성, 1인분 수량, 단위 등이 들어있음
+		
+		LEFT JOIN the_full_order.tb_ingredient_master im
+		    ON rd.ingredient_id = im.ingredient_id
+		-- 재료 마스터 테이블
+		-- 표준 재료명, 기준단위, 발주단위, 환산값, 안전재고 등을 가져옴
+		LEFT JOIN the_full_order.tb_inventory_balance ib
+		    ON rd.ingredient_id = ib.ingredient_id
+		   AND (
+		        ib.unit = rd.qty_unit
+		        OR ib.unit = im.base_unit
+		        OR rd.qty_unit IS NULL
+		      )
+		-- 재고 테이블
+		-- 같은 재료 ID의 현재고를 연결
+		-- 단위가 레시피 단위와 같거나, 기준단위와 같을 때 연결
+		-- rd.qty_unit이 NULL이면 일단 연결 허용
+		WHERE rd.menu_id = #{menu_id}
+		-- 특정 메뉴만 조회
+		
+		  AND rd.qty_num IS NOT NULL
+		-- 1인분 수량이 있는 재료만 조회
+		-- 수량이 없는 재료는 계산 불가하므로 제외
+		
+		GROUP BY
+		    rd.menu_id,
+		    rd.ingredient_id,
+		    rd.recipe_id,
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw),
+		    rd.qty_num,
+		    rd.qty_unit,
+		    ib.location_id,
+		    im.base_unit,
+		    im.order_unit,
+		    im.convert_value,
+		    im.safe_stock_qty
+		-- 집계 기준
+		-- 재료별로 현재고 SUM 계산을 위해 묶음
+		
+		ORDER BY ingredient_seq;
+		-- 레시피에 등록된 재료 순서대로 정렬
+	</select>
+	
+	<select id="AccountDetailList" parameterType="map" resultType="hashmap">
+		SELECT
+			rd.recipe_id,
+		    rd.menu_id,															-- 메뉴 ID
+		    rd.ingredient_id,													-- 재료 ID
+		    -- 재료명
+		    -- ingredient_master에 표준 재료명이 있으면 그 값을 사용하고,
+		    -- 없으면 recipe_detail에 저장된 원본 재료명을 사용
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
+		    -- 1인분 기준 수량(숫자 부분)
+		    -- qty_unit과 함께 "1인분당 얼마나 필요한지"를 의미
+		    rd.qty_num AS per_person_qty,	
+		    rd.qty_unit AS recipe_unit,											-- 레시피 단위
+		    #{servingQty} AS serving_qty,										-- 조리할 인분 수
+		    ROUND(COALESCE(rd.qty_num, 0) * #{servingQty}, 3) AS required_qty,	-- 필요수량
+		    ROUND(COALESCE(SUM(ib.current_qty), 0), 3) AS current_qty,			-- 현재고
+		    ifnull(ib.location_id, 'L999') as location_id,						-- 보관방식
+		    ROUND(
+		        GREATEST((COALESCE(rd.qty_num, 0) * #{servingQty}) - COALESCE(SUM(ib.current_qty), 0), 0),
+		        3
+		    ) AS shortage_qty,													-- 부족수량 공식: 필요수량 - 현재고
+		    ROUND(
+		        GREATEST(
+		            (COALESCE(rd.qty_num, 0) * #{servingQty})
+		            + COALESCE(im.safe_stock_qty, 0)
+		            - COALESCE(SUM(ib.current_qty), 0),
+		            0
+		        ),
+		        3
+		    ) AS order_needed_qty,												-- 발주필요수량  공식: 필요수량 + 안전재고 - 현재고
+		    COALESCE(im.base_unit, rd.qty_unit) AS base_unit,					-- 기준단위   예: g, kg, ml, 개 등
+		    im.order_unit,														-- 발주단위   예: 박스, 포, EA, kg 등
+		    im.convert_value,													-- 환산값    예: 1박스 = 10kg 이면 convert_value = 10 같은 식
+		    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,					-- 안전재고   최소한 남겨두고 싶은 재고량
+		    MIN(rd.ingredient_seq) AS ingredient_seq,							-- 재료 순번 
+		    li.like
+		FROM the_full_order.tb_account_recipe_detail rd
+		-- 레시피 상세 테이블
+		-- 메뉴별 재료 구성, 1인분 수량, 단위 등이 들어있음
+		
+		LEFT JOIN the_full_order.tb_account_ingredient_master im
+		    ON rd.ingredient_id = im.ingredient_id
+		    AND rd.account_id = im.account_id
+		-- 재료 마스터 테이블
+		-- 표준 재료명, 기준단위, 발주단위, 환산값, 안전재고 등을 가져옴
+		LEFT JOIN the_full_order.tb_account_inventory_balance ib
+		    ON rd.ingredient_id = ib.ingredient_id
+		    AND rd.account_id = ib.account_id
+		   AND (
+		        ib.unit = rd.qty_unit
+		        OR ib.unit = im.base_unit
+		        OR rd.qty_unit IS NULL
+		      )
+		-- 재고 테이블
+		-- 같은 재료 ID의 현재고를 연결
+		-- 단위가 레시피 단위와 같거나, 기준단위와 같을 때 연결
+		-- rd.qty_unit이 NULL이면 일단 연결 허용
+		
+		
+		LEFT JOIN the_full_order.tb_like_ingredients li
+		ON im.account_id = li.account_id
+		AND im.ingredient_id = li.ingredient_id
+		
+		WHERE rd.menu_id = #{menu_id}
+		-- 특정 메뉴만 조회
+		
+		  AND rd.qty_num IS NOT NULL
+		-- 1인분 수량이 있는 재료만 조회
+		-- 수량이 없는 재료는 계산 불가하므로 제외
+		
+		GROUP BY
+		    rd.menu_id,
+		    rd.ingredient_id,
+		    rd.recipe_id,
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw),
+		    rd.qty_num,
+		    rd.qty_unit,
+		    ib.location_id,
+		    im.base_unit,
+		    im.order_unit,
+		    im.convert_value,
+		    im.safe_stock_qty,
+		    li.like
+		-- 집계 기준
+		-- 재료별로 현재고 SUM 계산을 위해 묶음
+		
+		ORDER BY ingredient_seq;
+		-- 레시피에 등록된 재료 순서대로 정렬
+	</select>
+	
+	<select id="IngredientsList" parameterType="map" resultType="hashmap">
+		SELECT ingredient_id,
+			   ingredient_name_raw,
+			   category_name,
+			   base_unit,
+			   menu_usage_count
+		FROM the_full_order.tb_ingredient_master
+	</select>
+	
+	<insert id="MenuSave" parameterType="map">
+		INSERT INTO the_full_order.tb_menu_master
+		(menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, menu_img, menu_type, menu_gubun, user_id)
+		VALUES
+		(#{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
+		    CASE 
+		        WHEN #{food_type} = 1 THEN '한식'
+		        WHEN #{food_type} = 2 THEN '중식'
+		        WHEN #{food_type} = 3 THEN '일식'
+		        WHEN #{food_type} = 4 THEN '분식'
+		        WHEN #{food_type} = 5 THEN '간식'
+		        ELSE '기타'
+		    END
+		, ':', #{menu_name}), #{menu_img}, #{menu_type}, #{menu_gubun}, #{user_id})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        menu_name = #{menu_name},
+	        menu_name_raw = #{menu_name},
+	        food_type = #{food_type},
+	        del_yn = #{del_yn},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id},
+	        menu_img = #{menu_img},
+	        menu_type = #{menu_type}, 
+	        menu_gubun = #{menu_gubun}
+	    </trim>
+	</insert>
+	
+	<!-- 추후 식자재 관리를 위해 필요함 -->
+	<insert id="IngredientsMasterSave" parameterType="map">
+		INSERT INTO the_full_order.tb_ingredient_master
+		(ingredient_id, ingredient_name_raw, ingredient_name_std, category_name, base_unit, order_unit, convert_value, storage_type, menu_usage_count, needs_review, note, created_at, safe_stock_qty, lead_time_days)
+		VALUES
+		(#{ingredient_id}, #{ingredient_name_raw}, #{ingredient_name_std}, #{category_name}, #{base_unit}, #{order_unit}, #{convert_value}, #{storage_type}, #{menu_usage_count}, #{needs_review}, #{note}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{safe_stock_qty}, #{lead_time_days})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	    	ingredient_name_raw = #{ingredient_name_raw}, 
+	    	ingredient_name_std = #{ingredient_name_std}, 
+	    	category_name = #{category_name}, 
+	    	base_unit = #{base_unit}, 
+	    	order_unit = #{order_unit}, 
+	    	convert_value = #{convert_value}, 
+	    	storage_type = #{storage_type}, 
+	    	menu_usage_count = #{menu_usage_count}, 
+	    	needs_review = #{needs_review}, 
+	    	note = #{note}, 
+	    	created_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 
+	    	safe_stock_qty = #{safe_stock_qty}, 
+	    	lead_time_days = #{lead_time_days}
+	    </trim>
+	</insert>
+	
+	<insert id="IngredientsSave" parameterType="map">
+		INSERT INTO the_full_order.tb_recipe_detail
+		(menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit, review_flag, created_at)
+		VALUES
+		(#{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name}, #{qty_raw}, #{qty_num}, #{qty_unit}, #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        menu_id = #{menu_id},
+	        ingredient_id = #{ingredient_id},
+	        ingredient_seq = #{ingredient_seq},
+	        ingredient_name_raw = #{ingredient_name},
+	        qty_raw = #{qty_raw},
+	        qty_num = #{qty_num},
+	        qty_unit = #{qty_unit},
+	        review_flag = #{review_flag},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id}
+	    </trim>
+	</insert>
+	
+	<insert id="AccountMenuSave" parameterType="map">
+		INSERT INTO the_full_order.tb_account_menu_master
+		(account_id, menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, user_id, menu_type, menu_gubun)
+		VALUES
+		(#{account_id}, #{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
+		    CASE 
+		        WHEN #{food_type} = 1 THEN '한식'
+		        WHEN #{food_type} = 2 THEN '중식'
+		        WHEN #{food_type} = 3 THEN '일식'
+		        WHEN #{food_type} = 4 THEN '분식'
+		        WHEN #{food_type} = 5 THEN '간식'
+		        ELSE '기타'
+		    END
+		, ':', #{menu_name}), #{user_id}, #{menu_type}, #{menu_gubun})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        menu_name = #{menu_name},
+	        menu_name_raw = #{menu_name},
+	        food_type = #{food_type},
+	        del_yn = #{del_yn},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id},
+	        menu_type = #{menu_type}, 
+	        menu_gubun = #{menu_gubun}
+	    </trim>
+	</insert>
+	
+	<!-- 추후 식자재 관리를 위해 필요함 -->
+	<insert id="AccountIngredientsMasterSave" parameterType="map">
+		INSERT INTO the_full_order.tb_ingredient_master
+		(account_id, ingredient_id, ingredient_name_raw, ingredient_name_std, category_name, base_unit, order_unit, convert_value, storage_type, menu_usage_count, needs_review, note, created_at, safe_stock_qty, lead_time_days)
+		VALUES
+		(#{ingredient_id}, #{ingredient_name_raw}, #{ingredient_name_std}, #{category_name}, #{base_unit}, #{order_unit}, #{convert_value}, #{storage_type}, #{menu_usage_count}, #{needs_review}, #{note}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{safe_stock_qty}, #{lead_time_days})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	    	ingredient_name_raw = #{ingredient_name_raw}, 
+	    	ingredient_name_std = #{ingredient_name_std}, 
+	    	category_name = #{category_name}, 
+	    	base_unit = #{base_unit}, 
+	    	order_unit = #{order_unit}, 
+	    	convert_value = #{convert_value}, 
+	    	storage_type = #{storage_type}, 
+	    	menu_usage_count = #{menu_usage_count}, 
+	    	needs_review = #{needs_review}, 
+	    	note = #{note}, 
+	    	created_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 
+	    	safe_stock_qty = #{safe_stock_qty}, 
+	    	lead_time_days = #{lead_time_days}
+	    </trim>
+	</insert>
+	
+	<insert id="AccountIngredientsSave" parameterType="map">
+		INSERT INTO the_full_order.tb_account_recipe_detail
+		(account_id, recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit, review_flag, created_at, user_id)
+		VALUES
+		(#{account_id}, #{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name}, #{qty_raw}, #{qty_num}, #{qty_unit}, #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        menu_id = #{menu_id},
+	        ingredient_id = #{ingredient_id},
+	        ingredient_seq = #{ingredient_seq},
+	        ingredient_name_raw = #{ingredient_name},
+	        qty_raw = #{qty_raw},
+	        qty_num = #{qty_num},
+	        qty_unit = #{qty_unit},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id}
+	    </trim>
+	</insert>
+	
+	<insert id="AccountInventorySave" parameterType="map">
+		INSERT INTO the_full_order.tb_account_inventory_balance
+		(account_id, ingredient_id, location_id, unit, created_at, user_id, note)
+		VALUES
+		(#{account_id}, #{ingredient_id}, #{location_id}, #{qty_unit}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id}, #{note})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        current_qty = #{current_qty},
+	        unit = #{unit},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id}
+	    </trim>
+	</insert>
+	
+	<select id="AccountMenuList" parameterType="map" resultType="hashmap">
+		SELECT T.account_id,
+			   T2.menu_img,
+			   T.menu_id,
+			   T.menu_name,
+			   T.del_yn,
+			   T.food_type,
+			   T.food_type_reason,
+			   DATE_FORMAT(T.created_at, '%Y-%m-%d') as created_at,
+			   T3.like,
+			   T.menu_type,
+			   T.menu_gubun
+		FROM the_full_order.tb_account_menu_master T
+		JOIN the_full_order.tb_menu_master T2
+		ON T2.menu_id = T.menu_id
+		LEFT JOIN the_full_order.tb_like_menu T3
+		ON T3.account_id = T.account_id
+		AND T3.menu_id = T.menu_id
+		WHERE T.account_id = #{account_id}
+		AND ifnull(T.del_yn, 'N') = 'N'
+	</select>
+	
+	<select id="LikeMenuList" parameterType="map" resultType="hashmap">
+		SELECT T.account_id,
+			   T.menu_id,
+			   T2.menu_name,
+			   T2.menu_img,
+			   T.user_id,
+			   T.like,
+			   T2.food_type,
+			   T2.menu_type,
+			   T2.menu_gubun,
+			   T2.food_type_reason
+		  FROM the_full_order.tb_like_menu T
+		  JOIN the_full_order.tb_menu_master T2
+		  ON T2.menu_id = T.menu_id
+		 WHERE T.account_id = #{account_id}
+		   AND T.user_id = #{user_id}
+	</select>
+	
+	<insert id="LikeMenuSave" parameterType="map">
+		INSERT INTO the_full_order.tb_like_menu
+		(account_id, menu_id, user_id, `like`, created_at)
+		VALUES
+		(#{account_id}, #{menu_id}, #{user_id}, #{like}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        `like` = #{like},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
+	    </trim>
+	</insert>
+	
+	<select id="AccountIngredientsList" parameterType="map" resultType="hashmap">
+		SELECT ingredient_id,
+			   ingredient_name_raw,
+			   category_name,
+			   base_unit,
+			   menu_usage_count
+		FROM the_full_order.tb_account_ingredient_master
+		WHERE account_id = #{account_id}
+	</select>
+	
+	<select id="LikeIngredientsList" parameterType="map" resultType="hashmap">
+		SELECT T.account_id,
+			   T.ingredient_id,
+			   T2.ingredient_name_raw,
+			   T.user_id,
+			   T.like,
+			   T2.category_name,
+			   T3.code_name
+		  FROM the_full_order.tb_like_ingredients T
+		  JOIN the_full_order.tb_account_ingredient_master T2
+		  ON T2.ingredient_id = T.ingredient_id
+		  JOIN tb_code_storage_type T3
+		  ON T3.storage_type = T2.storage_type
+		 WHERE T.account_id = #{account_id}
+		   AND T.user_id = #{user_id}
+	</select>
+	
+	<insert id="LikeIngredientsSave" parameterType="map">
+		INSERT INTO the_full_order.tb_like_ingredients
+		(account_id, ingredient_id, user_id, `like`, created_at)
+		VALUES
+		(#{account_id}, #{ingredient_id}, #{user_id}, #{like}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        `like` = #{like},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
+	    </trim>
+	</insert>
+	
+	<delete id="RecipeInfoDelete" parameterType="map">
+		DELETE FROM the_full_order.tb_recipe_info
+		WHERE recipe_id = #{recipe_id}
+	</delete>
+	
+	<delete id="RecipeImageDelete" parameterType="map">
+		DELETE FROM the_full_order.tb_recipe_image
+		WHERE recipe_id = #{recipe_id}
+	</delete>
+	
+	<delete id="RecipeVideoDelete" parameterType="map">
+		DELETE FROM the_full_order.tb_recipe_video
+		WHERE recipe_id = #{recipe_id}
+	</delete>
+	
+	<insert id="RecipeInfoSave" parameterType="map">
+		INSERT INTO the_full_order.tb_recipe_info
+		(recipe_id, menu_id, menu_name, title, summary, servings_note, ingredients_json, steps_json, tips_json, storage_json, allergens_json, recipe_json, created_at, user_id, mod_at)
+		VALUES
+		(#{recipe_id}, #{menu_id}, #{menu_name}, #{title}, #{summary}, #{servings_note}, #{ingredients_json}, #{steps_json}, #{tips_json}, #{storage_json}, #{allergens_json}, #{recipe_json}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id}, NULL)
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        title = #{title},
+	        summary = #{summary},
+	        servings_note = #{servings_note},
+	        ingredients_json = #{ingredients_json},
+	        steps_json = #{steps_json},
+	        tips_json = #{tips_json},
+	        storage_json = #{storage_json},
+	        allergens_json = #{allergens_json},
+	        recipe_json = #{recipe_json},
+	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+	        user_id = #{user_id},
+	    </trim>
+	</insert>
+	
+	<insert id="RecipeImageSave" parameterType="map">
+		INSERT INTO the_full_order.tb_recipe_image
+		(recipe_id, menu_id, file_id, file_name, file_url, file_path, file_size, is_primary, sort_order, created_at)
+		VALUES
+		(#{recipe_id}, #{menu_id}, #{file_id}, #{file_name}, #{file_url}, #{file_path}, #{file_size}, #{is_primary}, #{sort_order}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        file_id = #{file_id},
+	        file_name = #{file_name},
+	        file_url = #{file_url},
+	        file_path = #{file_path},
+	        file_size = #{file_size},
+	        is_primary = #{is_primary},
+	        sort_order = #{sort_order},
+	    </trim>
+	</insert>
+	
+	<insert id="RecipeVideoSave" parameterType="map">
+		INSERT INTO the_full_order.tb_recipe_video
+		(recipe_id, menu_id, title, url, description, sort_order, created_at, user_id)
+		VALUES
+		(#{recipe_id}, #{menu_id}, #{title}, #{url}, #{description}, #{sort_order}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
+		ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	        title = #{title},
+	        url = #{url},
+	        description = #{description},
+	        sort_order = #{sort_order},
+	    </trim>
+	</insert>
+	
+	<select id="RecipeList" parameterType="map" resultType="hashmap">
+		SELECT recipe_id,
+				menu_id,
+				menu_name,
+				title,
+				summary,
+				servings_note,
+				ingredients_json,
+				steps_json,
+				tips_json,
+				storage_json,
+				allergens_json,
+				recipe_json,
+				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at,
+				user_id,
+				DATE_FORMAT(mod_at, '%Y-%m-%d') as mod_at
+		FROM the_full_order.tb_recipe_info
+		WHERE menu_id = #{menu_id}
+	</select>
+	
+	<select id="ImageList" parameterType="map" resultType="hashmap">
+		SELECT image_id,
+				recipe_id,
+				menu_id,
+				file_id,
+				file_name,
+				file_url,
+				file_path,
+				file_size,
+				is_primary,
+				sort_order,
+				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at
+		FROM the_full_order.tb_recipe_image
+		WHERE menu_id = #{menu_id}
+	</select>
+	
+	<select id="VideoList" parameterType="map" resultType="hashmap">
+		SELECT video_id,
+				recipe_id,
+				menu_id, 
+				title, 
+				url, 
+				description,
+				sort_order,
+				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at,
+				user_id
+		FROM the_full_order.tb_recipe_video 
+		WHERE menu_id = #{menu_id}
+	</select>
+	
+</mapper>

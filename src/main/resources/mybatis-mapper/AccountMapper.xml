@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.AccountMapper">
+	
+	<select id="NowDateKey" resultType="String">
+		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
+	</select>
+	
+	<select id="AccountList" parameterType="map" resultType="hashmap">
+		SELECT account_id, 
+			   account_name, 
+			   concat(ifnull(account_address,''), ' ', ifnull(account_address_detail,'')) as account_address,
+			   case account_type when 1 then '요양원' when 2 then '도소매' when 3 then '프랜차이즈' when 4 then '산업체' else '학교' end as account_type, 
+			   account_rqd_member,
+			   account_headcount,
+			   meal_type,
+			   del_yn
+		FROM the_full.tb_account
+		WHERE del_yn = 'N'
+	</select>
+</mapper>

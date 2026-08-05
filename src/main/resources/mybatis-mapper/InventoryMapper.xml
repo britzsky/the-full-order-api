@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.InventoryMapper">
+	<select id="AccountInventoryList" parameterType="map" resultType="hashmap">
+		SELECT
+			    ib.ingredient_id,                                                   -- 재료 ID
+			    COALESCE(im.ingredient_name_raw, rd.recipe_ingredient_name) AS ingredient_name, -- 재료명
+			    rd.recipe_unit,                                                     -- 레시피 단위
+			    ROUND(SUM(COALESCE(ib.current_qty, 0)), 3) AS current_qty,          -- 현재고
+			    COALESCE(ib.location_id, 'L999') AS location_id,                    -- 보관방식
+			    COALESCE(im.base_unit, ib.unit, rd.recipe_unit) AS base_unit,       -- 기준단위
+			    im.order_unit,                                                      -- 발주단위
+			    im.convert_value,                                                   -- 환산값
+			    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,                   -- 안전재고
+			    rd.ingredient_seq,                                                  -- 레시피상 재료 순번
+			    im.category_name
+			FROM the_full_order.tb_account_inventory_balance ib
+			LEFT JOIN the_full_order.tb_account_ingredient_master im
+			    ON ib.account_id = im.account_id
+			   AND ib.ingredient_id = im.ingredient_id
+			LEFT JOIN (
+			    SELECT
+			        account_id,
+			        ingredient_id,
+			        COALESCE(MAX(ingredient_name_raw), '') AS recipe_ingredient_name,
+			        MIN(qty_unit) AS recipe_unit,
+			        MIN(ingredient_seq) AS ingredient_seq
+			    FROM the_full_order.tb_account_recipe_detail
+			    GROUP BY
+			        account_id,
+			        ingredient_id
+			) rd
+			    ON ib.account_id = rd.account_id
+			   AND ib.ingredient_id = rd.ingredient_id
+			WHERE ib.account_id = #{account_id}
+			GROUP BY
+			    ib.ingredient_id,
+			    COALESCE(im.ingredient_name_raw, rd.recipe_ingredient_name),
+			    rd.recipe_unit,
+			    COALESCE(ib.location_id, 'L999'),
+			    COALESCE(im.base_unit, ib.unit, rd.recipe_unit),
+			    im.order_unit,
+			    im.convert_value,
+			    im.safe_stock_qty,
+			    rd.ingredient_seq,
+			    im.category_name
+			ORDER BY ib.ingredient_id;
+	</select>
+</mapper>

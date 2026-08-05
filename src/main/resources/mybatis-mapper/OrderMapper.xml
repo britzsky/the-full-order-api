@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.OrderMapper">
+	
+	<select id="NowDateKey" resultType="String">
+		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
+	</select>
+	
+	<select id="MenuList" parameterType="map" resultType="hashmap">
+		SELECT menu_id,
+			   menu_name,
+			   del_yn,
+			   food_type,
+			   DATE_FORMAT(created_at, '%Y-%m-%d') as created_at
+		FROM the_full_order.tb_menu_master
+	</select>
+	
+	<select id="DetailList" parameterType="map" resultType="hashmap">
+		SELECT
+		    rd.menu_id,															-- 메뉴 ID
+		    rd.ingredient_id,													-- 재료 ID
+		    -- 재료명
+		    -- ingredient_master에 표준 재료명이 있으면 그 값을 사용하고,
+		    -- 없으면 recipe_detail에 저장된 원본 재료명을 사용
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
+		    -- 1인분 기준 수량(숫자 부분)
+		    -- qty_unit과 함께 "1인분당 얼마나 필요한지"를 의미
+		    rd.qty_num AS per_person_qty,	
+		    rd.qty_unit AS recipe_unit,											-- 레시피 단위
+		    #{servingQty} AS serving_qty,										-- 조리할 인분 수
+		    ROUND(COALESCE(rd.qty_num, 0) * #{servingQty}, 3) AS required_qty,	-- 필요수량
+		    ROUND(COALESCE(SUM(ib.current_qty), 0), 3) AS current_qty,			-- 현재고
+		    ROUND(
+		        GREATEST((COALESCE(rd.qty_num, 0) * #{servingQty}) - COALESCE(SUM(ib.current_qty), 0), 0),
+		        3
+		    ) AS shortage_qty,													-- 부족수량 공식: 필요수량 - 현재고
+		    ROUND(
+		        GREATEST(
+		            (COALESCE(rd.qty_num, 0) * #{servingQty})
+		            + COALESCE(im.safe_stock_qty, 0)
+		            - COALESCE(SUM(ib.current_qty), 0),
+		            0
+		        ),
+		        3
+		    ) AS order_needed_qty,												-- 발주필요수량  공식: 필요수량 + 안전재고 - 현재고
+		    COALESCE(im.base_unit, rd.qty_unit) AS base_unit,					-- 기준단위   예: g, kg, ml, 개 등
+		    im.order_unit,														-- 발주단위   예: 박스, 포, EA, kg 등
+		    im.convert_value,													-- 환산값    예: 1박스 = 10kg 이면 convert_value = 10 같은 식
+		    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,					-- 안전재고   최소한 남겨두고 싶은 재고량
+		    MIN(rd.ingredient_seq) AS ingredient_seq							-- 재료 순번 
+		FROM the_full_order.tb_recipe_detail rd
+		-- 레시피 상세 테이블
+		-- 메뉴별 재료 구성, 1인분 수량, 단위 등이 들어있음
+		
+		LEFT JOIN the_full_order.tb_ingredient_master im
+		    ON rd.ingredient_id = im.ingredient_id
+		-- 재료 마스터 테이블
+		-- 표준 재료명, 기준단위, 발주단위, 환산값, 안전재고 등을 가져옴
+		LEFT JOIN the_full_order.tb_inventory_balance ib
+		    ON rd.ingredient_id = ib.ingredient_id
+		   AND (
+		        ib.unit = rd.qty_unit
+		        OR ib.unit = im.base_unit
+		        OR rd.qty_unit IS NULL
+		      )
+		-- 재고 테이블
+		-- 같은 재료 ID의 현재고를 연결
+		-- 단위가 레시피 단위와 같거나, 기준단위와 같을 때 연결
+		-- rd.qty_unit이 NULL이면 일단 연결 허용
+		
+		WHERE rd.menu_id = #{menu_id}
+		-- 특정 메뉴만 조회
+		
+		  AND rd.qty_num IS NOT NULL
+		-- 1인분 수량이 있는 재료만 조회
+		-- 수량이 없는 재료는 계산 불가하므로 제외
+		
+		GROUP BY
+		    rd.menu_id,
+		    rd.ingredient_id,
+		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw),
+		    rd.qty_num,
+		    rd.qty_unit,
+		    im.base_unit,
+		    im.order_unit,
+		    im.convert_value,
+		    im.safe_stock_qty
+		-- 집계 기준
+		-- 재료별로 현재고 SUM 계산을 위해 묶음
+		
+		ORDER BY ingredient_seq;
+		-- 레시피에 등록된 재료 순서대로 정렬
+	</select>
+</mapper>

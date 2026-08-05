@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.TableMealsMapper">
+	
+	<select id="NowDateKey" resultType="String">
+		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
+	</select>
+	
+	<select id="TableMealsList" parameterType="map" resultType="hashmap">
+		SELECT H.table_id,
+		       H.account_id,
+		       H.account_name,
+		       H.table_name,
+		       H.table_year,
+		       H.table_month,
+		       H.table_week,
+		       H.source,
+		       H.user_id,
+		       DATE_FORMAT(H.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+		       DATE_FORMAT(H.mod_at, '%Y-%m-%d %H:%i:%s') AS mod_at
+		  FROM the_full_order.tb_account_table_meals H
+		 WHERE 1 = 1
+		<if test="account_id != null and account_id != ''">
+		   AND H.account_id = #{account_id}
+		</if>
+		<if test="table_id != null and table_id != ''">
+		   AND H.table_id = #{table_id}
+		</if>
+		<if test="table_year != null and table_year != ''">
+		   AND H.table_year = #{table_year}
+		</if>
+		<if test="table_month != null and table_month != ''">
+		   AND H.table_month = #{table_month}
+		</if>
+		<if test="table_week != null and table_week != ''">
+		   AND H.table_week = #{table_week}
+		</if>
+		 ORDER BY H.table_year DESC,
+		          H.table_month DESC,
+		          H.table_week DESC
+	</select>
+	
+	<select id="TableMealsDetailList" parameterType="map" resultType="hashmap">
+		SELECT H.table_id,
+		       H.account_id,
+		       H.account_name,
+		       H.table_name,
+		       H.table_year,
+		       H.table_month,
+		       H.table_week,
+		       H.source,
+		       H.user_id,
+		       DATE_FORMAT(H.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+		       DATE_FORMAT(H.mod_at, '%Y-%m-%d %H:%i:%s') AS mod_at,
+		       D.meal_date,
+		       D.weekday,
+		       D.meal_slot,
+		       D.sort_order,
+		       D.menu_id,
+		       D.menu_name,
+		       D.food_type,
+		       D.menu_type,
+		       D.menu_gubun
+		  FROM the_full_order.tb_account_table_meals H
+		  LEFT JOIN the_full_order.tb_account_table_meals_detail D
+		    ON D.table_id = H.table_id
+		 WHERE 1 = 1
+		<if test="account_id != null and account_id != ''">
+		   AND H.account_id = #{account_id}
+		</if>
+		<if test="table_id != null and table_id != ''">
+		   AND H.table_id = #{table_id}
+		</if>
+		 ORDER BY H.table_year DESC,
+		          H.table_month DESC,
+		          H.table_week DESC,
+		          D.meal_date,
+		          D.meal_slot,
+		          D.sort_order
+	</select>
+	
+	<insert id="TableMealsHeaderSave" parameterType="map">
+		INSERT INTO the_full_order.tb_account_table_meals
+		(table_id, account_id, account_name, table_name, table_year, table_month, table_week, source, user_id, created_at)
+		VALUES
+		(#{table_id}, #{account_id}, #{account_name}, #{table_name}, #{table_year}, #{table_month}, #{table_week}, #{source}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+		    account_name = #{account_name},
+		    table_name = #{table_name},
+		    table_year = #{table_year},
+		    table_month = #{table_month},
+		    table_week = #{table_week},
+		    source = #{source},
+		    user_id = #{user_id},
+		    mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
+	</insert>
+	
+	<delete id="TableMealsDetailDelete" parameterType="map">
+		DELETE FROM the_full_order.tb_account_table_meals_detail
+		 WHERE table_id = #{table_id}
+	</delete>
+	
+	<insert id="TableMealsDetailSave" parameterType="map">
+		INSERT INTO the_full_order.tb_account_table_meals_detail
+		(table_id, account_id, meal_date, weekday, meal_slot, sort_order, menu_id, menu_name, food_type, menu_type, menu_gubun, user_id, created_at)
+		VALUES
+		(#{table_id}, #{account_id}, #{meal_date}, #{weekday}, #{meal_slot}, #{sort_order}, #{menu_id}, #{menu_name}, #{food_type}, #{menu_type}, #{menu_gubun}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		ON DUPLICATE KEY UPDATE
+		    account_id = #{account_id},
+		    weekday = #{weekday},
+		    menu_name = #{menu_name},
+		    food_type = #{food_type},
+		    menu_type = #{menu_type},
+		    menu_gubun = #{menu_gubun},
+		    user_id = #{user_id},
+		    mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
+	</insert>
+</mapper>

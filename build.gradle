@@ -1,0 +1,62 @@
+plugins {
+	id 'java'
+	id 'war'
+	id 'org.springframework.boot' version '3.5.4'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+bootWar {
+    enabled = true
+}
+
+bootJar {
+    enabled = false
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+description = 'Demo project for Spring Boot'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	// 외부 톰캣에서 돌릴 거니까 providedRuntime
+    providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat'
+	implementation 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+	implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
+	implementation 'com.google.code.gson:gson:2.8.6'
+	runtimeOnly 'com.mysql:mysql-connector-j'
+	runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	implementation 'com.google.cloud:google-cloud-vision:3.47.0' // 최신 버전을 확인하여 사용하세요
+	implementation 'com.google.protobuf:protobuf-java:3.25.3'
+	implementation 'jakarta.annotation:jakarta.annotation-api:2.1.1' // @PostConstruct (Java 17/Spring Boot 3.x 호환)
+	implementation platform("com.google.cloud:libraries-bom:26.56.0")
+    implementation "com.google.cloud:google-cloud-document-ai"
+    implementation "com.google.api.grpc:proto-google-common-protos"
+	implementation 'org.openpnp:opencv:4.9.0-0'
+	// ✅ WebClient (Spring WebFlux)
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}

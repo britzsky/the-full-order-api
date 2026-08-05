@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.demo.mapper.LoginMapper">
+	
+	<select id="NowDateKey" resultType="String">
+		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
+	</select>
+	
+	<select id="Login" parameterType="map" resultType="map">
+        CALL the_full.tb_user_login(#{user_id}, #{password})
+    </select>
+    
+    <select id="AccountCoordinateInfo" parameterType="map" resultType="map">
+        SELECT *
+        FROM the_full.tb_account_coordinate
+		WHERE account_id = #{account_id}
+    </select>
+    
+    <insert id="CommuteSave">
+        INSERT INTO the_full.tb_account_members_commute
+    
+	    <trim prefix="(" suffix=")" suffixOverrides=",">
+	        user_id,
+	        t_date,
+	        start_time,
+	        st_x_coordinate,
+	        st_y_coordinate,
+	        st_error_margin,
+	        end_time,
+	        ed_x_coordinate,
+	        ed_y_coordinate,
+	        ed_error_margin,
+	        mod_dt
+	    </trim>
+	    
+	    VALUES
+	    
+	    <trim prefix="(" suffix=")" suffixOverrides=",">
+	    	#{user_id},
+	        DATE_FORMAT(#{t_date}, '%Y-%m-%d'),
+	        #{start_time},
+	        #{st_x_coordinate},
+	        #{st_y_coordinate},
+	        #{st_error_margin},
+	        #{end_time},
+	        #{ed_x_coordinate},
+	        #{ed_y_coordinate},
+	        #{ed_error_margin},
+	        DATE_FORMAT(NOW(), '%Y-%m-%d')
+	    </trim>
+	    
+	    ON DUPLICATE KEY UPDATE
+	    <trim suffixOverrides=",">
+	    	user_id = #{user_id},
+	        t_date = DATE_FORMAT(#{t_date}, '%Y-%m-%d'),
+	        <if test="start_time != null">
+		        start_time = #{start_time},
+		    </if>
+		    <if test="st_x_coordinate != null">
+		        st_x_coordinate = #{st_x_coordinate},
+		    </if>
+		    <if test="st_y_coordinate != null">
+		        st_y_coordinate = #{st_y_coordinate},
+		    </if>
+		    <if test="st_error_margin != null">
+		        st_error_margin = #{st_error_margin},
+		    </if>
+		    <if test="end_time != null">
+		        end_time = #{end_time},
+		    </if>
+		    <if test="ed_x_coordinate != null">
+		        ed_x_coordinate = #{ed_x_coordinate},
+		    </if>
+		    <if test="ed_y_coordinate != null">
+		        ed_y_coordinate = #{ed_y_coordinate},
+		    </if>
+		    <if test="ed_error_margin != null">
+		        ed_error_margin = #{ed_error_margin},
+		    </if>
+	        mod_dt = DATE_FORMAT(NOW(), '%Y-%m-%d')
+	    </trim>
+    </insert>
+</mapper>
