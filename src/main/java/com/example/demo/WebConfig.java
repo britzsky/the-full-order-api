@@ -31,7 +31,7 @@ public class WebConfig implements WebMvcConfigurer {
 						"http://thefull.kr",
 						"http://thefull.kr:9000",
 						"http://localhost:8081",
-						"http://localhost:19090"
+						"http://localhost:19090",
 						"http://localhost:8092",
 						"http://172.30.1.48:8081")
 				.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
