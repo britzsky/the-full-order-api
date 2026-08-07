@@ -28,6 +28,7 @@ public class WebConfig implements WebMvcConfigurer {
 						"http://52.64.151.137:9000",
 						"http://52.64.151.137:19090",
 						"http://52.64.151.137:8092",
+						"http://13.236.127.178:8080",
 						"http://thefull.kr",
 						"http://thefull.kr:9000",
 						"http://localhost:8081",
