@@ -7,7 +7,7 @@ plugins {
 
 bootWar {
     enabled = true
-    archiveFileName = 'the-full-order-api.war' 
+	archiveFileName = 'ROOT.war'
 }
 
 bootJar {
