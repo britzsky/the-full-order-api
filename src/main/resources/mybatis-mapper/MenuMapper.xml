@@ -335,9 +335,18 @@
 	
 	<insert id="AccountIngredientsSave" parameterType="map">
 		INSERT INTO the_full_order.tb_account_recipe_detail
-		(account_id, recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit, review_flag, created_at, user_id)
+		(account_id, recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw,
+		 qty_raw, qty_num, qty_unit, recipe_yield_servings, qty_base, base_unit,
+		 qty_per_person, review_flag, created_at, user_id)
 		VALUES
-		(#{account_id}, #{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name}, #{qty_raw}, #{qty_num}, #{qty_unit}, #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
+		(#{account_id}, #{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name},
+		 #{qty_raw}, #{qty_num}, #{qty_unit},
+		 COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1),
+		 COALESCE(#{qty_base}, #{qty_num}, 0),
+		 COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
+		 COALESCE(#{qty_per_person},
+		          COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
+		 #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
 	        menu_id = #{menu_id},
@@ -347,6 +356,11 @@
 	        qty_raw = #{qty_raw},
 	        qty_num = #{qty_num},
 	        qty_unit = #{qty_unit},
+	        recipe_yield_servings = COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1),
+	        qty_base = COALESCE(#{qty_base}, #{qty_num}, 0),
+	        base_unit = COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
+	        qty_per_person = COALESCE(#{qty_per_person},
+	                                  COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id}
 	    </trim>
