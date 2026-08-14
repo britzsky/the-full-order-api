@@ -17,8 +17,14 @@
 			   T.food_type_reason,
 			   DATE_FORMAT(T.created_at, '%Y-%m-%d') as created_at,
 			   T.menu_type,
-			   T.menu_gubun
+			   T.menu_gubun,
+			   T.meal_plan_type,
+			   T.calories_per_serving
 		FROM the_full_order.tb_menu_master T
+		WHERE 1 = 1
+		<if test="meal_plan_type != null and meal_plan_type != ''">
+		   AND T.meal_plan_type = #{meal_plan_type}
+		</if>
 	</select>
 	
 	<select id="DetailList" parameterType="map" resultType="hashmap">
@@ -202,7 +208,7 @@
 	
 	<insert id="MenuSave" parameterType="map">
 		INSERT INTO the_full_order.tb_menu_master
-		(menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, menu_img, menu_type, menu_gubun, user_id)
+		(menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, menu_img, menu_type, menu_gubun, meal_plan_type, calories_per_serving, user_id)
 		VALUES
 		(#{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
 		    CASE 
@@ -213,7 +219,7 @@
 		        WHEN #{food_type} = 5 THEN '간식'
 		        ELSE '기타'
 		    END
-		, ':', #{menu_name}), #{menu_img}, #{menu_type}, #{menu_gubun}, #{user_id})
+		, ':', #{menu_name}), #{menu_img}, #{menu_type}, #{menu_gubun}, COALESCE(#{meal_plan_type}, 0), #{calories_per_serving}, #{user_id})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
 	        menu_name = #{menu_name},
@@ -224,7 +230,9 @@
 	        user_id = #{user_id},
 	        menu_img = #{menu_img},
 	        menu_type = #{menu_type}, 
-	        menu_gubun = #{menu_gubun}
+	        menu_gubun = #{menu_gubun},
+	        meal_plan_type = COALESCE(#{meal_plan_type}, meal_plan_type),
+	        calories_per_serving = COALESCE(#{calories_per_serving}, calories_per_serving)
 	    </trim>
 	</insert>
 	
@@ -274,7 +282,7 @@
 	
 	<insert id="AccountMenuSave" parameterType="map">
 		INSERT INTO the_full_order.tb_account_menu_master
-		(account_id, menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, user_id, menu_type, menu_gubun)
+		(account_id, menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, user_id, menu_type, menu_gubun, meal_plan_type, calories_per_serving)
 		VALUES
 		(#{account_id}, #{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
 		    CASE 
@@ -285,7 +293,7 @@
 		        WHEN #{food_type} = 5 THEN '간식'
 		        ELSE '기타'
 		    END
-		, ':', #{menu_name}), #{user_id}, #{menu_type}, #{menu_gubun})
+		, ':', #{menu_name}), #{user_id}, #{menu_type}, #{menu_gubun}, COALESCE(#{meal_plan_type}, 0), #{calories_per_serving})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
 	        menu_name = #{menu_name},
@@ -295,7 +303,9 @@
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id},
 	        menu_type = #{menu_type}, 
-	        menu_gubun = #{menu_gubun}
+	        menu_gubun = #{menu_gubun},
+	        meal_plan_type = COALESCE(#{meal_plan_type}, meal_plan_type),
+	        calories_per_serving = COALESCE(#{calories_per_serving}, calories_per_serving)
 	    </trim>
 	</insert>
 	
@@ -367,7 +377,9 @@
 			   DATE_FORMAT(T.created_at, '%Y-%m-%d') as created_at,
 			   T3.like,
 			   T.menu_type,
-			   T.menu_gubun
+			   T.menu_gubun,
+			   T.meal_plan_type,
+			   T.calories_per_serving
 		FROM the_full_order.tb_account_menu_master T
 		JOIN the_full_order.tb_menu_master T2
 		ON T2.menu_id = T.menu_id
@@ -376,6 +388,9 @@
 		AND T3.menu_id = T.menu_id
 		WHERE T.account_id = #{account_id}
 		AND ifnull(T.del_yn, 'N') = 'N'
+		<if test="meal_plan_type != null and meal_plan_type != ''">
+		AND T.meal_plan_type = #{meal_plan_type}
+		</if>
 	</select>
 	
 	<select id="LikeMenuList" parameterType="map" resultType="hashmap">
@@ -388,12 +403,17 @@
 			   T2.food_type,
 			   T2.menu_type,
 			   T2.menu_gubun,
-			   T2.food_type_reason
+			   T2.food_type_reason,
+			   T2.meal_plan_type,
+			   T2.calories_per_serving
 		  FROM the_full_order.tb_like_menu T
 		  JOIN the_full_order.tb_menu_master T2
 		  ON T2.menu_id = T.menu_id
 		 WHERE T.account_id = #{account_id}
 		   AND T.user_id = #{user_id}
+		<if test="meal_plan_type != null and meal_plan_type != ''">
+		   AND T2.meal_plan_type = #{meal_plan_type}
+		</if>
 	</select>
 	
 	<insert id="LikeMenuSave" parameterType="map">

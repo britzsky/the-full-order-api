@@ -1,51 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
-        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.InventoryMapper">
-	<select id="AccountInventoryList" parameterType="map" resultType="hashmap">
-		SELECT
-			    ib.ingredient_id,                                                   -- 재료 ID
-			    COALESCE(im.ingredient_name_raw, rd.recipe_ingredient_name) AS ingredient_name, -- 재료명
-			    rd.recipe_unit,                                                     -- 레시피 단위
-			    ROUND(SUM(COALESCE(ib.current_qty, 0)), 3) AS current_qty,          -- 현재고
-			    COALESCE(ib.location_id, 'L999') AS location_id,                    -- 보관방식
-			    COALESCE(im.base_unit, ib.unit, rd.recipe_unit) AS base_unit,       -- 기준단위
-			    im.order_unit,                                                      -- 발주단위
-			    im.convert_value,                                                   -- 환산값
-			    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,                   -- 안전재고
-			    rd.ingredient_seq,                                                  -- 레시피상 재료 순번
-			    im.category_name
-			FROM the_full_order.tb_account_inventory_balance ib
-			LEFT JOIN the_full_order.tb_account_ingredient_master im
-			    ON ib.account_id = im.account_id
-			   AND ib.ingredient_id = im.ingredient_id
-			LEFT JOIN (
-			    SELECT
-			        account_id,
-			        ingredient_id,
-			        COALESCE(MAX(ingredient_name_raw), '') AS recipe_ingredient_name,
-			        MIN(qty_unit) AS recipe_unit,
-			        MIN(ingredient_seq) AS ingredient_seq
-			    FROM the_full_order.tb_account_recipe_detail
-			    GROUP BY
-			        account_id,
-			        ingredient_id
-			) rd
-			    ON ib.account_id = rd.account_id
-			   AND ib.ingredient_id = rd.ingredient_id
-			WHERE ib.account_id = #{account_id}
-			GROUP BY
-			    ib.ingredient_id,
-			    COALESCE(im.ingredient_name_raw, rd.recipe_ingredient_name),
-			    rd.recipe_unit,
-			    COALESCE(ib.location_id, 'L999'),
-			    COALESCE(im.base_unit, ib.unit, rd.recipe_unit),
-			    im.order_unit,
-			    im.convert_value,
-			    im.safe_stock_qty,
-			    rd.ingredient_seq,
-			    im.category_name
-			ORDER BY ib.ingredient_id;
-	</select>
+ <select id="AccountInventoryList" parameterType="map" resultType="hashmap">
+  WITH usage_data AS (SELECT account_id,account_ingredient_product_id,MAX(CASE WHEN movement_type='OUT' THEN movement_at END) last_out_at,ABS(SUM(CASE WHEN movement_type='OUT' AND movement_at&gt;=DATE_SUB(CURRENT_DATE,INTERVAL COALESCE(#{average_days},14) DAY) THEN quantity_delta ELSE 0 END))/GREATEST(COALESCE(#{average_days},14),1) avg_daily_usage FROM the_full_order.tb_account_inventory_movement GROUP BY account_id,account_ingredient_product_id)
+  SELECT b.*,ap.safe_stock_base_qty,ap.max_stock_base_qty,ap.lead_time_days,p.ingredient_id,p.product_name,p.supplier_item_code,p.order_unit,p.base_qty package_base_qty,s.supplier_name,ph.purchase_price,u.avg_daily_usage,u.last_out_at,
+  CASE WHEN b.current_base_qty&lt;COALESCE(#{required_base_qty},0) THEN 'RED' WHEN b.current_base_qty&lt;COALESCE(u.avg_daily_usage,0)*ap.lead_time_days+ap.safe_stock_base_qty THEN 'ORANGE' WHEN u.last_out_at IS NULL AND ap.max_stock_base_qty&gt;0 AND b.current_base_qty/ap.max_stock_base_qty&lt;=0.30 THEN 'YELLOW' ELSE 'GREEN' END stock_status
+  FROM the_full_order.tb_account_inventory_balance b JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=b.account_ingredient_product_id JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL LEFT JOIN usage_data u ON u.account_id=b.account_id AND u.account_ingredient_product_id=b.account_ingredient_product_id WHERE b.account_id=#{account_id}<if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if> ORDER BY FIELD(stock_status,'RED','ORANGE','YELLOW','GREEN'),p.product_name
+ </select>
+ <select id="inventoryForUpdate" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} FOR UPDATE</select>
+ <insert id="insertInventory" parameterType="map" useGeneratedKeys="true" keyProperty="inventory_balance_id">INSERT INTO the_full_order.tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,note,user_id)VALUES(#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),COALESCE(#{current_base_qty},0),#{base_unit},#{note},#{user_id})</insert>
+ <update id="updateInventory" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="location_id!=null">location_id=#{location_id},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>
+ <delete id="deleteInventory" parameterType="map">DELETE FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id}</delete>
+ <select id="movements" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_movement WHERE account_id=#{account_id}<if test="account_ingredient_product_id!=null and account_ingredient_product_id!=''"> AND account_ingredient_product_id=#{account_ingredient_product_id}</if> ORDER BY movement_at DESC</select>
+ <insert id="insertMovement" parameterType="map">INSERT INTO the_full_order.tb_account_inventory_movement(movement_id,account_id,account_ingredient_product_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{account_ingredient_product_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>
 </mapper>

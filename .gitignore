@@ -37,12 +37,16 @@ out/
 .vscode/
 
 ### Application properties ###
-application-local.properties
-application-real.properties
-application-secret-real.properties
-application-secret.properties
-application.properties_dev
-application.properties_local
-application.properties_real
+**/src/main/resources/application-local.properties
+**/src/main/resources/application-real.properties
+**/src/main/resources/application-secret-real.properties
+**/src/main/resources/application-secret.properties
+**/src/main/resources/application.properties_dev
+**/src/main/resources/application.properties_local
+**/src/main/resources/application.properties_real
 the-full-ocr-project-f7202d1e7284.json
 the-full-ocr-project-4680f824e68a.json
+
+
+rebuild_modified_tables_drop_create.sql
+seed_meal_inventory_procurement_test_data.sql

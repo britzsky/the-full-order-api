@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.SupplierCatalogMapper">
+    <select id="suppliers" parameterType="map" resultType="hashmap">
+        SELECT * FROM the_full_order.tb_supplier WHERE 1=1
+        <if test="supplier_id != null and supplier_id != ''">AND supplier_id=#{supplier_id}</if>
+        <if test="active_yn != null and active_yn != ''">AND active_yn=#{active_yn}</if>
+        ORDER BY supplier_name
+    </select>
+    <insert id="insertSupplier" parameterType="map" useGeneratedKeys="true" keyProperty="supplier_id">
+        INSERT INTO the_full_order.tb_supplier
+        (supplier_code,supplier_name,supplier_type,active_yn,user_id)
+        VALUES (#{supplier_code},#{supplier_name},COALESCE(#{supplier_type},'FOOD'),COALESCE(#{active_yn},'Y'),#{user_id})
+    </insert>
+    <update id="updateSupplier" parameterType="map">
+        UPDATE the_full_order.tb_supplier SET supplier_code=#{supplier_code},supplier_name=#{supplier_name},
+        supplier_type=COALESCE(#{supplier_type},supplier_type),active_yn=COALESCE(#{active_yn},active_yn),user_id=#{user_id},mod_at=NOW()
+        WHERE supplier_id=#{supplier_id}
+    </update>
+    <delete id="deleteSupplier" parameterType="map">DELETE FROM the_full_order.tb_supplier WHERE supplier_id=#{supplier_id}</delete>
+
+    <select id="products" parameterType="map" resultType="hashmap">
+        SELECT p.*,s.supplier_code,s.supplier_name,i.ingredient_name_std,
+               ph.purchase_price current_price
+        FROM the_full_order.tb_supplier_ingredient_product p
+        JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
+        JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
+        LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph
+          ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
+        WHERE 1=1
+        <if test="supplier_product_id != null and supplier_product_id != ''">AND p.supplier_product_id=#{supplier_product_id}</if>
+        <if test="supplier_id != null and supplier_id != ''">AND p.supplier_id=#{supplier_id}</if>
+        <if test="ingredient_id != null and ingredient_id != ''">AND p.ingredient_id=#{ingredient_id}</if>
+        <if test="active_yn != null and active_yn != ''">AND p.active_yn=#{active_yn}</if>
+        ORDER BY s.supplier_name,p.product_name
+    </select>
+    <insert id="insertProduct" parameterType="map" useGeneratedKeys="true" keyProperty="supplier_product_id">
+        INSERT INTO the_full_order.tb_supplier_ingredient_product
+        (supplier_id,ingredient_id,supplier_item_code,product_name,order_unit,package_qty,package_unit,base_qty,base_unit,
+         minimum_order_qty,order_multiple_qty,tax_type,active_yn,user_id)
+        VALUES (#{supplier_id},#{ingredient_id},#{supplier_item_code},#{product_name},#{order_unit},#{package_qty},#{package_unit},
+        #{base_qty},#{base_unit},COALESCE(#{minimum_order_qty},1),COALESCE(#{order_multiple_qty},1),#{tax_type},COALESCE(#{active_yn},'Y'),#{user_id})
+    </insert>
+    <update id="updateProduct" parameterType="map">
+        UPDATE the_full_order.tb_supplier_ingredient_product
+        <set>
+            <if test="supplier_id != null">supplier_id=#{supplier_id},</if><if test="ingredient_id != null">ingredient_id=#{ingredient_id},</if>
+            <if test="supplier_item_code != null">supplier_item_code=#{supplier_item_code},</if><if test="product_name != null">product_name=#{product_name},</if>
+            <if test="order_unit != null">order_unit=#{order_unit},</if><if test="package_qty != null">package_qty=#{package_qty},</if>
+            <if test="package_unit != null">package_unit=#{package_unit},</if><if test="base_qty != null">base_qty=#{base_qty},</if>
+            <if test="base_unit != null">base_unit=#{base_unit},</if><if test="minimum_order_qty != null">minimum_order_qty=#{minimum_order_qty},</if>
+            <if test="order_multiple_qty != null">order_multiple_qty=#{order_multiple_qty},</if><if test="tax_type != null">tax_type=#{tax_type},</if>
+            <if test="active_yn != null">active_yn=#{active_yn},</if>user_id=#{user_id},mod_at=NOW()
+        </set> WHERE supplier_product_id=#{supplier_product_id}
+    </update>
+    <delete id="deleteProduct" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id}</delete>
+
+    <select id="prices" parameterType="map" resultType="hashmap">
+        SELECT * FROM the_full_order.tb_supplier_ingredient_price_history WHERE 1=1
+        <if test="price_history_id != null and price_history_id != ''">AND price_history_id=#{price_history_id}</if>
+        <if test="supplier_product_id != null and supplier_product_id != ''">AND supplier_product_id=#{supplier_product_id}</if>
+        ORDER BY effective_from DESC
+    </select>
+    <update id="closeCurrentPrice" parameterType="map">
+        UPDATE the_full_order.tb_supplier_ingredient_price_history SET effective_to=DATE_SUB(#{effective_from},INTERVAL 1 SECOND)
+        WHERE supplier_product_id=#{supplier_product_id} AND effective_to IS NULL AND effective_from &lt; #{effective_from}
+    </update>
+    <insert id="insertPrice" parameterType="map" useGeneratedKeys="true" keyProperty="price_history_id">
+        INSERT INTO the_full_order.tb_supplier_ingredient_price_history
+        (supplier_product_id,purchase_price,effective_from,effective_to,user_id)
+        VALUES (#{supplier_product_id},#{purchase_price},#{effective_from},#{effective_to},#{user_id})
+    </insert>
+    <update id="updatePrice" parameterType="map">
+        UPDATE the_full_order.tb_supplier_ingredient_price_history SET purchase_price=#{purchase_price},
+        effective_from=#{effective_from},effective_to=#{effective_to},user_id=#{user_id} WHERE price_history_id=#{price_history_id}
+    </update>
+    <delete id="deletePrice" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_price_history WHERE price_history_id=#{price_history_id}</delete>
+
+    <select id="accountProducts" parameterType="map" resultType="hashmap">
+        SELECT ap.*,p.ingredient_id,p.supplier_item_code,p.product_name,p.order_unit,p.base_qty,p.base_unit,
+               s.supplier_id,s.supplier_name,ph.purchase_price current_price
+        FROM the_full_order.tb_account_ingredient_product ap
+        JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+        JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
+        LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
+        WHERE 1=1
+        <if test="account_id != null and account_id != ''">AND ap.account_id=#{account_id}</if>
+        <if test="account_ingredient_product_id != null and account_ingredient_product_id != ''">AND ap.account_ingredient_product_id=#{account_ingredient_product_id}</if>
+        <if test="ingredient_id != null and ingredient_id != ''">AND p.ingredient_id=#{ingredient_id}</if>
+        ORDER BY p.ingredient_id,ap.preferred_yn DESC,s.supplier_name
+    </select>
+    <update id="clearPreferredProduct" parameterType="map">
+        UPDATE the_full_order.tb_account_ingredient_product ap
+        JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+        SET ap.preferred_yn='N',ap.mod_at=NOW()
+        WHERE ap.account_id=#{account_id} AND p.ingredient_id=(SELECT ingredient_id FROM the_full_order.tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id})
+    </update>
+    <insert id="insertAccountProduct" parameterType="map" useGeneratedKeys="true" keyProperty="account_ingredient_product_id">
+        INSERT INTO the_full_order.tb_account_ingredient_product
+        (account_id,supplier_product_id,preferred_yn,safe_stock_base_qty,max_stock_base_qty,lead_time_days,default_location_id,active_yn,user_id)
+        VALUES (#{account_id},#{supplier_product_id},COALESCE(#{preferred_yn},'N'),COALESCE(#{safe_stock_base_qty},0),#{max_stock_base_qty},
+        COALESCE(#{lead_time_days},0),#{default_location_id},COALESCE(#{active_yn},'Y'),#{user_id})
+    </insert>
+    <update id="updateAccountProduct" parameterType="map">
+        UPDATE the_full_order.tb_account_ingredient_product
+        <set><if test="supplier_product_id != null">supplier_product_id=#{supplier_product_id},</if><if test="preferred_yn != null">preferred_yn=#{preferred_yn},</if>
+        <if test="safe_stock_base_qty != null">safe_stock_base_qty=#{safe_stock_base_qty},</if><if test="max_stock_base_qty != null">max_stock_base_qty=#{max_stock_base_qty},</if>
+        <if test="lead_time_days != null">lead_time_days=#{lead_time_days},</if><if test="default_location_id != null">default_location_id=#{default_location_id},</if>
+        <if test="active_yn != null">active_yn=#{active_yn},</if>user_id=#{user_id},mod_at=NOW()</set>
+        WHERE account_ingredient_product_id=#{account_ingredient_product_id} AND account_id=#{account_id}
+    </update>
+    <delete id="deleteAccountProduct" parameterType="map">DELETE FROM the_full_order.tb_account_ingredient_product WHERE account_ingredient_product_id=#{account_ingredient_product_id}</delete>
+</mapper>
