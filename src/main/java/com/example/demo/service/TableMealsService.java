@@ -100,7 +100,7 @@ public class TableMealsService {
 				}
 				
 				Map<String, Object> detail = new HashMap<>();
-				copy(detail, meal, "meal_date", "weekday", "meal_slot");
+				copy(detail, meal, "meal_date", "weekday", "meal_slot", "serving_qty");
 				copy(detail, menu, "sort_order", "menu_id", "menu_name", "meal_category", "menu_type", "menu_gubun");
 				resultList.add(detail);
 			}

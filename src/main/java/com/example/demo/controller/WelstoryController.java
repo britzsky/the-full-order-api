@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/Order/Welstory")
-public class WelstoryController {
+public class WelstoryController { 
 
 	private final WelstoryItemLookupService service;
 	private final ObjectMapper objectMapper;
@@ -36,9 +36,7 @@ public class WelstoryController {
 
 	@GetMapping("/WebSocketStatus")
 	public Map<String, Object> webSocketStatus() {
-		return Map.of(
-				"enabled", webSocketService.isEnabled(),
-				"connected", webSocketService.isConnected(),
+		return Map.of("enabled", webSocketService.isEnabled(), "connected", webSocketService.isConnected(),
 				"lastError", webSocketService.getLastError());
 	}
 
@@ -137,8 +135,8 @@ public class WelstoryController {
 	public ResponseEntity<JsonNode> revokeToken() {
 		try {
 			return ResponseEntity.ok(service.revokeConfiguredToken());
-		} catch (Exception e) {
-			return failure(e);
+		} catch (Exception exception) {
+			return failure(exception);
 		}
 	}
 
@@ -149,19 +147,21 @@ public class WelstoryController {
 			return result == null
 					? ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error("E5020", "웰스토리 응답이 없습니다."))
 					: ResponseEntity.ok(result);
-		} catch (Exception e) {
-			return failure(e);
+		} catch (Exception exception) {
+			return failure(exception);
 		}
 	}
 
-	private ResponseEntity<JsonNode> failure(Exception e) {
-		if (e instanceof WebClientResponseException webException) {
+	private ResponseEntity<JsonNode> failure(Exception exception) {
+		if (exception instanceof WebClientResponseException webException) {
 			try {
 				return ResponseEntity.status(webException.getStatusCode())
 						.body(objectMapper.readTree(webException.getResponseBodyAsString()));
-			} catch (Exception ignored) { }
+			} catch (Exception ignored) {
+				// Use the normalized gateway response below.
+			}
 		}
-		String message = e.getMessage() == null ? "웰스토리 API 호출에 실패했습니다." : e.getMessage();
+		String message = exception.getMessage() == null ? "웰스토리 API 호출에 실패했습니다." : exception.getMessage();
 		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error("E5022", message));
 	}
 
@@ -185,41 +185,60 @@ public class WelstoryController {
 	}
 
 	private String validateOrder(JsonNode request) {
-		JsonNode header = header(request);
-		String error = requireText(header, "clientOrd", "주문번호", 20);
-		if (error == null) error = requireText(header, "soldTo", "사업장코드", 8);
-		if (error == null) error = requireDate(header, "reqDeliveryDate", "입고일자");
-		String status = text(header, "ordStatus");
-		if (error == null && !status.matches("N|U")) error = "ordStatus는 N 또는 U여야 합니다.";
+		JsonNode requestHeader = header(request);
+		String error = requireText(requestHeader, "clientOrd", "주문번호", 20);
+		if (error == null) error = requireText(requestHeader, "soldTo", "사업장코드", 8);
+		if (error == null) error = requireDate(requestHeader, "reqDeliveryDate", "입고일자");
+		String orderStatus = text(requestHeader, "ordStatus");
+		if (error == null && !orderStatus.matches("N|U")) error = "ordStatus는 N 또는 U여야 합니다.";
 		JsonNode details = body(request).path("ordDetail");
 		if (error == null && (!details.isArray() || details.isEmpty())) error = "ordDetail은 한 건 이상 필요합니다.";
 		if (error != null) return error;
+
 		for (JsonNode detail : details) {
 			if ((error = requireText(detail, "clientOrd", "상세 주문번호", 20)) != null) return error;
+			if (!text(detail, "clientOrd").equals(text(requestHeader, "clientOrd"))) return "상세 주문번호는 헤더 주문번호와 같아야 합니다.";
 			if ((error = requireText(detail, "clientOrdItem", "주문 일련번호", 6)) != null) return error;
 			if ((error = requireText(detail, "itemCode", "품목코드", 18)) != null) return error;
 			if ((error = requireText(detail, "ordQty", "주문수량", 0)) != null) return error;
 			if ((error = requireDate(detail, "itemDeliveryDate", "품목납품일")) != null) return error;
-			if (!text(detail, "ordItemStatus").matches("N|U|D")) return "ordItemStatus는 N, U, D 중 하나여야 합니다.";
+			if (!text(detail, "itemDeliveryDate").equals(text(requestHeader, "reqDeliveryDate"))) return "품목납품일은 헤더 입고일자와 같아야 합니다.";
+			String itemStatus = text(detail, "ordItemStatus");
+			if (!itemStatus.matches("N|U|D")) return "ordItemStatus는 N, U, D 중 하나여야 합니다.";
+			if ("N".equals(orderStatus) && !"N".equals(itemStatus)) return "신규 주문의 모든 품목 상태는 N이어야 합니다.";
 		}
 		return null;
 	}
 
-	private JsonNode header(JsonNode request) { return request == null ? objectMapper.createObjectNode() : request.path("dataHeader"); }
-	private JsonNode body(JsonNode request) { return request == null ? objectMapper.createObjectNode() : request.path("dataBody"); }
-	private String text(JsonNode node, String field) { return node.path(field).asText("").trim(); }
+	private JsonNode header(JsonNode request) {
+		return request == null ? objectMapper.createObjectNode() : request.path("dataHeader");
+	}
+
+	private JsonNode body(JsonNode request) {
+		return request == null ? objectMapper.createObjectNode() : request.path("dataBody");
+	}
+
+	private String text(JsonNode node, String field) {
+		return node.path(field).asText("").trim();
+	}
+
 	private String requireText(JsonNode node, String field, String label, int maxLength) {
 		String value = text(node, field);
 		if (value.isEmpty()) return label + "은(는) 필수입니다.";
 		return maxLength > 0 && value.length() > maxLength ? label + "은(는) " + maxLength + "자리 이하여야 합니다." : null;
 	}
+
 	private String requireDate(JsonNode node, String field, String label) {
 		String value = text(node, field);
 		if (!value.matches("\\d{8}")) return label + "은(는) YYYYMMDD 형식이어야 합니다.";
-		try { LocalDate.parse(value, DateTimeFormatter.BASIC_ISO_DATE); }
-		catch (DateTimeParseException e) { return label + "이(가) 유효한 날짜가 아닙니다."; }
+		try {
+			LocalDate.parse(value, DateTimeFormatter.BASIC_ISO_DATE);
+		} catch (DateTimeParseException exception) {
+			return label + "이(가) 유효한 날짜가 아닙니다.";
+		}
 		return null;
 	}
+
 	private JsonNode error(String code, String message) {
 		return objectMapper.valueToTree(Map.of("dataHeader", Map.of(), "dataBody", Map.of("resCd", code, "resMsg", message)));
 	}

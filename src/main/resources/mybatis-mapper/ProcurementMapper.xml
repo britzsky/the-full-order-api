@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.ProcurementMapper">
+
+    <select id="mealPlanIngredientAnalysis" parameterType="map" resultType="hashmap">
+        WITH planned AS (
+            SELECT d.account_id, d.table_id, d.menu_id, d.menu_name, r.ingredient_id,
+                   COALESCE(i.ingredient_name_std, r.ingredient_name_raw) ingredient_name,
+                   COALESCE(i.base_unit, r.qty_unit) base_unit,
+                   i.order_unit, COALESCE(i.convert_value, 1) convert_value,
+                   i.welstory_item_code, i.purchase_price, i.package_base_qty,
+                   COALESCE(i.safe_stock_qty, 0) safe_stock_qty,
+                   COALESCE(i.lead_time_days, 0) lead_time_days,
+                   i.max_stock_qty,
+                   SUM(COALESCE(r.qty_num, 0) * COALESCE(d.serving_qty, 1)) planned_qty
+              FROM the_full_order.tb_account_table_meals_detail d
+              JOIN the_full_order.tb_account_recipe_detail r
+                ON r.account_id = d.account_id AND r.menu_id = d.menu_id
+              LEFT JOIN the_full_order.tb_account_ingredient_master i
+                ON i.account_id = r.account_id AND i.ingredient_id = r.ingredient_id
+             WHERE d.account_id = #{account_id} AND d.table_id = #{table_id}
+             GROUP BY d.account_id, d.table_id, d.menu_id, d.menu_name, r.ingredient_id,
+                      COALESCE(i.ingredient_name_std, r.ingredient_name_raw),
+                      COALESCE(i.base_unit, r.qty_unit), i.order_unit, i.convert_value,
+                      i.welstory_item_code, i.purchase_price, i.package_base_qty,
+                      i.safe_stock_qty, i.lead_time_days, i.max_stock_qty
+        ), stock AS (
+            SELECT account_id, ingredient_id, SUM(current_qty) current_qty
+              FROM the_full_order.tb_account_inventory_balance
+             WHERE account_id = #{account_id}
+             GROUP BY account_id, ingredient_id
+        ), usage_history AS (
+            SELECT d.account_id, r.ingredient_id,
+                   SUM(COALESCE(r.qty_num, 0) * COALESCE(d.serving_qty, 1))
+                       / GREATEST(COUNT(DISTINCT STR_TO_DATE(REPLACE(d.meal_date, '-', ''), '%Y%m%d')), 1) avg_daily_usage,
+                   COUNT(*) usage_count
+              FROM the_full_order.tb_account_table_meals_detail d
+              JOIN the_full_order.tb_account_recipe_detail r
+                ON r.account_id = d.account_id AND r.menu_id = d.menu_id
+             WHERE d.account_id = #{account_id}
+               AND STR_TO_DATE(REPLACE(d.meal_date, '-', ''), '%Y%m%d') BETWEEN
+                   DATE_SUB(CURRENT_DATE, INTERVAL COALESCE(#{average_days}, 14) DAY)
+                   AND DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY)
+             GROUP BY d.account_id, r.ingredient_id
+        )
+        SELECT p.*, COALESCE(s.current_qty, 0) current_qty,
+               COALESCE(u.avg_daily_usage, 0) avg_daily_usage,
+               GREATEST(p.planned_qty + p.safe_stock_qty - COALESCE(s.current_qty, 0), 0) shortage_qty,
+               CEIL(GREATEST(p.planned_qty + p.safe_stock_qty - COALESCE(s.current_qty, 0), 0)
+                    / GREATEST(p.convert_value, 1)) suggested_order_qty,
+               ROUND(CASE WHEN p.purchase_price IS NULL OR p.package_base_qty IS NULL OR p.package_base_qty = 0
+                          THEN NULL ELSE p.purchase_price / p.package_base_qty * p.planned_qty END, 2) planned_cost,
+               CASE
+                   WHEN COALESCE(s.current_qty, 0) &lt; p.planned_qty THEN 'RED'
+                   WHEN COALESCE(s.current_qty, 0) &lt; p.planned_qty + p.safe_stock_qty
+                        + COALESCE(u.avg_daily_usage, 0) * p.lead_time_days THEN 'ORANGE'
+                   WHEN COALESCE(u.usage_count, 0) = 0 AND COALESCE(s.current_qty, 0) &gt; 0
+                        AND p.max_stock_qty &gt; 0 AND COALESCE(s.current_qty, 0) / p.max_stock_qty &lt;= 0.3 THEN 'YELLOW'
+                   ELSE 'GREEN'
+               END stock_status
+          FROM planned p
+          LEFT JOIN stock s ON s.account_id = p.account_id AND s.ingredient_id = p.ingredient_id
+          LEFT JOIN usage_history u ON u.account_id = p.account_id AND u.ingredient_id = p.ingredient_id
+         ORDER BY FIELD(stock_status, 'RED', 'ORANGE', 'YELLOW', 'GREEN'), p.menu_name, p.ingredient_name
+    </select>
+
+    <select id="mealPlanSummary" parameterType="map" resultType="hashmap">
+        SELECT h.meal_budget_per_person,
+               COALESCE(SUM(x.serving_qty), 0) total_servings
+          FROM the_full_order.tb_account_table_meals h
+          LEFT JOIN (
+              SELECT table_id, meal_date, meal_slot, MAX(COALESCE(serving_qty, 1)) serving_qty
+                FROM the_full_order.tb_account_table_meals_detail
+               WHERE account_id = #{account_id} AND table_id = #{table_id}
+               GROUP BY table_id, meal_date, meal_slot
+          ) x ON x.table_id = h.table_id
+         WHERE h.account_id = #{account_id} AND h.table_id = #{table_id}
+         GROUP BY h.meal_budget_per_person
+    </select>
+
+    <select id="purchaseOrders" parameterType="map" resultType="hashmap">
+        SELECT * FROM the_full_order.tb_account_purchase_order
+         WHERE account_id = #{account_id}
+        <if test="purchase_order_id != null and purchase_order_id != ''">AND purchase_order_id = #{purchase_order_id}</if>
+         ORDER BY ordered_at DESC
+    </select>
+
+    <select id="purchaseOrderItems" parameterType="map" resultType="hashmap">
+        SELECT * FROM the_full_order.tb_account_purchase_order_item
+         WHERE purchase_order_id = #{purchase_order_id} ORDER BY client_ord_item
+    </select>
+
+    <insert id="insertPurchaseOrder" parameterType="map">
+        INSERT INTO the_full_order.tb_account_purchase_order
+        (purchase_order_id, account_id, sold_to, client_ord, req_delivery_date, status,
+         welstory_res_cd, welstory_res_msg, client_note, user_id, ordered_at)
+        VALUES (#{purchase_order_id}, #{account_id}, #{sold_to}, #{client_ord}, #{req_delivery_date},
+                #{status}, #{welstory_res_cd}, #{welstory_res_msg}, #{client_note}, #{user_id}, NOW())
+    </insert>
+
+    <insert id="insertPurchaseOrderItem" parameterType="map">
+        INSERT INTO the_full_order.tb_account_purchase_order_item
+        (purchase_order_id, client_ord_item, ingredient_id, menu_id, welstory_item_code,
+         order_qty, order_unit, base_unit, base_qty_per_order_unit, item_status, welstory_res_cd, welstory_error_msg)
+        VALUES (#{purchase_order_id}, #{client_ord_item}, #{ingredient_id}, #{menu_id}, #{welstory_item_code},
+                #{order_qty}, #{order_unit}, #{base_unit}, #{base_qty_per_order_unit}, #{item_status},
+                #{welstory_res_cd}, #{welstory_error_msg})
+    </insert>
+
+    <update id="updatePurchaseOrderStatus" parameterType="map">
+        UPDATE the_full_order.tb_account_purchase_order SET status = #{status},
+               welstory_res_cd = COALESCE(#{welstory_res_cd}, welstory_res_cd),
+               welstory_res_msg = COALESCE(#{welstory_res_msg}, welstory_res_msg),
+               reconciled_at = CASE WHEN #{status} = 'CONFIRMED' THEN NOW() ELSE reconciled_at END,
+               received_at = CASE WHEN #{status} = 'RECEIVED' THEN NOW() ELSE received_at END,
+               mod_at = NOW() WHERE purchase_order_id = #{purchase_order_id}
+    </update>
+
+    <update id="updatePurchaseOrderItemReconciliation" parameterType="map">
+        UPDATE the_full_order.tb_account_purchase_order_item
+           SET welstory_res_cd = #{welstory_res_cd}, welstory_error_msg = #{welstory_error_msg}
+         WHERE purchase_order_id = #{purchase_order_id} AND client_ord_item = #{client_ord_item}
+    </update>
+
+    <update id="markItemReceived" parameterType="map">
+        UPDATE the_full_order.tb_account_purchase_order_item
+           SET received_qty = #{received_qty}
+         WHERE purchase_order_id = #{purchase_order_id} AND client_ord_item = #{client_ord_item}
+           AND received_qty = 0
+    </update>
+
+    <insert id="increaseInventory" parameterType="map">
+        INSERT INTO the_full_order.tb_account_inventory_balance
+        (account_id, ingredient_id, location_id, current_qty, unit, created_at)
+        VALUES (#{account_id}, #{ingredient_id}, 'L999', #{base_received_qty}, #{base_unit}, NOW())
+        ON DUPLICATE KEY UPDATE current_qty = current_qty + VALUES(current_qty), mod_at = NOW()
+    </insert>
+
+    <insert id="insertInventoryMovement" parameterType="map">
+        INSERT INTO the_full_order.tb_account_inventory_movement
+        (movement_id, account_id, ingredient_id, movement_type, quantity, unit,
+         reference_type, reference_id, movement_at, user_id)
+        VALUES (#{movement_id}, #{account_id}, #{ingredient_id}, 'IN', #{base_received_qty}, #{base_unit},
+                'PURCHASE_ORDER', #{movement_reference}, NOW(), #{user_id})
+    </insert>
+</mapper>

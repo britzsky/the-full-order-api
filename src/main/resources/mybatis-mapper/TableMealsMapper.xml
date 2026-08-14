@@ -17,10 +17,13 @@
 		       H.table_month,
 		       H.table_week,
 		       H.source,
+		       T2.total AS meal_budget_per_person,
 		       H.user_id,
 		       DATE_FORMAT(H.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
 		       DATE_FORMAT(H.mod_at, '%Y-%m-%d %H:%i:%s') AS mod_at
 		  FROM the_full_order.tb_account_table_meals H
+		  LEFT OUTER JOIN the_full.tb_account_diners_number T2
+		  ON T2.account_id = H.account_id
 		 WHERE 1 = 1
 		<if test="account_id != null and account_id != ''">
 		   AND H.account_id = #{account_id}
@@ -30,9 +33,11 @@
 		</if>
 		<if test="table_year != null and table_year != ''">
 		   AND H.table_year = #{table_year}
+		   AND T2.diner_year = #{table_year}
 		</if>
 		<if test="table_month != null and table_month != ''">
 		   AND H.table_month = #{table_month}
+		   AND T2.diner_month = #{table_month}
 		</if>
 		<if test="table_week != null and table_week != ''">
 		   AND H.table_week = #{table_week}
@@ -51,6 +56,7 @@
 		       H.table_month,
 		       H.table_week,
 		       H.source,
+		       T2.total AS meal_budget_per_person,
 		       H.user_id,
 		       DATE_FORMAT(H.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
 		       DATE_FORMAT(H.mod_at, '%Y-%m-%d %H:%i:%s') AS mod_at,
@@ -58,6 +64,7 @@
 		       D.weekday,
 		       D.meal_slot,
 		       D.sort_order,
+		       D.serving_qty,
 		       D.menu_id,
 		       D.menu_name,
 		       D.food_type,
@@ -66,6 +73,8 @@
 		  FROM the_full_order.tb_account_table_meals H
 		  LEFT JOIN the_full_order.tb_account_table_meals_detail D
 		    ON D.table_id = H.table_id
+		  LEFT OUTER JOIN the_full.tb_account_diners_number T2
+		  	ON T2.account_id = H.account_id
 		 WHERE 1 = 1
 		<if test="account_id != null and account_id != ''">
 		   AND H.account_id = #{account_id}
@@ -73,6 +82,7 @@
 		<if test="table_id != null and table_id != ''">
 		   AND H.table_id = #{table_id}
 		</if>
+		   AND STR_TO_DATE(CONCAT(T2.diner_year, '-', T2.diner_month, '-', T2.diner_date),'%Y-%m-%d') = D.meal_date
 		 ORDER BY H.table_year DESC,
 		          H.table_month DESC,
 		          H.table_week DESC,
@@ -83,9 +93,9 @@
 	
 	<insert id="TableMealsHeaderSave" parameterType="map">
 		INSERT INTO the_full_order.tb_account_table_meals
-		(table_id, account_id, account_name, table_name, table_year, table_month, table_week, source, user_id, created_at)
+		(table_id, account_id, account_name, table_name, table_year, table_month, table_week, source, meal_budget_per_person, user_id, created_at)
 		VALUES
-		(#{table_id}, #{account_id}, #{account_name}, #{table_name}, #{table_year}, #{table_month}, #{table_week}, #{source}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		(#{table_id}, #{account_id}, #{account_name}, #{table_name}, #{table_year}, #{table_month}, #{table_week}, #{source}, #{meal_budget_per_person}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
 		ON DUPLICATE KEY UPDATE
 		    account_name = #{account_name},
 		    table_name = #{table_name},
@@ -93,6 +103,7 @@
 		    table_month = #{table_month},
 		    table_week = #{table_week},
 		    source = #{source},
+		    meal_budget_per_person = #{meal_budget_per_person},
 		    user_id = #{user_id},
 		    mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
 	</insert>
@@ -104,9 +115,9 @@
 	
 	<insert id="TableMealsDetailSave" parameterType="map">
 		INSERT INTO the_full_order.tb_account_table_meals_detail
-		(table_id, account_id, meal_date, weekday, meal_slot, sort_order, menu_id, menu_name, food_type, menu_type, menu_gubun, user_id, created_at)
+		(table_id, account_id, meal_date, weekday, meal_slot, sort_order, serving_qty, menu_id, menu_name, food_type, menu_type, menu_gubun, user_id, created_at)
 		VALUES
-		(#{table_id}, #{account_id}, #{meal_date}, #{weekday}, #{meal_slot}, #{sort_order}, #{menu_id}, #{menu_name}, #{food_type}, #{menu_type}, #{menu_gubun}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		(#{table_id}, #{account_id}, #{meal_date}, #{weekday}, #{meal_slot}, #{sort_order}, COALESCE(#{serving_qty}, 1), #{menu_id}, #{menu_name}, #{food_type}, #{menu_type}, #{menu_gubun}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
 		ON DUPLICATE KEY UPDATE
 		    account_id = #{account_id},
 		    weekday = #{weekday},
@@ -114,6 +125,7 @@
 		    food_type = #{food_type},
 		    menu_type = #{menu_type},
 		    menu_gubun = #{menu_gubun},
+		    serving_qty = COALESCE(#{serving_qty}, serving_qty),
 		    user_id = #{user_id},
 		    mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
 	</insert>
