@@ -31,16 +31,31 @@ public class AccountMenuRecipeService {
         Object rows=b.get("ingredients");
         if(!(rows instanceof List<?> list) || list.isEmpty()) throw new IllegalArgumentException("ingredients is required.");
         for(Object value:list){
+            if (!(value instanceof Map<?, ?>)) throw new IllegalArgumentException("Each ingredient must be an object.");
             Map<String,Object> row=(Map<String,Object>)value;
             row.put("account_id",b.get("account_id")); row.put("menu_id",b.get("menu_id")); row.put("recipe_id",b.get("recipe_id")); row.put("user_id",b.get("user_id"));
-            require(row,"ingredient_id","base_unit","qty_base");
+            require(row,"ingredient_id","base_unit","qty_base","supplier_id","supplier_item_code","product_name","order_unit","base_qty");
             mapper.upsertIngredient(row);
             normalize(row);
             mapper.insertRecipeDetail(row);
-            if(!text(row.get("account_ingredient_product_id")).isBlank()) mapper.ensureInventory(row);
+            ensureIngredientInventory(row);
             changed++;
         }
         return Map.of("code",200,"message","success","saved_count",changed,"menu_id",b.get("menu_id"));
+    }
+
+    public int ensureIngredientInventory(Map<String,Object> row){
+        require(row,"account_id","ingredient_id","base_unit","supplier_id","supplier_item_code","product_name","order_unit","base_qty");
+        mapper.upsertIngredient(row);
+        mapper.ensureSupplierProduct(row);
+        Long supplierProductId=mapper.supplierProductId(row);
+        if(supplierProductId==null) throw new IllegalArgumentException("Supplier product could not be resolved.");
+        row.put("supplier_product_id",supplierProductId);
+        mapper.ensureAccountProduct(row);
+        Long accountProductId=mapper.accountIngredientProductId(row);
+        if(accountProductId==null) throw new IllegalArgumentException("Account supplier product could not be resolved.");
+        row.put("account_ingredient_product_id",accountProductId);
+        return mapper.ensureInventory(row);
     }
 
     public Map<String,Object> createRecipe(Map<String,Object> b){require(b,"account_id","recipe_id","menu_id","ingredient_id","qty_base","base_unit"); normalize(b); mapper.insertRecipeDetail(b); return result(1);}

@@ -12,6 +12,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import org.springframework.transaction.annotation.Transactional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.demo.service.MenuService;
+import com.example.demo.service.AccountMenuRecipeService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,15 +42,18 @@ public class MenuController {
 	private static final Pattern DATA_URL_PATTERN = Pattern.compile("^data:([^;]+);base64,(.+)$");
 
 	private final MenuService menuService;
+	private final AccountMenuRecipeService accountMenuRecipeService;
 	private final String uploadDir;
 	private final ObjectMapper objectMapper;
 
 	@Autowired
 	public MenuController(
 			MenuService menuService,
+			AccountMenuRecipeService accountMenuRecipeService,
 			@Value("${file.upload-dir}") String uploadDir,
 			ObjectMapper objectMapper) {
 		this.menuService = menuService;
+		this.accountMenuRecipeService = accountMenuRecipeService;
 		this.uploadDir = uploadDir;
 		this.objectMapper = objectMapper;
 	}
@@ -268,12 +274,12 @@ public class MenuController {
 	 * comment : 거래처 메뉴 저장
 	 */
 	@SuppressWarnings({ "null", "unchecked" })
+	@Transactional
 	@PostMapping("/Menu/AccountMenuSave")
 	public String AccountMenuSave(@RequestBody Map<String, Object> payload) {
 		List<Map<String, Object>> menuList = (List<Map<String, Object>>) payload.get("added_menus");
 		List<Map<String, Object>> detailList = (List<Map<String, Object>>) payload.get("menu_details");
 		List<Map<String, Object>> removeList = (List<Map<String, Object>>) payload.get("removed_menus");
-		List<Map<String, Object>> ingredient_detail = (List<Map<String, Object>>) payload.get("ingredient_detail");
 		
 		int iResult = 0;
 	    
@@ -282,11 +288,12 @@ public class MenuController {
 				iResult += menuService.AccountMenuSave(paramMap);
 			}
 			
-			if (detailList != null && detailList.size() > 0) {
-				for (Map<String, Object> paramMap : detailList) {
-					iResult += menuService.AccountIngredientsSave(paramMap);
-					iResult += menuService.AccountInventorySave(paramMap);
-				}
+		}
+
+		if (detailList != null && detailList.size() > 0) {
+			for (Map<String, Object> paramMap : detailList) {
+				iResult += accountMenuRecipeService.ensureIngredientInventory(paramMap);
+				iResult += menuService.AccountIngredientsSave(paramMap);
 			}
 		}
 		
@@ -296,11 +303,7 @@ public class MenuController {
 			}
 		}
 		
-		if (ingredient_detail != null && ingredient_detail.size() > 0) {
-			for (Map<String, Object> paramMap : ingredient_detail) {
-				iResult += menuService.AccountIngredientsMasterSave(paramMap);
-			}
-		}
+		// The account ingredient master is upserted together with each recipe detail above.
 	    
 		JsonObject obj = new JsonObject();
     	

@@ -108,93 +108,45 @@
 	</select>
 	
 	<select id="AccountDetailList" parameterType="map" resultType="hashmap">
-		SELECT
-			rd.recipe_id,
-		    rd.menu_id,															-- 메뉴 ID
-		    rd.ingredient_id,													-- 재료 ID
-		    -- 재료명
-		    -- ingredient_master에 표준 재료명이 있으면 그 값을 사용하고,
-		    -- 없으면 recipe_detail에 저장된 원본 재료명을 사용
-		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
-		    -- 1인분 기준 수량(숫자 부분)
-		    -- qty_unit과 함께 "1인분당 얼마나 필요한지"를 의미
-		    rd.qty_num AS per_person_qty,	
-		    rd.qty_unit AS recipe_unit,											-- 레시피 단위
-		    #{servingQty} AS serving_qty,										-- 조리할 인분 수
-		    ROUND(COALESCE(rd.qty_num, 0) * #{servingQty}, 3) AS required_qty,	-- 필요수량
-		    ROUND(COALESCE(SUM(ib.current_qty), 0), 3) AS current_qty,			-- 현재고
-		    ifnull(ib.location_id, 'L999') as location_id,						-- 보관방식
-		    ROUND(
-		        GREATEST((COALESCE(rd.qty_num, 0) * #{servingQty}) - COALESCE(SUM(ib.current_qty), 0), 0),
-		        3
-		    ) AS shortage_qty,													-- 부족수량 공식: 필요수량 - 현재고
-		    ROUND(
-		        GREATEST(
-		            (COALESCE(rd.qty_num, 0) * #{servingQty})
-		            + COALESCE(im.safe_stock_qty, 0)
-		            - COALESCE(SUM(ib.current_qty), 0),
-		            0
-		        ),
-		        3
-		    ) AS order_needed_qty,												-- 발주필요수량  공식: 필요수량 + 안전재고 - 현재고
-		    COALESCE(im.base_unit, rd.qty_unit) AS base_unit,					-- 기준단위   예: g, kg, ml, 개 등
-		    im.order_unit,														-- 발주단위   예: 박스, 포, EA, kg 등
-		    im.convert_value,													-- 환산값    예: 1박스 = 10kg 이면 convert_value = 10 같은 식
-		    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,					-- 안전재고   최소한 남겨두고 싶은 재고량
-		    MIN(rd.ingredient_seq) AS ingredient_seq,							-- 재료 순번 
-		    li.like
+		SELECT rd.recipe_id, rd.menu_id, rd.ingredient_id,
+		       COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
+		       rd.ingredient_name_raw, im.ingredient_name_std, im.category_name, im.storage_type,
+		       rd.qty_num AS per_person_qty, rd.qty_num, rd.qty_unit, rd.qty_raw,
+		       COALESCE(#{servingQty}, 1) AS serving_qty,
+		       ROUND(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1), 3) AS required_qty,
+		       ROUND(COALESCE(SUM(ib.current_base_qty), 0), 3) AS current_qty,
+		       COALESCE(MIN(ib.location_id), ap.default_location_id, 'L999') AS location_id,
+		       ROUND(GREATEST(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS shortage_qty,
+		       ROUND(GREATEST(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1) + COALESCE(ap.safe_stock_base_qty, 0) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS order_needed_qty,
+		       COALESCE(sp.base_unit, im.base_unit, rd.base_unit, rd.qty_unit) AS base_unit,
+		       sp.order_unit, COALESCE(sp.base_qty, 1) AS convert_value,
+		       COALESCE(ap.safe_stock_base_qty, 0) AS safe_stock_qty,
+		       rd.ingredient_seq, li.like,
+		       sp.supplier_product_id, sp.supplier_id, s.supplier_name, sp.supplier_item_code,
+		       sp.product_name, sp.package_qty, sp.package_unit, sp.base_qty
 		FROM the_full_order.tb_account_recipe_detail rd
-		-- 레시피 상세 테이블
-		-- 메뉴별 재료 구성, 1인분 수량, 단위 등이 들어있음
-		
 		LEFT JOIN the_full_order.tb_account_ingredient_master im
-		    ON rd.ingredient_id = im.ingredient_id
-		    AND rd.account_id = im.account_id
-		-- 재료 마스터 테이블
-		-- 표준 재료명, 기준단위, 발주단위, 환산값, 안전재고 등을 가져옴
+		  ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
+		LEFT JOIN the_full_order.tb_account_ingredient_product ap
+		  ON ap.account_id=rd.account_id AND ap.supplier_product_id=(
+		    SELECT ap2.supplier_product_id FROM the_full_order.tb_account_ingredient_product ap2
+		    JOIN the_full_order.tb_supplier_ingredient_product sp2 ON sp2.supplier_product_id=ap2.supplier_product_id
+		    WHERE ap2.account_id=rd.account_id AND sp2.ingredient_id=rd.ingredient_id AND ap2.active_yn='Y'
+		    ORDER BY ap2.preferred_yn DESC,ap2.account_ingredient_product_id LIMIT 1)
+		LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=ap.supplier_product_id
+		LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=sp.supplier_id
 		LEFT JOIN the_full_order.tb_account_inventory_balance ib
-		    ON rd.ingredient_id = ib.ingredient_id
-		    AND rd.account_id = ib.account_id
-		   AND (
-		        ib.unit = rd.qty_unit
-		        OR ib.unit = im.base_unit
-		        OR rd.qty_unit IS NULL
-		      )
-		-- 재고 테이블
-		-- 같은 재료 ID의 현재고를 연결
-		-- 단위가 레시피 단위와 같거나, 기준단위와 같을 때 연결
-		-- rd.qty_unit이 NULL이면 일단 연결 허용
-		
-		
-		LEFT JOIN the_full_order.tb_like_ingredients li
-		ON im.account_id = li.account_id
-		AND im.ingredient_id = li.ingredient_id
-		
+		  ON ib.account_id=rd.account_id AND ib.account_ingredient_product_id=ap.account_ingredient_product_id
+		LEFT JOIN the_full_order.tb_like_ingredients li ON li.account_id=rd.account_id AND li.ingredient_id=rd.ingredient_id
 		WHERE rd.menu_id = #{menu_id}
-		-- 특정 메뉴만 조회
-		
+		<if test="account_id != null and account_id != ''">AND rd.account_id=#{account_id}</if>
 		  AND rd.qty_num IS NOT NULL
-		-- 1인분 수량이 있는 재료만 조회
-		-- 수량이 없는 재료는 계산 불가하므로 제외
-		
-		GROUP BY
-		    rd.menu_id,
-		    rd.ingredient_id,
-		    rd.recipe_id,
-		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw),
-		    rd.qty_num,
-		    rd.qty_unit,
-		    ib.location_id,
-		    im.base_unit,
-		    im.order_unit,
-		    im.convert_value,
-		    im.safe_stock_qty,
-		    li.like
-		-- 집계 기준
-		-- 재료별로 현재고 SUM 계산을 위해 묶음
-		
+		GROUP BY rd.account_recipe_detail_id,rd.recipe_id,rd.menu_id,rd.ingredient_id,rd.ingredient_name_raw,
+		         im.ingredient_name_std,im.category_name,im.storage_type,rd.qty_num,rd.qty_unit,rd.qty_raw,
+		         ap.default_location_id,ap.safe_stock_base_qty,sp.base_unit,im.base_unit,rd.base_unit,
+		         sp.order_unit,sp.base_qty,rd.ingredient_seq,li.like,sp.supplier_product_id,sp.supplier_id,
+		         s.supplier_name,sp.supplier_item_code,sp.product_name,sp.package_qty,sp.package_unit
 		ORDER BY ingredient_seq;
-		-- 레시피에 등록된 재료 순서대로 정렬
 	</select>
 	
 	<select id="IngredientsList" parameterType="map" resultType="hashmap">
@@ -346,7 +298,8 @@
 		 COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
 		 COALESCE(#{qty_per_person},
 		          COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
-		 #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
+		 CASE WHEN #{review_flag} IS NULL OR #{review_flag}='' OR #{review_flag}='0' THEN 0 ELSE 1 END,
+		 DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
 	        menu_id = #{menu_id},
@@ -361,6 +314,7 @@
 	        base_unit = COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
 	        qty_per_person = COALESCE(#{qty_per_person},
 	                                  COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
+	        review_flag = CASE WHEN #{review_flag} IS NULL OR #{review_flag}='' OR #{review_flag}='0' THEN 0 ELSE 1 END,
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id}
 	    </trim>

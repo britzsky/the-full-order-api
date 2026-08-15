@@ -16,5 +16,9 @@ public interface AccountMenuRecipeMapper {
     int insertRecipeDetail(Map<String,Object> p);
     int updateRecipeDetail(Map<String,Object> p);
     int deleteRecipeDetail(Map<String,Object> p);
+    int ensureSupplierProduct(Map<String,Object> p);
+    Long supplierProductId(Map<String,Object> p);
+    int ensureAccountProduct(Map<String,Object> p);
+    Long accountIngredientProductId(Map<String,Object> p);
     int ensureInventory(Map<String,Object> p);
 }

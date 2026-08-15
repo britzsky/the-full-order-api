@@ -22,6 +22,7 @@ public class InventoryService {
 	
 	// 재고관리 -> 거래처 재고 조회
 	public List<Map<String, Object>> AccountInventoryList(Map<String, Object> paramMap) {
+		require(paramMap, "account_id");
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = inventoryMapper.AccountInventoryList(paramMap);
 		return resultList;
