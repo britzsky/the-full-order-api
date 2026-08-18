@@ -4,12 +4,14 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.example.demo.mapper.AccountMenuRecipeMapper;
 
 @Service
 public class AccountMenuRecipeService {
+    private static final AtomicLong RECIPE_ID_SEQUENCE = new AtomicLong(System.currentTimeMillis());
     private final AccountMenuRecipeMapper mapper;
     public AccountMenuRecipeService(AccountMenuRecipeMapper mapper) { this.mapper=mapper; }
     public List<Map<String,Object>> ingredients(Map<String,Object> p){return mapper.ingredients(p);}
@@ -56,6 +58,17 @@ public class AccountMenuRecipeService {
         if(accountProductId==null) throw new IllegalArgumentException("Account supplier product could not be resolved.");
         row.put("account_ingredient_product_id",accountProductId);
         return mapper.ensureInventory(row);
+    }
+
+    public Object ensureRecipeId(Map<String,Object> row) {
+        Object recipeId = row.get("recipe_id");
+        if (recipeId != null && !recipeId.toString().isBlank()) return recipeId;
+
+        require(row, "account_id", "menu_id");
+        Long existingRecipeId = mapper.recipeId(row);
+        long resolvedRecipeId = existingRecipeId != null ? existingRecipeId : RECIPE_ID_SEQUENCE.incrementAndGet();
+        row.put("recipe_id", resolvedRecipeId);
+        return resolvedRecipeId;
     }
 
     public Map<String,Object> createRecipe(Map<String,Object> b){require(b,"account_id","recipe_id","menu_id","ingredient_id","qty_base","base_unit"); normalize(b); mapper.insertRecipeDetail(b); return result(1);}

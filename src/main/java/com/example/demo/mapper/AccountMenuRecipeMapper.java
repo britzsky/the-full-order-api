@@ -13,6 +13,7 @@ public interface AccountMenuRecipeMapper {
     int upsertMenu(Map<String,Object> p);
     int deleteMenu(Map<String,Object> p);
     List<Map<String,Object>> recipeDetails(Map<String,Object> p);
+    Long recipeId(Map<String,Object> p);
     int insertRecipeDetail(Map<String,Object> p);
     int updateRecipeDetail(Map<String,Object> p);
     int deleteRecipeDetail(Map<String,Object> p);

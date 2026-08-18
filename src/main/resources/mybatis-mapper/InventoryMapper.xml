@@ -2,14 +2,51 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.InventoryMapper">
  <select id="AccountInventoryList" parameterType="map" resultType="hashmap">
-  WITH usage_data AS (SELECT account_id,account_ingredient_product_id,MAX(CASE WHEN movement_type='OUT' THEN movement_at END) last_out_at,ABS(SUM(CASE WHEN movement_type='OUT' AND movement_at&gt;=DATE_SUB(CURRENT_DATE,INTERVAL COALESCE(#{average_days},14) DAY) THEN quantity_delta ELSE 0 END))/GREATEST(COALESCE(#{average_days},14),1) avg_daily_usage FROM the_full_order.tb_account_inventory_movement GROUP BY account_id,account_ingredient_product_id)
-  SELECT b.*,ap.safe_stock_base_qty,ap.max_stock_base_qty,ap.lead_time_days,p.ingredient_id,p.product_name,p.supplier_item_code,p.order_unit,p.base_qty package_base_qty,s.supplier_name,ph.purchase_price,u.avg_daily_usage,u.last_out_at,
-  CASE WHEN b.current_base_qty&lt;COALESCE(#{required_base_qty},0) THEN 'RED' WHEN b.current_base_qty&lt;COALESCE(u.avg_daily_usage,0)*ap.lead_time_days+ap.safe_stock_base_qty THEN 'ORANGE' WHEN u.last_out_at IS NULL AND ap.max_stock_base_qty&gt;0 AND b.current_base_qty/ap.max_stock_base_qty&lt;=0.30 THEN 'YELLOW' ELSE 'GREEN' END stock_status
-  FROM the_full_order.tb_account_inventory_balance b JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=b.account_ingredient_product_id JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL LEFT JOIN usage_data u ON u.account_id=b.account_id AND u.account_ingredient_product_id=b.account_ingredient_product_id WHERE b.account_id=#{account_id}<if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if> ORDER BY FIELD(stock_status,'RED','ORANGE','YELLOW','GREEN'),p.product_name
+  WITH usage_data AS (
+    SELECT account_id,account_ingredient_product_id,
+           MAX(CASE WHEN movement_type='OUT' THEN movement_at END) last_out_at,
+           ABS(SUM(CASE WHEN movement_type='OUT' AND movement_at&gt;=DATE_SUB(CURRENT_DATE,INTERVAL COALESCE(#{average_days},14) DAY) THEN quantity_delta ELSE 0 END))/GREATEST(COALESCE(#{average_days},14),1) avg_daily_usage
+      FROM the_full_order.tb_account_inventory_movement
+     GROUP BY account_id,account_ingredient_product_id
+  ), requirement_data AS (
+    SELECT ms.account_id,ap.account_ingredient_product_id,SUM(r.total_required_qty) required_base_qty
+      FROM the_full_order.tb_account_meal_ingredient_requirement r
+      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+      JOIN the_full_order.tb_account_ingredient_product ap
+        ON ap.account_id=ms.account_id AND ap.supplier_product_id=r.supplier_product_id
+     WHERE ms.status IN ('DRAFT','CONFIRMED') AND ms.meal_date&gt;=CURRENT_DATE
+     GROUP BY ms.account_id,ap.account_ingredient_product_id
+  )
+  SELECT b.*,ap.safe_stock_base_qty,ap.max_stock_base_qty,ap.lead_time_days,
+         COALESCE(b.location_id,ap.default_location_id,'L999') location_id,
+         p.ingredient_id,COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw,p.product_name) ingredient_name,
+         ai.category_name,ai.storage_type,p.product_name,p.supplier_item_code,p.order_unit,
+         p.base_qty package_base_qty,s.supplier_name,ph.purchase_price,
+         COALESCE(u.avg_daily_usage,0) average_usage_qty,u.last_out_at last_used_at,
+         ap.max_stock_base_qty total_capacity_qty,COALESCE(rq.required_base_qty,0) required_qty,
+         GREATEST(COALESCE(rq.required_base_qty,0)-b.current_base_qty,0) shortage_qty,
+         GREATEST(COALESCE(rq.required_base_qty,0)+ap.safe_stock_base_qty-b.current_base_qty,0) order_needed_qty,
+         (SELECT rd.menu_id FROM the_full_order.tb_account_recipe_detail rd WHERE rd.account_id=b.account_id AND rd.ingredient_id=p.ingredient_id ORDER BY rd.menu_id LIMIT 1) menu_id,
+         (SELECT am.menu_name FROM the_full_order.tb_account_recipe_detail rd JOIN the_full_order.tb_account_menu_master am ON am.account_id=rd.account_id AND am.menu_id=rd.menu_id WHERE rd.account_id=b.account_id AND rd.ingredient_id=p.ingredient_id AND am.del_yn='N' ORDER BY rd.menu_id LIMIT 1) menu_name,
+         CASE WHEN b.current_base_qty&lt;COALESCE(rq.required_base_qty,0) THEN 'RED'
+              WHEN b.current_base_qty&lt;COALESCE(u.avg_daily_usage,0)*ap.lead_time_days+ap.safe_stock_base_qty THEN 'ORANGE'
+              WHEN u.last_out_at IS NULL AND ap.max_stock_base_qty&gt;0 AND b.current_base_qty/ap.max_stock_base_qty&lt;=0.30 THEN 'YELLOW'
+              ELSE 'GREEN' END stock_status
+    FROM the_full_order.tb_account_inventory_balance b
+    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=b.account_ingredient_product_id
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=b.account_id AND ai.ingredient_id=p.ingredient_id
+    LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
+    LEFT JOIN usage_data u ON u.account_id=b.account_id AND u.account_ingredient_product_id=b.account_ingredient_product_id
+    LEFT JOIN requirement_data rq ON rq.account_id=b.account_id AND rq.account_ingredient_product_id=b.account_ingredient_product_id
+   WHERE b.account_id=#{account_id}<if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if>
+   ORDER BY FIELD(stock_status,'RED','ORANGE','YELLOW','GREEN'),p.product_name
  </select>
  <select id="inventoryForUpdate" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} FOR UPDATE</select>
  <insert id="insertInventory" parameterType="map" useGeneratedKeys="true" keyProperty="inventory_balance_id">INSERT INTO the_full_order.tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,note,user_id)VALUES(#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),COALESCE(#{current_base_qty},0),#{base_unit},#{note},#{user_id})</insert>
- <update id="updateInventory" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="location_id!=null">location_id=#{location_id},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>
+ <update id="updateInventory" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="base_unit!=null and base_unit!=''">base_unit=#{base_unit},</if><if test="location_id!=null">location_id=#{location_id},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>
+ <update id="updateAccountProduct" parameterType="map">UPDATE the_full_order.tb_account_ingredient_product <set>safe_stock_base_qty=#{safe_stock_base_qty},user_id=#{user_id},mod_at=NOW()</set>WHERE account_ingredient_product_id=#{account_ingredient_product_id}<if test="account_id!=null and account_id!=''"> AND account_id=#{account_id}</if></update>
  <delete id="deleteInventory" parameterType="map">DELETE FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id}</delete>
  <select id="movements" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_movement WHERE account_id=#{account_id}<if test="account_ingredient_product_id!=null and account_ingredient_product_id!=''"> AND account_ingredient_product_id=#{account_ingredient_product_id}</if> ORDER BY movement_at DESC</select>
  <insert id="insertMovement" parameterType="map">INSERT INTO the_full_order.tb_account_inventory_movement(movement_id,account_id,account_ingredient_product_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{account_ingredient_product_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>

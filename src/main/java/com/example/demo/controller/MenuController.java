@@ -292,6 +292,7 @@ public class MenuController {
 
 		if (detailList != null && detailList.size() > 0) {
 			for (Map<String, Object> paramMap : detailList) {
+				accountMenuRecipeService.ensureRecipeId(paramMap);
 				iResult += accountMenuRecipeService.ensureIngredientInventory(paramMap);
 				iResult += menuService.AccountIngredientsSave(paramMap);
 			}

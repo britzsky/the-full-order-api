@@ -18,8 +18,8 @@
 			   DATE_FORMAT(T.created_at, '%Y-%m-%d') as created_at,
 			   T.menu_type,
 			   T.menu_gubun,
-			   T.meal_plan_type,
-			   T.calories_per_serving
+		       T.meal_plan_type,
+		       T.calories_per_serving
 		FROM the_full_order.tb_menu_master T
 		WHERE 1 = 1
 		<if test="meal_plan_type != null and meal_plan_type != ''">
@@ -124,6 +124,11 @@
 		       rd.ingredient_seq, li.like,
 		       sp.supplier_product_id, sp.supplier_id, s.supplier_name, sp.supplier_item_code,
 		       sp.product_name, sp.package_qty, sp.package_unit, sp.base_qty
+		       ,(SELECT ph.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history ph
+		          WHERE ph.supplier_product_id=sp.supplier_product_id
+		            AND ph.effective_from &lt;= NOW()
+		            AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
+		          ORDER BY ph.effective_from DESC LIMIT 1) AS purchase_price
 		FROM the_full_order.tb_account_recipe_detail rd
 		LEFT JOIN the_full_order.tb_account_ingredient_master im
 		  ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
@@ -291,7 +296,7 @@
 		 qty_raw, qty_num, qty_unit, recipe_yield_servings, qty_base, base_unit,
 		 qty_per_person, review_flag, created_at, user_id)
 		VALUES
-		(#{account_id}, #{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name},
+		(#{account_id}, #{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, COALESCE(NULLIF(#{ingredient_name_raw}, ''), #{ingredient_name}),
 		 #{qty_raw}, #{qty_num}, #{qty_unit},
 		 COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1),
 		 COALESCE(#{qty_base}, #{qty_num}, 0),
@@ -305,7 +310,7 @@
 	        menu_id = #{menu_id},
 	        ingredient_id = #{ingredient_id},
 	        ingredient_seq = #{ingredient_seq},
-	        ingredient_name_raw = #{ingredient_name},
+	        ingredient_name_raw = COALESCE(NULLIF(#{ingredient_name_raw}, ''), #{ingredient_name}),
 	        qty_raw = #{qty_raw},
 	        qty_num = #{qty_num},
 	        qty_unit = #{qty_unit},
@@ -347,7 +352,28 @@
 			   T.menu_type,
 			   T.menu_gubun,
 			   T.meal_plan_type,
-			   T.calories_per_serving
+			   T.calories_per_serving,
+		       (SELECT ROUND(SUM(r.qty_per_person * COALESCE((
+		           SELECT ph.purchase_price
+		             FROM the_full_order.tb_supplier_ingredient_price_history ph
+		            WHERE ph.supplier_product_id = sp.supplier_product_id
+		              AND ph.effective_from &lt;= NOW()
+		              AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
+		            ORDER BY ph.effective_from DESC LIMIT 1
+		         ), 0) / NULLIF(sp.base_qty, 0)), 4)
+		          FROM the_full_order.tb_account_recipe_detail r
+		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp
+		            ON sp.supplier_product_id = (
+		              SELECT ap.supplier_product_id
+		                FROM the_full_order.tb_account_ingredient_product ap
+		                JOIN the_full_order.tb_supplier_ingredient_product sp2
+		                  ON sp2.supplier_product_id = ap.supplier_product_id
+		               WHERE ap.account_id = r.account_id
+		                 AND sp2.ingredient_id = r.ingredient_id
+		                 AND ap.active_yn = 'Y'
+		               ORDER BY ap.preferred_yn DESC, ap.account_ingredient_product_id
+		               LIMIT 1)
+		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_per_person
 		FROM the_full_order.tb_account_menu_master T
 		JOIN the_full_order.tb_menu_master T2
 		ON T2.menu_id = T.menu_id

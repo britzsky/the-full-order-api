@@ -29,7 +29,15 @@ public class InventoryService {
 	}
 	public List<Map<String,Object>> movements(Map<String,Object> params) { return inventoryMapper.movements(params); }
 	public Map<String,Object> create(Map<String,Object> body) { require(body,"account_id","account_ingredient_product_id","base_unit"); inventoryMapper.insertInventory(body); return ok(body.get("inventory_balance_id")); }
-	public Map<String,Object> update(Map<String,Object> body) { require(body,"inventory_balance_id"); if(inventoryMapper.updateInventory(body)==0) throw new IllegalArgumentException("Inventory was not found."); return ok(body.get("inventory_balance_id")); }
+	@Transactional
+	public Map<String,Object> update(Map<String,Object> body) {
+		require(body,"inventory_balance_id");
+		if(inventoryMapper.updateInventory(body)==0) throw new IllegalArgumentException("Inventory was not found.");
+		if(body.get("account_ingredient_product_id")!=null && body.get("safe_stock_base_qty")!=null) {
+			inventoryMapper.updateAccountProduct(body);
+		}
+		return ok(body.get("inventory_balance_id"));
+	}
 	public Map<String,Object> delete(Map<String,Object> body) { require(body,"inventory_balance_id"); if(inventoryMapper.deleteInventory(body)==0) throw new IllegalArgumentException("Inventory was not found."); return ok(body.get("inventory_balance_id")); }
 	@Transactional public Map<String,Object> move(Map<String,Object> body) {
 		require(body,"inventory_balance_id","movement_type","quantity_delta"); Map<String,Object> current=inventoryMapper.inventoryForUpdate(body); if(current==null) throw new IllegalArgumentException("Inventory was not found.");

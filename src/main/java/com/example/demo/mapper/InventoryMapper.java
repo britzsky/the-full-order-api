@@ -11,6 +11,7 @@ public interface InventoryMapper {
 	Map<String, Object> inventoryForUpdate(Map<String, Object> paramMap);
 	int insertInventory(Map<String, Object> paramMap);
 	int updateInventory(Map<String, Object> paramMap);
+	int updateAccountProduct(Map<String, Object> paramMap);
 	int deleteInventory(Map<String, Object> paramMap);
 	List<Map<String, Object>> movements(Map<String, Object> paramMap);
 	int insertMovement(Map<String, Object> paramMap);
