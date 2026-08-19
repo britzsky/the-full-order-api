@@ -447,12 +447,13 @@
 			   T2.category_name,
 			   T3.code_name
 		  FROM the_full_order.tb_like_ingredients T
-		  JOIN the_full_order.tb_account_ingredient_master T2
-		  ON T2.ingredient_id = T.ingredient_id
-		  JOIN tb_code_storage_type T3
+		  LEFT JOIN the_full_order.tb_account_ingredient_master T2
+		  ON T2.account_id = T.account_id AND T2.ingredient_id = T.ingredient_id
+		  LEFT JOIN tb_code_storage_type T3
 		  ON T3.storage_type = T2.storage_type
 		 WHERE T.account_id = #{account_id}
 		   AND T.user_id = #{user_id}
+		   AND T.`like` = 'Y'
 	</select>
 	
 	<insert id="LikeIngredientsSave" parameterType="map">
