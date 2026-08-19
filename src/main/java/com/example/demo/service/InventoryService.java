@@ -28,15 +28,26 @@ public class InventoryService {
 		return resultList;
 	}
 	public List<Map<String,Object>> movements(Map<String,Object> params) { return inventoryMapper.movements(params); }
-	public Map<String,Object> create(Map<String,Object> body) { require(body,"account_id","account_ingredient_product_id","base_unit"); inventoryMapper.insertInventory(body); return ok(body.get("inventory_balance_id")); }
+	public Map<String,Object> create(Map<String,Object> body) { require(body,"account_id","account_ingredient_product_id","base_unit"); normalizeCurrentQuantity(body); inventoryMapper.insertInventory(body); return ok(body.get("inventory_balance_id")); }
 	@Transactional
 	public Map<String,Object> update(Map<String,Object> body) {
 		require(body,"inventory_balance_id");
+		normalizeCurrentQuantity(body);
 		if(inventoryMapper.updateInventory(body)==0) throw new IllegalArgumentException("Inventory was not found.");
 		if(body.get("account_ingredient_product_id")!=null && body.get("safe_stock_base_qty")!=null) {
 			inventoryMapper.updateAccountProduct(body);
 		}
 		return ok(body.get("inventory_balance_id"));
+	}
+	private void normalizeCurrentQuantity(Map<String,Object> body) {
+		if(body.get("current_qty")==null) return;
+		String base=body.get("base_unit")==null ? "" : body.get("base_unit").toString();
+		String current=body.get("current_unit")==null ? base : body.get("current_unit").toString();
+		BigDecimal qty=new BigDecimal(body.get("current_qty").toString());
+		if((base.equalsIgnoreCase("g") && current.equalsIgnoreCase("kg")) || (base.equalsIgnoreCase("ml") && current.equalsIgnoreCase("l"))) qty=qty.multiply(BigDecimal.valueOf(1000));
+		else if(!base.equalsIgnoreCase(current)) throw new IllegalArgumentException("current_unit is not compatible with base_unit.");
+		body.put("current_base_qty",qty);
+		body.put("current_unit",current);
 	}
 	public Map<String,Object> delete(Map<String,Object> body) { require(body,"inventory_balance_id"); if(inventoryMapper.deleteInventory(body)==0) throw new IllegalArgumentException("Inventory was not found."); return ok(body.get("inventory_balance_id")); }
 	@Transactional public Map<String,Object> move(Map<String,Object> body) {

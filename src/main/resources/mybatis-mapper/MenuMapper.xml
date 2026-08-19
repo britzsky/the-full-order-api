@@ -140,8 +140,14 @@
 		    ORDER BY ap2.preferred_yn DESC,ap2.account_ingredient_product_id LIMIT 1)
 		LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=ap.supplier_product_id
 		LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=sp.supplier_id
-		LEFT JOIN the_full_order.tb_account_inventory_balance ib
-		  ON ib.account_id=rd.account_id AND ib.account_ingredient_product_id=ap.account_ingredient_product_id
+		LEFT JOIN (
+		  SELECT b.account_id,p2.ingredient_id,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
+		  FROM the_full_order.tb_account_inventory_balance b
+		  JOIN the_full_order.tb_account_ingredient_product ap2
+		    ON ap2.account_ingredient_product_id=b.account_ingredient_product_id AND ap2.active_yn='Y'
+		  JOIN the_full_order.tb_supplier_ingredient_product p2 ON p2.supplier_product_id=ap2.supplier_product_id
+		  GROUP BY b.account_id,p2.ingredient_id
+		) ib ON ib.account_id=rd.account_id AND ib.ingredient_id=rd.ingredient_id
 		LEFT JOIN the_full_order.tb_like_ingredients li ON li.account_id=rd.account_id AND li.ingredient_id=rd.ingredient_id
 		WHERE rd.menu_id = #{menu_id}
 		<if test="account_id != null and account_id != ''">AND rd.account_id=#{account_id}</if>

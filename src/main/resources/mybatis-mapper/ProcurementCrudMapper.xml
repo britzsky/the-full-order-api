@@ -1,5 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.ProcurementCrudMapper">
+ <select id="shortages" parameterType="map" resultType="hashmap">
+  WITH menu_requirements AS (
+    SELECT r.menu_id,MAX(d.menu_name) menu_name,r.ingredient_id,
+           MAX(COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw,p.product_name)) ingredient_name,
+           SUM(r.total_required_qty) required_qty,MAX(r.base_unit) base_unit,
+           MAX(ap.account_ingredient_product_id) account_ingredient_product_id
+      FROM the_full_order.tb_account_meal_ingredient_requirement r
+      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+      JOIN the_full_order.tb_account_table_meals_detail d ON d.meal_service_id=r.meal_service_id AND d.menu_id=r.menu_id
+      JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=ms.account_id AND ap.supplier_product_id=r.supplier_product_id
+      JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=r.supplier_product_id
+      LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=ms.account_id AND ai.ingredient_id=r.ingredient_id
+     WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id}
+     GROUP BY r.menu_id,r.ingredient_id
+  ), stock AS (
+    SELECT account_ingredient_product_id,SUM(current_base_qty) current_qty
+      FROM the_full_order.tb_account_inventory_balance
+     WHERE account_id=#{account_id}
+     GROUP BY account_ingredient_product_id
+  ), compared AS (
+    SELECT mr.*,SUM(mr.required_qty) OVER(PARTITION BY mr.ingredient_id) total_required_qty,
+           COALESCE(s.current_qty,0) current_qty
+      FROM menu_requirements mr LEFT JOIN stock s ON s.account_ingredient_product_id=mr.account_ingredient_product_id
+  )
+  SELECT menu_id,menu_name,ingredient_id,ingredient_name,ROUND(required_qty,3) required_qty,
+         ROUND(total_required_qty,3) total_required_qty,ROUND(current_qty,3) current_qty,
+         ROUND(total_required_qty-current_qty,3) shortage_qty,base_unit
+    FROM compared WHERE total_required_qty&gt;current_qty
+   ORDER BY menu_name,ingredient_name
+ </select>
  <select id="analysis" parameterType="map" resultType="hashmap">SELECT ap.account_ingredient_product_id,r.ingredient_id,p.product_name,p.supplier_item_code,s.supplier_name,p.order_unit,p.base_qty,p.base_unit,ph.purchase_price,SUM(r.total_required_qty) required_base_qty,COALESCE(SUM(b.current_base_qty),0) current_base_qty,ap.safe_stock_base_qty,GREATEST(SUM(r.total_required_qty)+ap.safe_stock_base_qty-COALESCE(SUM(b.current_base_qty),0),0) shortage_base_qty,CEIL(GREATEST(SUM(r.total_required_qty)+ap.safe_stock_base_qty-COALESCE(SUM(b.current_base_qty),0),0)/NULLIF(p.base_qty,0)) suggested_order_qty FROM the_full_order.tb_account_meal_ingredient_requirement r JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=ms.account_id AND ap.supplier_product_id=r.supplier_product_id JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL LEFT JOIN the_full_order.tb_account_inventory_balance b ON b.account_id=ms.account_id AND b.account_ingredient_product_id=ap.account_ingredient_product_id WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} GROUP BY ap.account_ingredient_product_id,r.ingredient_id,p.product_name,p.supplier_item_code,s.supplier_name,p.order_unit,p.base_qty,p.base_unit,ph.purchase_price,ap.safe_stock_base_qty</select>
  <select id="carts" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_procurement_cart WHERE account_id=#{account_id}<if test="procurement_cart_id!=null and procurement_cart_id!=''"> AND procurement_cart_id=#{procurement_cart_id}</if> ORDER BY created_at DESC</select>
  <select id="cartItems" parameterType="map" resultType="hashmap">SELECT ci.*,p.product_name,p.supplier_item_code,p.order_unit,p.base_unit,s.supplier_name FROM the_full_order.tb_account_procurement_cart_item ci JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=ci.account_ingredient_product_id JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id WHERE ci.procurement_cart_id=#{procurement_cart_id} ORDER BY ci.procurement_cart_item_id</select>
