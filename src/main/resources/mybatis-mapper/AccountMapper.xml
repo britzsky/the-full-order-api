@@ -20,4 +20,36 @@
 		FROM the_full.tb_account
 		WHERE del_yn = 'N'
 	</select>
+
+	<!-- 고객사가 선택할 수 있는 전체 식사구분과 현재 선택 여부를 표시한다. -->
+	<select id="MealSlotList" parameterType="map" resultType="hashmap">
+		SELECT M.meal_slot_code,
+		       M.meal_slot_name,
+		       COALESCE(S.display_order, M.display_order) AS display_order,
+		       CASE WHEN S.account_id IS NULL THEN 'N' ELSE 'Y' END AS selected_yn
+		FROM the_full_order.tb_meal_slot_master M
+		LEFT JOIN the_full_order.tb_account_meal_slot_setting S
+		  ON S.meal_slot_code = M.meal_slot_code
+		 AND S.account_id = #{account_id}
+		WHERE M.active_yn = 'Y'
+		ORDER BY CASE WHEN S.account_id IS NULL THEN 1 ELSE 0 END,
+		         COALESCE(S.display_order, M.display_order),
+		         M.display_order
+	</select>
+
+	<!-- 저장 전에 해당 고객사의 기존 식사구분 선택값을 제거한다. -->
+	<delete id="DeleteMealSlotSetting" parameterType="map">
+		DELETE FROM the_full_order.tb_account_meal_slot_setting
+		WHERE account_id = #{account_id}
+	</delete>
+
+	<!-- 화면에서 선택한 식사구분을 고객사 설정으로 일괄 등록한다. -->
+	<insert id="InsertMealSlotSetting" parameterType="map">
+		INSERT INTO the_full_order.tb_account_meal_slot_setting
+		    (account_id, meal_slot_code, display_order, created_at, user_id)
+		VALUES
+		<foreach collection="meal_slots" item="mealSlot" separator=",">
+			(#{account_id}, #{mealSlot.meal_slot_code}, #{mealSlot.display_order}, NOW(), #{user_id})
+		</foreach>
+	</insert>
 </mapper>
