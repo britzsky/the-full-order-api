@@ -49,5 +49,9 @@ public class InventoryController {
 	@DeleteMapping("/v2/inventory") public ResponseEntity<?> delete(@RequestBody Map<String,Object>b){return execute(()->inventoryService.delete(b));}
 	@GetMapping("/v2/inventory/movements") public ResponseEntity<?> movements(@RequestParam Map<String,Object>p){return execute(()->inventoryService.movements(p));}
 	@PostMapping("/v2/inventory/movements") public ResponseEntity<?> move(@RequestBody Map<String,Object>b){return execute(()->inventoryService.move(b));}
+	/* 본사 식자재 마스터는 거래처 재고와 수명주기가 달라 별도 API로 관리한다. */
+	@GetMapping("/v2/ingredients") public ResponseEntity<?> ingredients(@RequestParam Map<String,Object>p){return execute(()->inventoryService.ingredientMasters(p));}
+	@PostMapping("/v2/ingredients") public ResponseEntity<?> createIngredient(@RequestBody Map<String,Object>b){return execute(()->inventoryService.createIngredientMaster(b));}
+	@PatchMapping("/v2/ingredients") public ResponseEntity<?> updateIngredient(@RequestBody Map<String,Object>b){return execute(()->inventoryService.updateIngredientMaster(b));}
 	private ResponseEntity<?> execute(java.util.function.Supplier<?> a){try{return ResponseEntity.ok(a.get());}catch(IllegalArgumentException e){return ResponseEntity.badRequest().body(Map.of("code",400,"message",e.getMessage()));}}
 }

@@ -42,11 +42,66 @@
     JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
     LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=b.account_id AND ai.ingredient_id=p.ingredient_id
     LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=p.ingredient_id
-    LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
+    <!-- 거래처 재고 가격은 현재 시점에 유효한 최신 가격 한 건만 사용한다. -->
+    LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.price_history_id=(
+      SELECT ph2.price_history_id FROM the_full_order.tb_supplier_ingredient_price_history ph2
+       WHERE ph2.supplier_product_id=p.supplier_product_id AND ph2.effective_from&lt;=NOW()
+         AND (ph2.effective_to IS NULL OR ph2.effective_to&gt;NOW())
+       ORDER BY ph2.effective_from DESC LIMIT 1)
     LEFT JOIN requirement_history rh ON rh.account_id=b.account_id AND rh.account_ingredient_product_id=b.account_ingredient_product_id
    WHERE b.account_id=#{account_id}<if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if>
    ORDER BY FIELD(stock_status,'RED','ORANGE','YELLOW','GREEN'),p.product_name
  </select>
+
+ <!--
+   본사 식자재 마스터 목록이다. 가격은 메뉴 마스터 원가와 동일하게 웰스토리를 우선하고,
+   없으면 현재 유효한 기준단위 가격이 가장 낮은 활성 공급상품을 사용한다.
+ -->
+ <select id="ingredientMasterList" parameterType="map" resultType="hashmap">
+  SELECT i.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
+         i.ingredient_name_raw,i.ingredient_name_std,i.category_name,i.base_unit,i.order_unit,
+         i.convert_value,i.storage_type,i.menu_usage_count,i.safe_stock_qty,i.needs_review,i.note,
+         sp.supplier_product_id,sp.product_name,sp.order_unit product_order_unit,sp.base_qty package_base_qty,
+         s.supplier_name,ph.purchase_price
+    FROM the_full_order.tb_ingredient_master i
+    LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=(
+      SELECT sp2.supplier_product_id
+        FROM the_full_order.tb_supplier_ingredient_product sp2
+        JOIN the_full_order.tb_supplier s2 ON s2.supplier_id=sp2.supplier_id
+        JOIN the_full_order.tb_supplier_ingredient_price_history ph2 ON ph2.supplier_product_id=sp2.supplier_product_id
+         AND ph2.effective_from&lt;=NOW() AND (ph2.effective_to IS NULL OR ph2.effective_to&gt;NOW())
+       WHERE sp2.ingredient_id=i.ingredient_id AND sp2.active_yn='Y' AND sp2.base_qty&gt;0 AND ph2.purchase_price&gt;0
+       ORDER BY CASE WHEN UPPER(s2.supplier_code) LIKE '%WELSTORY%' THEN 0 ELSE 1 END,
+                ph2.purchase_price/sp2.base_qty,sp2.supplier_product_id LIMIT 1)
+    LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=sp.supplier_id
+    LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.price_history_id=(
+      SELECT ph3.price_history_id FROM the_full_order.tb_supplier_ingredient_price_history ph3
+       WHERE ph3.supplier_product_id=sp.supplier_product_id AND ph3.effective_from&lt;=NOW()
+         AND (ph3.effective_to IS NULL OR ph3.effective_to&gt;NOW())
+       ORDER BY ph3.effective_from DESC LIMIT 1)
+   WHERE 1=1
+   <if test="ingredient_id!=null and ingredient_id!=''">AND i.ingredient_id=#{ingredient_id}</if>
+   ORDER BY i.category_name,ingredient_name
+ </select>
+
+ <!-- 신규 본사 식자재 마스터를 등록한다. -->
+ <insert id="insertIngredientMaster" parameterType="map">
+  INSERT INTO the_full_order.tb_ingredient_master
+   (ingredient_id,ingredient_name_raw,ingredient_name_std,category_name,base_unit,order_unit,convert_value,
+    storage_type,menu_usage_count,needs_review,note,created_at,safe_stock_qty)
+  VALUES
+   (#{ingredient_id},#{ingredient_name},#{ingredient_name},#{category_name},#{base_unit},#{order_unit},#{convert_value},
+    #{storage_type},COALESCE(#{menu_usage_count},0),COALESCE(#{needs_review},0),#{note},NOW(),COALESCE(#{safe_stock_qty},0))
+ </insert>
+
+ <!-- 메뉴/재고 원가 산정에 사용되는 본사 식자재 속성을 수정한다. -->
+ <update id="updateIngredientMaster" parameterType="map">
+  UPDATE the_full_order.tb_ingredient_master
+     SET ingredient_name_raw=#{ingredient_name},ingredient_name_std=#{ingredient_name},category_name=#{category_name},
+         base_unit=#{base_unit},order_unit=#{order_unit},convert_value=#{convert_value},storage_type=#{storage_type},
+         safe_stock_qty=COALESCE(#{safe_stock_qty},0),note=#{note},created_at=NOW()
+   WHERE ingredient_id=#{ingredient_id}
+ </update>
  <select id="inventoryForUpdate" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} FOR UPDATE</select>
  <insert id="insertInventory" parameterType="map" useGeneratedKeys="true" keyProperty="inventory_balance_id">INSERT INTO the_full_order.tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,current_unit,note,user_id)VALUES(#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),COALESCE(#{current_base_qty},0),#{base_unit},COALESCE(#{current_unit},#{base_unit}),#{note},#{user_id})</insert>
  <update id="updateInventory" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="current_unit!=null and current_unit!=''">current_unit=#{current_unit},</if><if test="location_id!=null">location_id=#{location_id},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>

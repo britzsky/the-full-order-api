@@ -52,4 +52,56 @@
 			(#{account_id}, #{mealSlot.meal_slot_code}, #{mealSlot.display_order}, NOW(), #{user_id})
 		</foreach>
 	</insert>
+
+	<!--
+		고객사 유형별 단가 계산 결과와 식사 기본 구성을 한 번에 반환한다.
+		단가 자체는 vw_account_meal_slot_budget에서 계산하여 프런트 입력 금액을 신뢰하지 않는다.
+	-->
+	<select id="MealConfiguration" parameterType="map" resultType="hashmap">
+		SELECT B.account_id,
+		       B.account_type,
+		       CASE B.account_type
+		           WHEN 1 THEN '요양원'
+		           WHEN 4 THEN '산업체'
+		           WHEN 5 THEN '학교'
+		           ELSE '미지원'
+		       END AS account_type_name,
+		       B.meal_slot_code,
+		       B.meal_slot_name,
+		       B.main_meal_count,
+		       B.budget_per_person,
+		       B.budget_source,
+		       B.budget_source_amount,
+		       B.budget_divisor,
+		       COALESCE(B.default_food_type,
+		           CASE WHEN B.meal_slot_code IN (1, 3, 4, 6, 7, 8) THEN 6 ELSE 1 END) AS default_food_type,
+		       COALESCE(B.default_meal_plan_type, 0) AS default_meal_plan_type,
+		       B.template_id,
+		       T.template_name
+		FROM the_full_order.vw_account_meal_slot_budget B
+		LEFT JOIN the_full_order.tb_meal_composition_template T
+		  ON T.template_id = B.template_id
+		WHERE B.account_id = #{account_id}
+		ORDER BY B.meal_slot_code
+	</select>
+
+	<!-- FK CASCADE에 의존하지 않고 저장 순서를 명확하게 유지하기 위해 프로필을 먼저 삭제한다. -->
+	<delete id="DeleteMealSlotProfile" parameterType="map">
+		DELETE FROM the_full_order.tb_account_meal_slot_profile
+		WHERE account_id = #{account_id}
+	</delete>
+
+	<!-- 화면에서 선택한 식사구분마다 자동 식단 생성의 기본 분류와 식단유형을 저장한다. -->
+	<insert id="InsertMealSlotProfile" parameterType="map">
+		INSERT INTO the_full_order.tb_account_meal_slot_profile
+		    (account_id, meal_slot_code, default_food_type, default_meal_plan_type,
+		     template_id, created_at, user_id)
+		VALUES
+		<foreach collection="meal_slots" item="mealSlot" separator=",">
+			(#{account_id}, #{mealSlot.meal_slot_code},
+			 COALESCE(#{mealSlot.default_food_type}, 1),
+			 COALESCE(#{mealSlot.default_meal_plan_type}, 0),
+			 #{mealSlot.template_id}, NOW(), #{user_id})
+		</foreach>
+	</insert>
 </mapper>

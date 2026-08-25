@@ -19,7 +19,36 @@
 			   T.menu_type,
 			   T.menu_gubun,
 		       T.meal_plan_type,
-		       T.calories_per_serving
+		       T.calories_per_serving,
+		       (SELECT CASE WHEN COUNT(*) &gt; 0 AND SUM(CASE
+		           WHEN rd.qty_num &gt; 0 AND sp.base_qty &gt; 0 AND ph.purchase_price &gt; 0
+		            AND (LOWER(COALESCE(rd.qty_unit,''))=LOWER(COALESCE(im.base_unit,sp.base_unit,''))
+		              OR (LOWER(rd.qty_unit)='kg' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='g')
+		              OR (LOWER(rd.qty_unit)='g' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='kg')
+		              OR (LOWER(rd.qty_unit)='l' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='ml')
+		              OR (LOWER(rd.qty_unit)='ml' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='l'))
+		           THEN 1 ELSE 0 END)=COUNT(*)
+		         THEN ROUND(SUM((CASE
+		           WHEN LOWER(rd.qty_unit)='kg' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='g' THEN rd.qty_num*1000
+		           WHEN LOWER(rd.qty_unit)='g' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='kg' THEN rd.qty_num/1000
+		           WHEN LOWER(rd.qty_unit)='l' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='ml' THEN rd.qty_num*1000
+		           WHEN LOWER(rd.qty_unit)='ml' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='l' THEN rd.qty_num/1000
+		           ELSE rd.qty_num END)*ph.purchase_price/NULLIF(sp.base_qty,0)),4)
+		         ELSE NULL END
+		          FROM the_full_order.tb_recipe_detail rd
+		          LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=(
+		            SELECT sp2.supplier_product_id
+		              FROM the_full_order.tb_supplier_ingredient_product sp2
+		              JOIN the_full_order.tb_supplier s2 ON s2.supplier_id=sp2.supplier_id
+		              JOIN the_full_order.tb_supplier_ingredient_price_history ph2 ON ph2.supplier_product_id=sp2.supplier_product_id
+		               AND ph2.effective_from&lt;=NOW() AND (ph2.effective_to IS NULL OR ph2.effective_to&gt;NOW())
+		             WHERE sp2.ingredient_id=rd.ingredient_id AND sp2.active_yn='Y' AND sp2.base_qty&gt;0 AND ph2.purchase_price&gt;0
+		             ORDER BY CASE WHEN UPPER(s2.supplier_code) LIKE '%WELSTORY%' THEN 0 ELSE 1 END,
+		                      ph2.purchase_price/sp2.base_qty,sp2.supplier_product_id LIMIT 1)
+		          LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=sp.supplier_product_id
+		           AND ph.effective_from&lt;=NOW() AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW())
+		         WHERE rd.menu_id=T.menu_id) AS menu_cost_per_person
 		FROM the_full_order.tb_menu_master T
 		WHERE 1 = 1
 		<if test="meal_plan_type != null and meal_plan_type != ''">
@@ -379,7 +408,28 @@
 		                 AND ap.active_yn = 'Y'
 		               ORDER BY ap.preferred_yn DESC, ap.account_ingredient_product_id
 		               LIMIT 1)
-		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_per_person
+		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_per_person,
+		       (SELECT CASE WHEN COUNT(*) &gt; 0 AND SUM(CASE
+		           WHEN r.qty_per_person &gt; 0 AND sp.base_qty &gt; 0 AND (SELECT ph.purchase_price
+		             FROM the_full_order.tb_supplier_ingredient_price_history ph
+		            WHERE ph.supplier_product_id = sp.supplier_product_id
+		              AND ph.effective_from &lt;= NOW()
+		              AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
+		            ORDER BY ph.effective_from DESC LIMIT 1) &gt; 0 THEN 1 ELSE 0 END) = COUNT(*)
+		         THEN 1 ELSE 0 END
+		          FROM the_full_order.tb_account_recipe_detail r
+		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp
+		            ON sp.supplier_product_id = (
+		              SELECT ap.supplier_product_id
+		                FROM the_full_order.tb_account_ingredient_product ap
+		                JOIN the_full_order.tb_supplier_ingredient_product sp2
+		                  ON sp2.supplier_product_id = ap.supplier_product_id
+		               WHERE ap.account_id = r.account_id
+		                 AND sp2.ingredient_id = r.ingredient_id
+		                 AND ap.active_yn = 'Y'
+		               ORDER BY ap.preferred_yn DESC, ap.account_ingredient_product_id
+		               LIMIT 1)
+		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_complete
 		FROM the_full_order.tb_account_menu_master T
 		JOIN the_full_order.tb_menu_master T2
 		ON T2.menu_id = T.menu_id

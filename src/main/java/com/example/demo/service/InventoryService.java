@@ -28,6 +28,33 @@ public class InventoryService {
 		return resultList;
 	}
 	public List<Map<String,Object>> movements(Map<String,Object> params) { return inventoryMapper.movements(params); }
+
+	// 거래처별 재고와 분리된 본사 식자재 마스터를 조회한다.
+	public List<Map<String,Object>> ingredientMasters(Map<String,Object> params) {
+		return inventoryMapper.ingredientMasterList(params);
+	}
+
+	// 본사 식자재의 기준 단위와 환산값은 메뉴 원가 계산의 기준이므로 저장 전에 필수값을 검증한다.
+	public Map<String,Object> createIngredientMaster(Map<String,Object> body) {
+		require(body,"ingredient_id","ingredient_name","base_unit");
+		normalizeIngredientMaster(body);
+		inventoryMapper.insertIngredientMaster(body);
+		return ok(body.get("ingredient_id"));
+	}
+
+	public Map<String,Object> updateIngredientMaster(Map<String,Object> body) {
+		require(body,"ingredient_id","ingredient_name","base_unit");
+		normalizeIngredientMaster(body);
+		if(inventoryMapper.updateIngredientMaster(body)==0) throw new IllegalArgumentException("Ingredient master was not found.");
+		return ok(body.get("ingredient_id"));
+	}
+
+	private void normalizeIngredientMaster(Map<String,Object> body) {
+		Object convert=body.get("convert_value");
+		BigDecimal value=convert==null||convert.toString().isBlank()?BigDecimal.ONE:new BigDecimal(convert.toString());
+		if(value.signum()<=0) throw new IllegalArgumentException("convert_value must be greater than zero.");
+		body.put("convert_value",value);
+	}
 	public Map<String,Object> create(Map<String,Object> body) { require(body,"account_id","account_ingredient_product_id","base_unit"); normalizeCurrentQuantity(body); inventoryMapper.insertInventory(body); return ok(body.get("inventory_balance_id")); }
 	@Transactional
 	public Map<String,Object> update(Map<String,Object> body) {

@@ -21,12 +21,15 @@
 
     <select id="products" parameterType="map" resultType="hashmap">
         SELECT p.*,s.supplier_code,s.supplier_name,i.ingredient_name_std,
-               ph.purchase_price current_price
+               (SELECT ph.purchase_price
+                  FROM the_full_order.tb_supplier_ingredient_price_history ph
+                 WHERE ph.supplier_product_id=p.supplier_product_id
+                   AND ph.effective_from&lt;=NOW()
+                   AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW())
+                 ORDER BY ph.effective_from DESC LIMIT 1) current_price
         FROM the_full_order.tb_supplier_ingredient_product p
         JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
         JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
-        LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph
-          ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
         WHERE 1=1
         <if test="supplier_product_id != null and supplier_product_id != ''">AND p.supplier_product_id=#{supplier_product_id}</if>
         <if test="supplier_id != null and supplier_id != ''">AND p.supplier_id=#{supplier_id}</if>

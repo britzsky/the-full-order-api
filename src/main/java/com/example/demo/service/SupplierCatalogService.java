@@ -44,6 +44,21 @@ public class SupplierCatalogService {
         return result(body.get("supplier_product_id"));
     }
 
+    /**
+     * 공급상품과 최초 가격은 한 단위로 저장한다.
+     * 가격 저장이 실패하면 상품도 롤백하여 가격 없는 반쪽 상품이 남지 않게 한다.
+     */
+    @Transactional
+    public Map<String, Object> createProductWithPrice(Map<String, Object> body) {
+        require(body, "supplier_id", "ingredient_id", "supplier_item_code", "product_name",
+                "order_unit", "package_qty", "package_unit", "base_qty", "base_unit",
+                "purchase_price", "effective_from");
+        mapper.insertProduct(body);
+        mapper.closeCurrentPrice(body);
+        mapper.insertPrice(body);
+        return result(body.get("supplier_product_id"));
+    }
+
     public Map<String, Object> updateProduct(Map<String, Object> body) {
         require(body, "supplier_product_id");
         return changed(mapper.updateProduct(body), body.get("supplier_product_id"));
