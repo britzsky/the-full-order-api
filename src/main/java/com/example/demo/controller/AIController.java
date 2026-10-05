@@ -40,6 +40,9 @@ public class AIController {
 		this.objectMapper = objectMapper;
 	}
 
+	/*
+	 * part : AI 레시피 method : RecipeGenerate comment : 메뉴명과 식재료를 OpenAI에 전달해 단체급식용 레시피(JSON)를 생성
+	 */
 	@PostMapping("/AI/RecipeGenerate")
 	public ResponseEntity<Map<String, Object>> RecipeGenerate(@RequestBody Map<String, Object> payload) {
 		if (openAiApiKey == null || openAiApiKey.isBlank()) {

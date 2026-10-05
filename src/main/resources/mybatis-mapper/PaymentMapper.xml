@@ -27,7 +27,7 @@
 			   currency,
 			   is_active,
 			   DATE_FORMAT(reg_dt, '%Y-%m-%d') as reg_dt
-		WHERE the_full_order.tb_thefull_plan
+		FROM the_full_order.tb_thefull_plan
 	</select>
 	
 	<select id="SubscriptionStatus" parameterType="map" resultType="hashmap">

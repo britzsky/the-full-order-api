@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.AnalyticsMapper">
+    <insert id="upsertSearchSession" parameterType="map">
+        INSERT INTO the_full_order.tb_search_session
+            (search_session_id, account_id, user_id_hash, channel, started_at, last_activity_at)
+        VALUES
+            (#{search_session_id}, NULLIF(#{account_id}, ''), NULLIF(#{user_id_hash}, ''), #{channel}, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+            last_activity_at = NOW(),
+            account_id = COALESCE(NULLIF(VALUES(account_id), ''), account_id),
+            user_id_hash = COALESCE(NULLIF(VALUES(user_id_hash), ''), user_id_hash)
+    </insert>
+
+    <insert id="insertSearchEvent" parameterType="map" useGeneratedKeys="true" keyProperty="search_event_id">
+        INSERT INTO the_full_order.tb_search_event
+            (search_session_id, account_id, query_raw, query_normalized, intent_type, result_count, filters_json, searched_at)
+        VALUES
+            (#{search_session_id}, NULLIF(#{account_id}, ''), #{query_raw}, #{query_normalized},
+             #{intent_type}, COALESCE(#{result_count}, 0), CAST(NULLIF(#{filters_json}, '') AS JSON), NOW())
+    </insert>
+
+    <insert id="insertSearchAction" parameterType="map">
+        INSERT INTO the_full_order.tb_search_action
+            (search_event_id, search_session_id, account_id, entity_type, entity_id,
+             action_type, screen, position_no, context_json, occurred_at)
+        VALUES
+            (#{search_event_id}, #{search_session_id}, NULLIF(#{account_id}, ''), NULLIF(#{entity_type}, ''),
+             NULLIF(#{entity_id}, ''), #{action_type}, NULLIF(#{screen}, ''), #{position_no},
+             CAST(NULLIF(#{context_json}, '') AS JSON), NOW())
+    </insert>
+
+    <select id="popularSearches" parameterType="map" resultType="hashmap">
+        SELECT query_normalized AS query, COUNT(*) AS search_count,
+               COUNT(DISTINCT search_session_id) AS session_count,
+               MAX(searched_at) AS last_searched_at
+          FROM the_full_order.tb_search_event
+         WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+           AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
+         GROUP BY query_normalized
+         ORDER BY search_count DESC, last_searched_at DESC
+         LIMIT #{limit}
+    </select>
+
+    <select id="searchSummary" parameterType="map" resultType="hashmap">
+        SELECT COUNT(*) AS total_searches, COUNT(DISTINCT search_session_id) AS total_sessions,
+               SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) AS no_result_searches,
+               ROUND(100 * SUM(CASE WHEN result_count &gt; 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS result_rate
+          FROM the_full_order.tb_search_event
+         WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+           AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
+    </select>
+
+    <select id="noResultSearches" parameterType="map" resultType="hashmap">
+        SELECT query_normalized AS query, COUNT(*) AS search_count, MAX(searched_at) AS last_searched_at
+          FROM the_full_order.tb_search_event
+         WHERE result_count = 0 AND searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+           AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
+         GROUP BY query_normalized ORDER BY search_count DESC, last_searched_at DESC LIMIT #{limit}
+    </select>
+
+    <select id="intentSummary" parameterType="map" resultType="hashmap">
+        SELECT intent_type, COUNT(*) AS search_count
+          FROM the_full_order.tb_search_event
+         WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+           AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
+         GROUP BY intent_type ORDER BY search_count DESC
+    </select>
+
+    <insert id="insertRecommendationEvent" parameterType="map">
+        INSERT INTO the_full_order.tb_recommendation_event
+            (recommendation_id, search_session_id, account_id, user_id_hash,
+             recommendation_type, request_context_json, model_version, generated_at)
+        VALUES
+            (#{recommendation_id}, NULLIF(#{search_session_id}, ''), NULLIF(#{account_id}, ''),
+             NULLIF(#{user_id_hash}, ''), #{recommendation_type},
+             CAST(NULLIF(#{request_context_json}, '') AS JSON), #{model_version}, NOW())
+    </insert>
+
+    <insert id="insertRecommendationItem" parameterType="map">
+        INSERT INTO the_full_order.tb_recommendation_item
+            (recommendation_id, entity_type, entity_id, rank_no, score, reason_json)
+        VALUES
+            (#{recommendation_id}, #{entity_type}, #{entity_id}, #{rank_no}, #{score},
+             CAST(NULLIF(#{reason_json}, '') AS JSON))
+    </insert>
+
+    <update id="updateRecommendationFeedback" parameterType="map">
+        UPDATE the_full_order.tb_recommendation_item
+           SET accepted_yn = #{accepted_yn}, feedback_code = NULLIF(#{feedback_code}, ''),
+               feedback_text = NULLIF(#{feedback_text}, ''), feedback_at = NOW()
+         WHERE recommendation_id = #{recommendation_id} AND entity_type = #{entity_type} AND entity_id = #{entity_id}
+    </update>
+
+    <select id="hygieneGuides" parameterType="map" resultType="hashmap">
+        SELECT guide_id, category, situation_code, title, risk_level, guidance_text,
+               source_name, source_url, effective_from, effective_to
+          FROM the_full_order.tb_hygiene_guide
+         WHERE approved_yn = 'Y'
+           AND effective_from &lt;= CURRENT_DATE
+           AND (effective_to IS NULL OR effective_to &gt;= CURRENT_DATE)
+           AND (NULLIF(#{category}, '') IS NULL OR category = #{category})
+           AND (NULLIF(#{situation_code}, '') IS NULL OR situation_code = #{situation_code})
+         ORDER BY risk_level DESC, effective_from DESC
+    </select>
+
+    <insert id="insertHygieneIncident" parameterType="map">
+        INSERT INTO the_full_order.tb_hygiene_incident
+            (incident_id, account_id, location_id, incident_type, measured_value,
+             measurement_unit, situation_text, risk_level, status, occurred_at, user_id)
+        VALUES
+            (#{incident_id}, #{account_id}, NULLIF(#{location_id}, ''), #{incident_type}, #{measured_value},
+             NULLIF(#{measurement_unit}, ''), NULLIF(#{situation_text}, ''), NULLIF(#{risk_level}, ''),
+             COALESCE(NULLIF(#{status}, ''), 'OPEN'), COALESCE(#{occurred_at}, NOW()), NULLIF(#{user_id}, ''))
+    </insert>
+
+    <insert id="insertHygieneAction" parameterType="map" useGeneratedKeys="true" keyProperty="hygiene_action_id">
+        INSERT INTO the_full_order.tb_hygiene_action
+            (incident_id, guide_id, recommended_action, actual_action, completed_yn, confirmed_by, completed_at, user_id)
+        VALUES
+            (#{incident_id}, #{guide_id}, #{recommended_action}, NULLIF(#{actual_action}, ''),
+             COALESCE(NULLIF(#{completed_yn}, ''), 'N'), NULLIF(#{confirmed_by}, ''),
+             CASE WHEN #{completed_yn} = 'Y' THEN NOW() ELSE NULL END, NULLIF(#{user_id}, ''))
+    </insert>
+
+    <update id="completeHygieneAction" parameterType="map">
+        UPDATE the_full_order.tb_hygiene_action
+           SET actual_action = NULLIF(#{actual_action}, ''), completed_yn = #{completed_yn},
+               confirmed_by = NULLIF(#{confirmed_by}, ''),
+               completed_at = CASE WHEN #{completed_yn} = 'Y' THEN NOW() ELSE NULL END
+         WHERE hygiene_action_id = #{hygiene_action_id}
+    </update>
+</mapper>

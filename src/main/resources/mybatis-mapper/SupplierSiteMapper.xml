@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.SupplierSiteMapper">
+  <!-- 공급사 사업장 마스터: 사용 여부(use_yn)는 사람이 정하므로 동기화로 덮어쓰지 않는다. -->
+  <insert id="upsertMasterSite" parameterType="map">
+    INSERT INTO the_full_order.tb_supplier_site
+      (supplier_id,external_site_code,external_site_name,representative_site_code,representative_site_name,
+       center_code,center_name,price_context_code,provider_attributes,provider_listed_yn,last_seen_at,user_id)
+    VALUES
+      (#{supplier_id},#{external_site_code},#{external_site_name},#{representative_site_code},#{representative_site_name},
+       #{center_code},#{center_name},#{price_context_code},#{provider_attributes},'Y',NOW(),#{user_id})
+    ON DUPLICATE KEY UPDATE external_site_name=VALUES(external_site_name),representative_site_code=VALUES(representative_site_code),
+      representative_site_name=VALUES(representative_site_name),center_code=VALUES(center_code),center_name=VALUES(center_name),
+      price_context_code=VALUES(price_context_code),provider_attributes=VALUES(provider_attributes),provider_listed_yn='Y',
+      last_seen_at=NOW(),user_id=VALUES(user_id)
+  </insert>
+  <update id="markUnlisted" parameterType="map">
+    UPDATE the_full_order.tb_supplier_site SET provider_listed_yn='N'
+     WHERE supplier_id=#{supplier_id} AND provider_listed_yn='Y'
+       AND external_site_code NOT IN <foreach collection="codes" item="code" open="(" separator="," close=")">#{code}</foreach>
+  </update>
+  <select id="masterSites" parameterType="map" resultType="hashmap">
+    SELECT m.supplier_site_id,m.supplier_id,s.supplier_code,s.supplier_name,m.external_site_code,m.external_site_name,
+           m.representative_site_code,m.representative_site_name,m.center_code,m.center_name,m.use_yn,m.provider_listed_yn,
+           m.first_seen_at,m.last_seen_at,
+           (SELECT GROUP_CONCAT(ss.account_id ORDER BY ss.account_id) FROM the_full_order.tb_supplier_account_site ss
+             WHERE ss.supplier_id=m.supplier_id AND ss.external_site_code=m.external_site_code AND ss.active_yn='Y') assigned_account_ids
+      FROM the_full_order.tb_supplier_site m
+      JOIN the_full_order.tb_supplier s ON s.supplier_id=m.supplier_id
+     WHERE 1=1
+     <if test="supplier_code!=null and supplier_code!=''">AND s.supplier_code=#{supplier_code}</if>
+     ORDER BY s.supplier_code,m.external_site_name,m.external_site_code
+  </select>
+  <select id="masterSite" parameterType="map" resultType="hashmap">
+    SELECT supplier_site_id,external_site_code,external_site_name,use_yn
+      FROM the_full_order.tb_supplier_site WHERE supplier_id=#{supplier_id} AND external_site_code=#{external_site_code}
+  </select>
+  <update id="updateMasterUse" parameterType="map">
+    UPDATE the_full_order.tb_supplier_site SET use_yn=#{use_yn},user_id=#{user_id} WHERE supplier_site_id=#{supplier_site_id}
+  </update>
+  <select id="activeMappings" resultType="hashmap">
+    SELECT ss.supplier_account_site_id,ss.account_id,s.supplier_id,s.supplier_code,s.supplier_name,ss.external_site_code,
+           ss.external_site_name,ss.center_code,ss.mod_at,ss.created_at,ss.user_id
+      FROM the_full_order.tb_supplier_account_site ss
+      JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
+     WHERE ss.active_yn='Y'
+     ORDER BY ss.account_id,s.supplier_code
+  </select>
+  <!-- 같은 거래처·공급사 매핑을 동시에 바꾸지 못하도록 잠근다. -->
+  <select id="lockAccountMappings" parameterType="map" resultType="hashmap">
+    SELECT supplier_account_site_id,external_site_code,external_site_name,active_yn
+      FROM the_full_order.tb_supplier_account_site
+     WHERE account_id=#{account_id} AND supplier_id=#{supplier_id}
+       FOR UPDATE
+  </select>
+  <select id="otherAccountsUsing" parameterType="map" resultType="string">
+    SELECT account_id FROM the_full_order.tb_supplier_account_site
+     WHERE supplier_id=#{supplier_id} AND external_site_code=#{external_site_code} AND active_yn='Y' AND account_id&lt;&gt;#{account_id}
+     ORDER BY account_id
+  </select>
+  <update id="deactivateMapping" parameterType="map">
+    UPDATE the_full_order.tb_supplier_account_site SET active_yn='N',user_id=#{user_id}
+     WHERE supplier_account_site_id=#{supplier_account_site_id} AND active_yn='Y'
+  </update>
+  <update id="activateMapping" parameterType="map">
+    UPDATE the_full_order.tb_supplier_account_site ss
+      JOIN the_full_order.tb_supplier_site m ON m.supplier_id=ss.supplier_id AND m.external_site_code=ss.external_site_code
+       SET ss.active_yn='Y',ss.external_site_name=m.external_site_name,ss.representative_site_code=m.representative_site_code,
+           ss.center_code=m.center_code,ss.price_context_code=COALESCE(m.price_context_code,ss.price_context_code),
+           ss.provider_attributes=m.provider_attributes,ss.last_synced_at=NOW(),ss.user_id=#{user_id}
+     WHERE ss.account_id=#{account_id} AND ss.supplier_id=#{supplier_id} AND ss.external_site_code=#{external_site_code}
+  </update>
+  <insert id="insertMapping" parameterType="map">
+    INSERT INTO the_full_order.tb_supplier_account_site
+      (account_id,supplier_id,external_site_code,external_site_name,representative_site_code,center_code,
+       price_context_code,provider_attributes,active_yn,last_synced_at,user_id)
+    SELECT #{account_id},m.supplier_id,m.external_site_code,m.external_site_name,m.representative_site_code,m.center_code,
+           m.price_context_code,m.provider_attributes,'Y',NOW(),#{user_id}
+      FROM the_full_order.tb_supplier_site m
+     WHERE m.supplier_id=#{supplier_id} AND m.external_site_code=#{external_site_code}
+  </insert>
+  <select id="mappingId" parameterType="map" resultType="long">
+    SELECT supplier_account_site_id FROM the_full_order.tb_supplier_account_site
+     WHERE account_id=#{account_id} AND supplier_id=#{supplier_id} AND external_site_code=#{external_site_code}
+  </select>
+</mapper>

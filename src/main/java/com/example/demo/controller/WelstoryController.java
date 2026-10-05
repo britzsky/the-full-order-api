@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/Order/Welstory")
-public class WelstoryController { 
+public class WelstoryController {
 
 	private final WelstoryItemLookupService service;
 	private final ObjectMapper objectMapper;
@@ -34,24 +34,37 @@ public class WelstoryController {
 		this.webSocketService = webSocketService;
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : webSocketStatus comment : 웰스토리 WebSocket 연결 상태 조회
+	 */
 	@GetMapping("/WebSocketStatus")
 	public Map<String, Object> webSocketStatus() {
-		return Map.of("enabled", webSocketService.isEnabled(), "connected", webSocketService.isConnected(),
-				"lastError", webSocketService.getLastError());
+		return Map.of("enabled", webSocketService.isEnabled(), "connected", webSocketService.isConnected(), "lastError",
+				webSocketService.getLastError());
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : allItemPrice comment : 전체 품목 단가 조회 (연도·순기 기준)
+	 */
 	@PostMapping("/AllItemPrice")
 	public ResponseEntity<JsonNode> allItemPrice(@RequestBody JsonNode request) {
 		return execute("/fdapi/service/payer-allitem-price", request, validatePricePeriod(request, 10000, false));
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : changedItemPrice comment : 변경 품목 단가 조회 (요청일자 기준)
+	 */
 	@PostMapping("/ChangedItemPrice")
 	public ResponseEntity<JsonNode> changedItemPrice(@RequestBody JsonNode request) {
 		String error = validatePricePeriod(request, 10000, false);
-		if (error == null) error = requireDate(body(request), "reqDate", "요청일자");
+		if (error == null)
+			error = requireDate(body(request), "reqDate", "요청일자");
 		return execute("/fdapi/service/payer-chgitem-price", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : soldToItemPrice comment : 사업장별 지정 품목 단가 조회 (품목코드 최대 2000개)
+	 */
 	@PostMapping("/SoldToItemPrice")
 	public ResponseEntity<JsonNode> soldToItemPrice(@RequestBody JsonNode request) {
 		String error = validatePricePeriod(request, 2000, true);
@@ -62,49 +75,76 @@ public class WelstoryController {
 		return execute("/fdapi/service/payer-soldto-item-price", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : emergencyChangedItem comment : 긴급 변경 품목 조회
+	 */
 	@PostMapping("/EmergencyChangedItem")
 	public ResponseEntity<JsonNode> emergencyChangedItem(@RequestBody JsonNode request) {
 		String error = validatePaging(header(request), 10000);
-		if (error == null) error = requireText(body(request), "emrSeq", "긴급순번", 0);
-		if (error == null) error = requireText(body(request), "msgKey", "알람메시지Key", 0);
+		if (error == null)
+			error = requireText(body(request), "emrSeq", "긴급순번", 0);
+		if (error == null)
+			error = requireText(body(request), "msgKey", "알람메시지Key", 0);
 		return execute("/fdapi/service/payer-emr-chgitem", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : soldToList comment : 대표 사업장(soldTo) 목록 조회
+	 */
 	@PostMapping("/SoldToList")
 	public ResponseEntity<JsonNode> soldToList(@RequestBody JsonNode request) {
 		return execute("/fdapi/service/payer-rep-soldto", request, validatePaging(header(request), 10000));
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : orderTransaction comment : 주문 전송 (신규 N / 수정 U)
+	 */
 	@PostMapping("/OrderTransaction")
 	public ResponseEntity<JsonNode> orderTransaction(@RequestBody JsonNode request) {
 		return execute("/fdapi/service/payer-soldto-order", request, validateOrder(request));
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : orderList comment : 주문 내역 조회 (사업장·입고일자 기준)
+	 */
 	@PostMapping("/OrderList")
 	public ResponseEntity<JsonNode> orderList(@RequestBody JsonNode request) {
 		JsonNode header = header(request);
 		String error = requireText(header, "soldTo", "사업장코드", 10);
-		if (error == null) error = requireDate(header, "reqDeliveryDate", "입고일자");
+		if (error == null)
+			error = requireDate(header, "reqDeliveryDate", "입고일자");
 		return execute("/fdapi/service/payer-order-list", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : realtimeItem comment : 실시간 품목 정보 조회 (사업장·품목·입고일자 기준)
+	 */
 	@PostMapping("/RealtimeItem")
 	public ResponseEntity<JsonNode> realtimeItem(@RequestBody JsonNode request) {
 		JsonNode header = header(request);
 		String error = requireText(header, "soldTo", "사업장코드", 10);
-		if (error == null) error = requireText(header, "itemCode", "품목코드", 18);
-		if (error == null) error = requireDate(header, "reqDeliveryDate", "입고일자");
+		if (error == null)
+			error = requireText(header, "itemCode", "품목코드", 18);
+		if (error == null)
+			error = requireDate(header, "reqDeliveryDate", "입고일자");
 		return execute("/fdapi/service/payer-realtime-item", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : receiveDetail comment : 입고 상세 조회
+	 */
 	@PostMapping("/ReceiveDetail")
 	public ResponseEntity<JsonNode> receiveDetail(@RequestBody JsonNode request) {
 		JsonNode header = header(request);
 		String error = requireText(header, "soldTo", "사업장코드", 10);
-		if (error == null) error = requireDate(header, "reqDeliveryDate", "입고일자");
+		if (error == null)
+			error = requireDate(header, "reqDeliveryDate", "입고일자");
 		return execute("/fdapi/service/payer-receive-detail", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : situationDetail comment : 입고 상황(결품·변경 등) 상세 조회
+	 */
 	@PostMapping("/SituationDetail")
 	public ResponseEntity<JsonNode> situationDetail(@RequestBody JsonNode request) {
 		JsonNode header = header(request);
@@ -112,18 +152,25 @@ public class WelstoryController {
 		if (error == null && text(header, "deliDateFrom").isEmpty() && text(header, "crDateFrom").isEmpty()) {
 			error = "입고일자 From 또는 상황생성일자 From 중 하나는 필수입니다.";
 		}
-		for (String field : new String[] {"deliDateFrom", "deliDateTo", "crDateFrom", "crDateTo"}) {
-			if (error == null && !text(header, field).isEmpty()) error = requireDate(header, field, field);
+		for (String field : new String[] { "deliDateFrom", "deliDateTo", "crDateFrom", "crDateTo" }) {
+			if (error == null && !text(header, field).isEmpty())
+				error = requireDate(header, field, field);
 		}
 		return execute("/fdapi/service/payer-situation-detail", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : alarmResponse comment : 알람 메시지 응답 처리
+	 */
 	@PostMapping("/AlarmResponse")
 	public ResponseEntity<JsonNode> alarmResponse(@RequestBody JsonNode request) {
 		return execute("/fdapi/service/payer-alarm-response", request,
 				requireText(header(request), "msgKey", "메시지Key", 0));
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : unansweredAlarmList comment : 미응답 알람 목록 조회
+	 */
 	@PostMapping("/UnansweredAlarmList")
 	public ResponseEntity<JsonNode> unansweredAlarmList(@RequestBody JsonNode request) {
 		String type = text(header(request), "type");
@@ -131,6 +178,9 @@ public class WelstoryController {
 		return execute("/fdapi/service/payer-nores-list", request, error);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : revokeToken comment : 설정된 웰스토리 API 토큰 폐기
+	 */
 	@PostMapping("/RevokeToken")
 	public ResponseEntity<JsonNode> revokeToken() {
 		try {
@@ -141,11 +191,11 @@ public class WelstoryController {
 	}
 
 	private ResponseEntity<JsonNode> execute(String path, JsonNode request, String validationError) {
-		if (validationError != null) return ResponseEntity.badRequest().body(error("E4000", validationError));
+		if (validationError != null)
+			return ResponseEntity.badRequest().body(error("E4000", validationError));
 		try {
 			JsonNode result = service.call(path, request);
-			return result == null
-					? ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error("E5020", "웰스토리 응답이 없습니다."))
+			return result == null ? ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error("E5020", "웰스토리 응답이 없습니다."))
 					: ResponseEntity.ok(result);
 		} catch (Exception exception) {
 			return failure(exception);
@@ -168,44 +218,63 @@ public class WelstoryController {
 	private String validatePricePeriod(JsonNode request, int maxPageRows, boolean soldToRequired) {
 		String error = validatePaging(header(request), maxPageRows);
 		JsonNode body = body(request);
-		if (error == null) error = requireText(body, "periodGroupYear", "연도", 4);
-		if (error == null) error = requireText(body, "periodGroup", "순기", 2);
-		if (error == null && soldToRequired) error = requireText(body, "soldTo", "사업장코드", 10);
+		if (error == null)
+			error = requireText(body, "periodGroupYear", "연도", 4);
+		if (error == null)
+			error = requireText(body, "periodGroup", "순기", 2);
+		if (error == null && soldToRequired)
+			error = requireText(body, "soldTo", "사업장코드", 10);
 		return error;
 	}
 
 	private String validatePaging(JsonNode header, int maxPageRows) {
-		if (!header.isObject()) return "dataHeader가 필요합니다.";
+		if (!header.isObject())
+			return "dataHeader가 필요합니다.";
 		int pageRow = header.path("pageRow").asInt(0);
-		if (pageRow < 1 || pageRow > maxPageRows) return "pageRow는 1~" + maxPageRows + " 범위여야 합니다.";
+		if (pageRow < 1 || pageRow > maxPageRows)
+			return "pageRow는 1~" + maxPageRows + " 범위여야 합니다.";
 		String contYn = text(header, "contYn");
-		if (!contYn.matches("Y|N")) return "contYn은 Y 또는 N이어야 합니다.";
-		if ("Y".equals(contYn) && text(header, "nextKey").isEmpty()) return "다음 페이지 조회 시 nextKey가 필요합니다.";
+		if (!contYn.matches("Y|N"))
+			return "contYn은 Y 또는 N이어야 합니다.";
 		return null;
 	}
 
 	private String validateOrder(JsonNode request) {
 		JsonNode requestHeader = header(request);
 		String error = requireText(requestHeader, "clientOrd", "주문번호", 20);
-		if (error == null) error = requireText(requestHeader, "soldTo", "사업장코드", 8);
-		if (error == null) error = requireDate(requestHeader, "reqDeliveryDate", "입고일자");
+		if (error == null)
+			error = requireText(requestHeader, "soldTo", "사업장코드", 8);
+		if (error == null)
+			error = requireDate(requestHeader, "reqDeliveryDate", "입고일자");
 		String orderStatus = text(requestHeader, "ordStatus");
-		if (error == null && !orderStatus.matches("N|U")) error = "ordStatus는 N 또는 U여야 합니다.";
+		if (error == null && !orderStatus.matches("N|U"))
+			error = "ordStatus는 N 또는 U여야 합니다.";
 		JsonNode details = body(request).path("ordDetail");
-		if (error == null && (!details.isArray() || details.isEmpty())) error = "ordDetail은 한 건 이상 필요합니다.";
-		if (error != null) return error;
+		if (error == null && (!details.isArray() || details.isEmpty()))
+			error = "ordDetail은 한 건 이상 필요합니다.";
+		if (error != null)
+			return error;
 
 		for (JsonNode detail : details) {
-			if ((error = requireText(detail, "clientOrd", "상세 주문번호", 20)) != null) return error;
-			if (!text(detail, "clientOrd").equals(text(requestHeader, "clientOrd"))) return "상세 주문번호는 헤더 주문번호와 같아야 합니다.";
-			if ((error = requireText(detail, "clientOrdItem", "주문 일련번호", 6)) != null) return error;
-			if ((error = requireText(detail, "itemCode", "품목코드", 18)) != null) return error;
-			if ((error = requireText(detail, "ordQty", "주문수량", 0)) != null) return error;
-			if ((error = requireDate(detail, "itemDeliveryDate", "품목납품일")) != null) return error;
-			if (!text(detail, "itemDeliveryDate").equals(text(requestHeader, "reqDeliveryDate"))) return "품목납품일은 헤더 입고일자와 같아야 합니다.";
+			if ((error = requireText(detail, "clientOrd", "상세 주문번호", 20)) != null)
+				return error;
+			if (!text(detail, "clientOrd").equals(text(requestHeader, "clientOrd")))
+				return "상세 주문번호는 헤더 주문번호와 같아야 합니다.";
+			if ((error = requireText(detail, "clientOrdItem", "주문 일련번호", 6)) != null)
+				return error;
+			if ((error = requireText(detail, "itemCode", "품목코드", 18)) != null)
+				return error;
+			if ((error = requireText(detail, "ordQty", "주문수량", 0)) != null)
+				return error;
+			if ((error = requireDate(detail, "itemDeliveryDate", "품목납품일")) != null)
+				return error;
+			if (!text(detail, "itemDeliveryDate").equals(text(requestHeader, "reqDeliveryDate")))
+				return "품목납품일은 헤더 입고일자와 같아야 합니다.";
 			String itemStatus = text(detail, "ordItemStatus");
-			if (!itemStatus.matches("N|U|D")) return "ordItemStatus는 N, U, D 중 하나여야 합니다.";
-			if ("N".equals(orderStatus) && !"N".equals(itemStatus)) return "신규 주문의 모든 품목 상태는 N이어야 합니다.";
+			if (!itemStatus.matches("N|U|D"))
+				return "ordItemStatus는 N, U, D 중 하나여야 합니다.";
+			if ("N".equals(orderStatus) && !"N".equals(itemStatus))
+				return "신규 주문의 모든 품목 상태는 N이어야 합니다.";
 		}
 		return null;
 	}
@@ -224,13 +293,15 @@ public class WelstoryController {
 
 	private String requireText(JsonNode node, String field, String label, int maxLength) {
 		String value = text(node, field);
-		if (value.isEmpty()) return label + "은(는) 필수입니다.";
+		if (value.isEmpty())
+			return label + "은(는) 필수입니다.";
 		return maxLength > 0 && value.length() > maxLength ? label + "은(는) " + maxLength + "자리 이하여야 합니다." : null;
 	}
 
 	private String requireDate(JsonNode node, String field, String label) {
 		String value = text(node, field);
-		if (!value.matches("\\d{8}")) return label + "은(는) YYYYMMDD 형식이어야 합니다.";
+		if (!value.matches("\\d{8}"))
+			return label + "은(는) YYYYMMDD 형식이어야 합니다.";
 		try {
 			LocalDate.parse(value, DateTimeFormatter.BASIC_ISO_DATE);
 		} catch (DateTimeParseException exception) {
@@ -240,6 +311,7 @@ public class WelstoryController {
 	}
 
 	private JsonNode error(String code, String message) {
-		return objectMapper.valueToTree(Map.of("dataHeader", Map.of(), "dataBody", Map.of("resCd", code, "resMsg", message)));
+		return objectMapper
+				.valueToTree(Map.of("dataHeader", Map.of(), "dataBody", Map.of("resCd", code, "resMsg", message)));
 	}
 }

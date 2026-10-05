@@ -19,6 +19,7 @@
 			   del_yn
 		FROM the_full.tb_account
 		WHERE del_yn = 'N'
+		<if test="account_id!=null and account_id!=''">AND account_id=#{account_id}</if>
 	</select>
 
 	<!-- 고객사가 선택할 수 있는 전체 식사구분과 현재 선택 여부를 표시한다. -->

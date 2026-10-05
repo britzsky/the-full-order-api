@@ -14,11 +14,11 @@ import com.example.demo.mapper.AccountMapper;
 public class AccountService {
 
 	AccountMapper accountMapper;
-	
+
 	public AccountService(AccountMapper accountMapper) {
 		this.accountMapper = accountMapper;
 	}
-	
+
 	// 거래처 -> 거래처 목록 조회
 	public List<Map<String, Object>> AccountList(Map<String, Object> paramMap) {
 		List<Map<String, Object>> resultList = new ArrayList<>();
@@ -27,16 +27,14 @@ public class AccountService {
 	}
 
 	/*
-	 * method : MealSlotList
-	 * comment : 고객사에서 선택 가능한 전체 식사구분과 현재 설정 조회
+	 * method : MealSlotList comment : 고객사에서 선택 가능한 전체 식사구분과 현재 설정 조회
 	 */
 	public List<Map<String, Object>> MealSlotList(Map<String, Object> paramMap) {
 		return accountMapper.MealSlotList(paramMap);
 	}
 
 	/*
-	 * method : MealSlotSave
-	 * comment : 고객사의 기존 식사구분 설정을 선택값으로 일괄 갱신
+	 * method : MealSlotSave comment : 고객사의 기존 식사구분 설정을 선택값으로 일괄 갱신
 	 */
 	@Transactional
 	public void MealSlotSave(Map<String, Object> paramMap) {
@@ -48,8 +46,8 @@ public class AccountService {
 	}
 
 	/*
-	 * 고객사 기본 구성과 서버 계산 단가를 화면에서 바로 사용할 수 있는 형태로 묶는다.
-	 * 단가는 DB 뷰가 the_full.tb_account/account_info의 최신 값을 기준으로 계산한다.
+	 * 고객사 기본 구성과 서버 계산 단가를 화면에서 바로 사용할 수 있는 형태로 묶는다. 단가는 DB 뷰가
+	 * the_full.tb_account/account_info의 최신 값을 기준으로 계산한다.
 	 */
 	public Map<String, Object> MealConfiguration(Map<String, Object> paramMap) {
 		Object accountId = paramMap.get("account_id");
@@ -78,8 +76,8 @@ public class AccountService {
 	}
 
 	/*
-	 * 급식형식과 기본 구성을 원자적으로 저장한다.
-	 * 중간 실패 시 식사구분만 저장되는 불완전한 상태가 남지 않도록 반드시 한 트랜잭션으로 처리한다.
+	 * 급식형식과 기본 구성을 원자적으로 저장한다. 중간 실패 시 식사구분만 저장되는 불완전한 상태가 남지 않도록 반드시 한 트랜잭션으로
+	 * 처리한다.
 	 */
 	@Transactional
 	public void MealConfigurationSave(Map<String, Object> paramMap) {

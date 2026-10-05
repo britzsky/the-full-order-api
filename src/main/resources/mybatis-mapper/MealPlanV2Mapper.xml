@@ -25,20 +25,9 @@
     FROM the_full_order.tb_account_meal_service s
     LEFT JOIN the_full_order.tb_account_table_meals_detail d ON d.meal_service_id=s.meal_service_id
     LEFT JOIN (
-      SELECT rd.account_id,rd.menu_id,COUNT(*) AS recipe_count,
-             SUM(CASE WHEN rd.qty_per_person &gt; 0 AND sp.supplier_product_id IS NOT NULL AND sp.base_qty &gt; 0 AND ph.purchase_price IS NOT NULL AND ph.purchase_price &gt; 0 THEN 1 ELSE 0 END) AS priced_count,
-             SUM(CASE WHEN rd.qty_per_person &gt; 0 AND sp.supplier_product_id IS NOT NULL AND sp.base_qty &gt; 0 AND ph.purchase_price IS NOT NULL AND ph.purchase_price &gt; 0
-                      THEN rd.qty_per_person*ph.purchase_price/sp.base_qty ELSE 0 END) AS menu_cost
-        FROM the_full_order.tb_account_recipe_detail rd
-        LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=(
-          SELECT ap.supplier_product_id
-            FROM the_full_order.tb_account_ingredient_product ap
-            JOIN the_full_order.tb_supplier_ingredient_product sp2 ON sp2.supplier_product_id=ap.supplier_product_id
-           WHERE ap.account_id=rd.account_id AND sp2.ingredient_id=rd.ingredient_id AND ap.active_yn='Y'
-           ORDER BY ap.preferred_yn DESC,ap.account_ingredient_product_id LIMIT 1)
-        LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=sp.supplier_product_id
-          AND ph.effective_from&lt;=NOW() AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW())
-       GROUP BY rd.account_id,rd.menu_id
+      SELECT c.account_id,c.menu_id,COUNT(*) recipe_count,COUNT(c.cost_per_person) priced_count,SUM(c.cost_per_person) menu_cost
+        FROM (<include refid="com.example.demo.mapper.MenuMapper.accountRecipeCosts"/>) c
+       GROUP BY c.account_id,c.menu_id
     ) r ON r.account_id=d.account_id AND r.menu_id=d.menu_id
    WHERE s.meal_service_id=#{meal_service_id}
    GROUP BY s.meal_service_id,s.meal_budget_per_person,s.budget_source
@@ -50,6 +39,19 @@
  <select id="costs" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_meal_menu_cost_snapshot WHERE meal_service_id=#{meal_service_id} ORDER BY sort_order</select>
  <select id="requirements" parameterType="map" resultType="hashmap">SELECT r.*,i.ingredient_name_std,p.product_name FROM the_full_order.tb_account_meal_ingredient_requirement r JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=r.supplier_product_id WHERE r.meal_service_id=#{meal_service_id} ORDER BY r.menu_id,r.ingredient_id</select>
  <delete id="deleteCosts" parameterType="map">DELETE FROM the_full_order.tb_account_meal_menu_cost_snapshot WHERE meal_service_id=#{meal_service_id}</delete><delete id="deleteRequirements" parameterType="map">DELETE FROM the_full_order.tb_account_meal_ingredient_requirement WHERE meal_service_id=#{meal_service_id}</delete>
- <insert id="insertRequirements" parameterType="map">INSERT INTO the_full_order.tb_account_meal_ingredient_requirement(meal_service_id,menu_id,ingredient_id,supplier_product_id,qty_per_person,planned_servings,total_required_qty,base_unit,package_price_snapshot,package_base_qty_snapshot,calculated_cost) SELECT d.meal_service_id,d.menu_id,r.ingredient_id,sp.supplier_product_id,r.qty_per_person,s.planned_servings,r.qty_per_person*s.planned_servings,r.base_unit,ph.purchase_price,sp.base_qty,ROUND(ph.purchase_price*(r.qty_per_person*s.planned_servings)/NULLIF(sp.base_qty,0),4) FROM the_full_order.tb_account_table_meals_detail d JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=d.meal_service_id JOIN the_full_order.tb_account_recipe_detail r ON r.account_id=d.account_id AND r.menu_id=d.menu_id LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=(SELECT ap2.supplier_product_id FROM the_full_order.tb_account_ingredient_product ap2 JOIN the_full_order.tb_supplier_ingredient_product sp2 ON sp2.supplier_product_id=ap2.supplier_product_id WHERE ap2.account_id=d.account_id AND sp2.ingredient_id=r.ingredient_id AND ap2.active_yn='Y' ORDER BY ap2.preferred_yn DESC,ap2.account_ingredient_product_id LIMIT 1) LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=sp.supplier_product_id AND ph.effective_from&lt;=NOW() AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW()) WHERE d.meal_service_id=#{meal_service_id}</insert>
+ <insert id="insertRequirements" parameterType="map">
+  INSERT INTO the_full_order.tb_account_meal_ingredient_requirement
+   (meal_service_id,menu_id,ingredient_id,supplier_product_id,qty_per_person,planned_servings,total_required_qty,
+    base_unit,package_price_snapshot,package_base_qty_snapshot,calculated_cost)
+  SELECT d.meal_service_id,d.menu_id,c.ingredient_id,c.supplier_product_id,c.qty_per_person,s.planned_servings,
+         c.qty_per_person*s.planned_servings,c.base_unit,c.purchase_price,c.base_qty,
+         ROUND(c.cost_per_person*s.planned_servings,4)
+    FROM the_full_order.tb_account_table_meals_detail d
+    JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=d.meal_service_id
+    JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountRecipeCosts"/>) c
+      ON c.account_id=d.account_id AND c.menu_id=d.menu_id
+   WHERE d.meal_service_id=#{meal_service_id}
+
+ </insert>
  <insert id="insertCosts" parameterType="map">INSERT INTO the_full_order.tb_account_meal_menu_cost_snapshot(meal_service_id,menu_id,sort_order,cost_per_person,total_cost) SELECT r.meal_service_id,r.menu_id,d.sort_order,ROUND(SUM(COALESCE(r.calculated_cost,0))/NULLIF(MAX(r.planned_servings),0),4),ROUND(SUM(COALESCE(r.calculated_cost,0)),2) FROM the_full_order.tb_account_meal_ingredient_requirement r JOIN the_full_order.tb_account_table_meals_detail d ON d.meal_service_id=r.meal_service_id AND d.menu_id=r.menu_id WHERE r.meal_service_id=#{meal_service_id} GROUP BY r.meal_service_id,r.menu_id,d.sort_order</insert>
 </mapper>

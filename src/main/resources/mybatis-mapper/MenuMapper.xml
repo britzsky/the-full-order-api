@@ -4,6 +4,7 @@
 
 <mapper namespace="com.example.demo.mapper.MenuMapper">
 	
+	<select id="ingredientBaseUnit" parameterType="map" resultType="string">SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}</select>
 	<select id="NowDateKey" resultType="String">
 		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
 	</select>
@@ -12,6 +13,10 @@
 		SELECT T.menu_img,
 			   T.menu_id,
 			   T.menu_name,
+			   (SELECT JSON_ARRAYAGG(CONCAT_WS(' ',rd.ingredient_name_raw,im.ingredient_name_std,im.ingredient_name_raw))
+                 FROM the_full_order.tb_recipe_detail rd
+                 LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+                 WHERE rd.menu_id=T.menu_id) AS recipe_ingredient_names,
 			   T.del_yn,
 			   T.food_type,
 			   T.food_type_reason,
@@ -20,35 +25,7 @@
 			   T.menu_gubun,
 		       T.meal_plan_type,
 		       T.calories_per_serving,
-		       (SELECT CASE WHEN COUNT(*) &gt; 0 AND SUM(CASE
-		           WHEN rd.qty_num &gt; 0 AND sp.base_qty &gt; 0 AND ph.purchase_price &gt; 0
-		            AND (LOWER(COALESCE(rd.qty_unit,''))=LOWER(COALESCE(im.base_unit,sp.base_unit,''))
-		              OR (LOWER(rd.qty_unit)='kg' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='g')
-		              OR (LOWER(rd.qty_unit)='g' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='kg')
-		              OR (LOWER(rd.qty_unit)='l' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='ml')
-		              OR (LOWER(rd.qty_unit)='ml' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='l'))
-		           THEN 1 ELSE 0 END)=COUNT(*)
-		         THEN ROUND(SUM((CASE
-		           WHEN LOWER(rd.qty_unit)='kg' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='g' THEN rd.qty_num*1000
-		           WHEN LOWER(rd.qty_unit)='g' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='kg' THEN rd.qty_num/1000
-		           WHEN LOWER(rd.qty_unit)='l' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='ml' THEN rd.qty_num*1000
-		           WHEN LOWER(rd.qty_unit)='ml' AND LOWER(COALESCE(im.base_unit,sp.base_unit))='l' THEN rd.qty_num/1000
-		           ELSE rd.qty_num END)*ph.purchase_price/NULLIF(sp.base_qty,0)),4)
-		         ELSE NULL END
-		          FROM the_full_order.tb_recipe_detail rd
-		          LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
-		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=(
-		            SELECT sp2.supplier_product_id
-		              FROM the_full_order.tb_supplier_ingredient_product sp2
-		              JOIN the_full_order.tb_supplier s2 ON s2.supplier_id=sp2.supplier_id
-		              JOIN the_full_order.tb_supplier_ingredient_price_history ph2 ON ph2.supplier_product_id=sp2.supplier_product_id
-		               AND ph2.effective_from&lt;=NOW() AND (ph2.effective_to IS NULL OR ph2.effective_to&gt;NOW())
-		             WHERE sp2.ingredient_id=rd.ingredient_id AND sp2.active_yn='Y' AND sp2.base_qty&gt;0 AND ph2.purchase_price&gt;0
-		             ORDER BY CASE WHEN UPPER(s2.supplier_code) LIKE '%WELSTORY%' THEN 0 ELSE 1 END,
-		                      ph2.purchase_price/sp2.base_qty,sp2.supplier_product_id LIMIT 1)
-		          LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=sp.supplier_product_id
-		           AND ph.effective_from&lt;=NOW() AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW())
-		         WHERE rd.menu_id=T.menu_id) AS menu_cost_per_person
+		       NULL AS menu_cost_per_person
 		FROM the_full_order.tb_menu_master T
 		WHERE 1 = 1
 		<if test="meal_plan_type != null and meal_plan_type != ''">
@@ -56,134 +33,65 @@
 		</if>
 	</select>
 	
-	<select id="DetailList" parameterType="map" resultType="hashmap">
-		SELECT
-			rd.recipe_id,
-		    rd.menu_id,															-- 메뉴 ID
-		    rd.ingredient_id,													-- 재료 ID
-		    -- 재료명
-		    -- ingredient_master에 표준 재료명이 있으면 그 값을 사용하고,
-		    -- 없으면 recipe_detail에 저장된 원본 재료명을 사용
-		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
-		    -- 1인분 기준 수량(숫자 부분)
-		    -- qty_unit과 함께 "1인분당 얼마나 필요한지"를 의미
-		    rd.qty_num AS per_person_qty,	
-		    rd.qty_unit AS recipe_unit,											-- 레시피 단위
-		    #{servingQty} AS serving_qty,										-- 조리할 인분 수
-		    ROUND(COALESCE(rd.qty_num, 0) * #{servingQty}, 3) AS required_qty,	-- 필요수량
-		    ROUND(COALESCE(SUM(ib.current_qty), 0), 3) AS current_qty,			-- 현재고
-		    ifnull(ib.location_id, 'L999') as location_id,						-- 보관방식
-		    ROUND(
-		        GREATEST((COALESCE(rd.qty_num, 0) * #{servingQty}) - COALESCE(SUM(ib.current_qty), 0), 0),
-		        3
-		    ) AS shortage_qty,													-- 부족수량 공식: 필요수량 - 현재고
-		    ROUND(
-		        GREATEST(
-		            (COALESCE(rd.qty_num, 0) * #{servingQty})
-		            + COALESCE(im.safe_stock_qty, 0)
-		            - COALESCE(SUM(ib.current_qty), 0),
-		            0
-		        ),
-		        3
-		    ) AS order_needed_qty,												-- 발주필요수량  공식: 필요수량 + 안전재고 - 현재고
-		    COALESCE(im.base_unit, rd.qty_unit) AS base_unit,					-- 기준단위   예: g, kg, ml, 개 등
-		    im.order_unit,														-- 발주단위   예: 박스, 포, EA, kg 등
-		    im.convert_value,													-- 환산값    예: 1박스 = 10kg 이면 convert_value = 10 같은 식
-		    COALESCE(im.safe_stock_qty, 0) AS safe_stock_qty,					-- 안전재고   최소한 남겨두고 싶은 재고량
-		    MIN(rd.ingredient_seq) AS ingredient_seq							-- 재료 순번 
-		FROM the_full_order.tb_recipe_detail rd
-		-- 레시피 상세 테이블
-		-- 메뉴별 재료 구성, 1인분 수량, 단위 등이 들어있음
-		
-		LEFT JOIN the_full_order.tb_ingredient_master im
-		    ON rd.ingredient_id = im.ingredient_id
-		-- 재료 마스터 테이블
-		-- 표준 재료명, 기준단위, 발주단위, 환산값, 안전재고 등을 가져옴
-		LEFT JOIN the_full_order.tb_inventory_balance ib
-		    ON rd.ingredient_id = ib.ingredient_id
-		   AND (
-		        ib.unit = rd.qty_unit
-		        OR ib.unit = im.base_unit
-		        OR rd.qty_unit IS NULL
-		      )
-		-- 재고 테이블
-		-- 같은 재료 ID의 현재고를 연결
-		-- 단위가 레시피 단위와 같거나, 기준단위와 같을 때 연결
-		-- rd.qty_unit이 NULL이면 일단 연결 허용
-		WHERE rd.menu_id = #{menu_id}
-		-- 특정 메뉴만 조회
-		
-		  AND rd.qty_num IS NOT NULL
-		-- 1인분 수량이 있는 재료만 조회
-		-- 수량이 없는 재료는 계산 불가하므로 제외
-		
-		GROUP BY
-		    rd.menu_id,
-		    rd.ingredient_id,
-		    rd.recipe_id,
-		    COALESCE(im.ingredient_name_std, rd.ingredient_name_raw),
-		    rd.qty_num,
-		    rd.qty_unit,
-		    ib.location_id,
-		    im.base_unit,
-		    im.order_unit,
-		    im.convert_value,
-		    im.safe_stock_qty
-		-- 집계 기준
-		-- 재료별로 현재고 SUM 계산을 위해 묶음
-		
-		ORDER BY ingredient_seq;
-		-- 레시피에 등록된 재료 순서대로 정렬
-	</select>
+ <select id="DetailList" parameterType="map" resultType="hashmap">
+ SELECT rd.*,COALESCE(im.ingredient_name_std,rd.ingredient_name_raw) ingredient_name,
+ im.category_name,im.storage_type,rd.qty_num per_person_qty,rd.qty_unit recipe_unit,
+ COALESCE(#{servingQty},1) serving_qty,
+ CASE WHEN rd.review_flag=0 THEN rd.qty_per_person*COALESCE(#{servingQty},1) END required_qty,
+ COALESCE(ib.current_qty,0) current_qty,COALESCE(ib.location_id,'L999') location_id,
+ CASE WHEN rd.review_flag=0 THEN GREATEST(rd.qty_per_person*COALESCE(#{servingQty},1)-COALESCE(ib.current_qty,0),0) END shortage_qty,
+ CASE WHEN rd.review_flag=0 THEN GREATEST(rd.qty_per_person*COALESCE(#{servingQty},1)+COALESCE(im.safe_stock_qty,0)-COALESCE(ib.current_qty,0),0) END order_needed_qty,
+ im.order_unit,im.convert_value,im.safe_stock_qty
+ FROM the_full_order.tb_recipe_detail rd
+ LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+ LEFT JOIN (SELECT ingredient_id,unit,SUM(current_qty) current_qty,MIN(location_id) location_id FROM the_full_order.tb_inventory_balance GROUP BY ingredient_id,unit) ib
+ ON ib.ingredient_id=rd.ingredient_id AND LOWER(ib.unit)=LOWER(rd.base_unit)
+ WHERE rd.menu_id=#{menu_id} ORDER BY rd.ingredient_seq
+ </select>
 	
 	<select id="AccountDetailList" parameterType="map" resultType="hashmap">
 		SELECT rd.recipe_id, rd.menu_id, rd.ingredient_id,
 		       COALESCE(im.ingredient_name_std, rd.ingredient_name_raw) AS ingredient_name,
 		       rd.ingredient_name_raw, im.ingredient_name_std, im.category_name, im.storage_type,
-		       rd.qty_num AS per_person_qty, rd.qty_num, rd.qty_unit, rd.qty_raw,
+		       rd.qty_num AS per_person_qty, rd.qty_num, rd.qty_unit, rd.qty_raw,rd.recipe_yield_servings,
 		       COALESCE(#{servingQty}, 1) AS serving_qty,
-		       ROUND(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1), 3) AS required_qty,
+		       ROUND((CASE WHEN rd.review_flag=0 THEN (CASE WHEN LOWER(rd.base_unit)=LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit)) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='g') OR (LOWER(rd.base_unit)='l' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='ml') THEN (rd.qty_per_person)*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='l') THEN (rd.qty_per_person)/1000 ELSE NULL END) * COALESCE(#{servingQty},1) END), 3) AS required_qty,
 		       ROUND(COALESCE(SUM(ib.current_base_qty), 0), 3) AS current_qty,
 		       COALESCE(MIN(ib.location_id), ap.default_location_id, 'L999') AS location_id,
-		       ROUND(GREATEST(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS shortage_qty,
-		       ROUND(GREATEST(COALESCE(rd.qty_num, 0) * COALESCE(#{servingQty}, 1) + COALESCE(ap.safe_stock_base_qty, 0) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS order_needed_qty,
-		       COALESCE(sp.base_unit, im.base_unit, rd.base_unit, rd.qty_unit) AS base_unit,
-		       sp.order_unit, COALESCE(sp.base_qty, 1) AS convert_value,
+		       ROUND(GREATEST((CASE WHEN rd.review_flag=0 THEN (CASE WHEN LOWER(rd.base_unit)=LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit)) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='g') OR (LOWER(rd.base_unit)='l' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='ml') THEN (rd.qty_per_person)*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='l') THEN (rd.qty_per_person)/1000 ELSE NULL END) * COALESCE(#{servingQty},1) END) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS shortage_qty,
+		       ROUND(GREATEST((CASE WHEN rd.review_flag=0 THEN (CASE WHEN LOWER(rd.base_unit)=LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit)) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='g') OR (LOWER(rd.base_unit)='l' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='ml') THEN (rd.qty_per_person)*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))='l') THEN (rd.qty_per_person)/1000 ELSE NULL END) * COALESCE(#{servingQty},1) END) + COALESCE(ap.safe_stock_base_qty, 0) - COALESCE(SUM(ib.current_base_qty), 0), 0), 3) AS order_needed_qty,
+		       COALESCE(ap.link_base_unit, sp.base_unit, im.base_unit, rd.base_unit, rd.qty_unit) AS base_unit,
+		       sp.order_unit, COALESCE(ap.link_base_qty, sp.base_qty, 1) AS convert_value,
 		       COALESCE(ap.safe_stock_base_qty, 0) AS safe_stock_qty,
 		       rd.ingredient_seq, li.like,
 		       sp.supplier_product_id, sp.supplier_id, s.supplier_name, sp.supplier_item_code,
-		       sp.product_name, sp.package_qty, sp.package_unit, sp.base_qty
-		       ,(SELECT ph.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history ph
-		          WHERE ph.supplier_product_id=sp.supplier_product_id
-		            AND ph.effective_from &lt;= NOW()
-		            AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
-		          ORDER BY ph.effective_from DESC LIMIT 1) AS purchase_price
+		       sp.product_name, sp.package_qty, sp.package_unit, COALESCE(ap.link_base_qty, sp.base_qty) AS base_qty
+		       ,(SELECT c.purchase_price FROM (<include refid="accountRecipeCosts"/>) c
+                    WHERE c.account_recipe_detail_id=rd.account_recipe_detail_id) AS purchase_price
 		FROM the_full_order.tb_account_recipe_detail rd
 		LEFT JOIN the_full_order.tb_account_ingredient_master im
 		  ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
 		LEFT JOIN the_full_order.tb_account_ingredient_product ap
 		  ON ap.account_id=rd.account_id AND ap.supplier_product_id=(
-		    SELECT ap2.supplier_product_id FROM the_full_order.tb_account_ingredient_product ap2
-		    JOIN the_full_order.tb_supplier_ingredient_product sp2 ON sp2.supplier_product_id=ap2.supplier_product_id
-		    WHERE ap2.account_id=rd.account_id AND sp2.ingredient_id=rd.ingredient_id AND ap2.active_yn='Y'
-		    ORDER BY ap2.preferred_yn DESC,ap2.account_ingredient_product_id LIMIT 1)
+		    SELECT c.supplier_product_id FROM (<include refid="accountRecipeCosts"/>) c
+             WHERE c.account_recipe_detail_id=rd.account_recipe_detail_id)
 		LEFT JOIN the_full_order.tb_supplier_ingredient_product sp ON sp.supplier_product_id=ap.supplier_product_id
 		LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=sp.supplier_id
 		LEFT JOIN (
-		  SELECT b.account_id,p2.ingredient_id,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
+		  SELECT b.account_id,ap2.mapped_ingredient_id ingredient_id,b.base_unit,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
 		  FROM the_full_order.tb_account_inventory_balance b
 		  JOIN the_full_order.tb_account_ingredient_product ap2
-		    ON ap2.account_ingredient_product_id=b.account_ingredient_product_id AND ap2.active_yn='Y'
+		    ON ap2.account_ingredient_product_id=b.account_ingredient_product_id
 		  JOIN the_full_order.tb_supplier_ingredient_product p2 ON p2.supplier_product_id=ap2.supplier_product_id
-		  GROUP BY b.account_id,p2.ingredient_id
-		) ib ON ib.account_id=rd.account_id AND ib.ingredient_id=rd.ingredient_id
+		  GROUP BY b.account_id,ap2.mapped_ingredient_id,b.base_unit
+		) ib ON ib.account_id=rd.account_id AND ib.ingredient_id=rd.ingredient_id AND LOWER(ib.base_unit)=LOWER(COALESCE(ap.link_base_unit,sp.base_unit,rd.base_unit))
 		LEFT JOIN the_full_order.tb_like_ingredients li ON li.account_id=rd.account_id AND li.ingredient_id=rd.ingredient_id
 		WHERE rd.menu_id = #{menu_id}
 		<if test="account_id != null and account_id != ''">AND rd.account_id=#{account_id}</if>
 		  AND rd.qty_num IS NOT NULL
 		GROUP BY rd.account_recipe_detail_id,rd.recipe_id,rd.menu_id,rd.ingredient_id,rd.ingredient_name_raw,
 		         im.ingredient_name_std,im.category_name,im.storage_type,rd.qty_num,rd.qty_unit,rd.qty_raw,
-		         ap.default_location_id,ap.safe_stock_base_qty,sp.base_unit,im.base_unit,rd.base_unit,
+		         ap.default_location_id,ap.safe_stock_base_qty,ap.link_base_unit,ap.link_base_qty,sp.base_unit,im.base_unit,rd.base_unit,
 		         sp.order_unit,sp.base_qty,rd.ingredient_seq,li.like,sp.supplier_product_id,sp.supplier_id,
 		         s.supplier_name,sp.supplier_item_code,sp.product_name,sp.package_qty,sp.package_unit
 		ORDER BY ingredient_seq;
@@ -217,7 +125,7 @@
 	        menu_name = #{menu_name},
 	        menu_name_raw = #{menu_name},
 	        food_type = #{food_type},
-	        del_yn = #{del_yn},
+	        del_yn = CASE WHEN #{del_yn} IN ('Y','N') THEN #{del_yn} ELSE del_yn END,
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id},
 	        menu_img = #{menu_img},
@@ -252,11 +160,24 @@
 	    </trim>
 	</insert>
 	
+	<select id="RecipeId" parameterType="map" resultType="long">
+		SELECT MIN(recipe_id)
+		FROM the_full_order.tb_recipe_detail
+		WHERE menu_id = #{menu_id}
+	</select>
+
 	<insert id="IngredientsSave" parameterType="map">
 		INSERT INTO the_full_order.tb_recipe_detail
-		(menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit, review_flag, created_at)
+		(recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit,
+		 recipe_yield_servings, qty_base, base_unit, qty_per_person, review_flag, created_at, user_id)
 		VALUES
-		(#{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name}, #{qty_raw}, #{qty_num}, #{qty_unit}, #{review_flag}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
+		(#{recipe_id}, #{menu_id}, #{ingredient_id}, #{ingredient_seq}, #{ingredient_name}, #{qty_raw}, #{qty_num}, #{qty_unit},
+		 COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1),
+		 COALESCE(#{qty_base}, #{qty_num}, 0),
+		 COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
+		 COALESCE(#{qty_per_person}, COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
+		 CASE WHEN #{review_flag} IS NULL OR #{review_flag} = '' OR #{review_flag} = '0' THEN 0 ELSE 1 END,
+		 DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
 	        menu_id = #{menu_id},
@@ -266,7 +187,9 @@
 	        qty_raw = #{qty_raw},
 	        qty_num = #{qty_num},
 	        qty_unit = #{qty_unit},
-	        review_flag = #{review_flag},
+            recipe_yield_servings = VALUES(recipe_yield_servings),
+            qty_base = VALUES(qty_base),base_unit = VALUES(base_unit),qty_per_person = VALUES(qty_per_person),
+	        review_flag = VALUES(review_flag),
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id}
 	    </trim>
@@ -291,7 +214,7 @@
 	        menu_name = #{menu_name},
 	        menu_name_raw = #{menu_name},
 	        food_type = #{food_type},
-	        del_yn = #{del_yn},
+	        del_yn = CASE WHEN #{del_yn} IN ('Y','N') THEN #{del_yn} ELSE del_yn END,
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id},
 	        menu_type = #{menu_type}, 
@@ -349,6 +272,10 @@
 	        qty_raw = #{qty_raw},
 	        qty_num = #{qty_num},
 	        qty_unit = #{qty_unit},
+	        recipe_yield_servings = VALUES(recipe_yield_servings),
+	        qty_base = VALUES(qty_base),
+	        base_unit = VALUES(base_unit),
+	        qty_per_person = VALUES(qty_per_person),
 	        recipe_yield_servings = COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1),
 	        qty_base = COALESCE(#{qty_base}, #{qty_num}, 0),
 	        base_unit = COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
@@ -374,8 +301,51 @@
 	    </trim>
 	</insert>
 	
+ <sql id="accountRecipeCosts">
+  SELECT rd.account_recipe_detail_id,rd.account_id,rd.menu_id,rd.ingredient_id,rd.ingredient_name_raw ingredient_name,
+         cp.supplier_product_id,cp.base_unit,cp.base_qty,cp.purchase_price,
+         (CASE WHEN LOWER(rd.base_unit)=LOWER(cp.base_unit) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(cp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(cp.base_unit)='ml') THEN rd.qty_per_person*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(cp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(cp.base_unit)='l') THEN rd.qty_per_person/1000 ELSE NULL END) qty_per_person,
+         CASE WHEN rd.review_flag=0 AND (CASE WHEN LOWER(rd.base_unit)=LOWER(cp.base_unit) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(cp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(cp.base_unit)='ml') THEN rd.qty_per_person*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(cp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(cp.base_unit)='l') THEN rd.qty_per_person/1000 ELSE NULL END)&gt;0 AND cp.base_qty&gt;0 AND cp.purchase_price&gt;0
+              THEN (CASE WHEN LOWER(rd.base_unit)=LOWER(cp.base_unit) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(cp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(cp.base_unit)='ml') THEN rd.qty_per_person*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(cp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(cp.base_unit)='l') THEN rd.qty_per_person/1000 ELSE NULL END)*cp.purchase_price/cp.base_qty END cost_per_person,
+         CASE WHEN cp.supplier_product_id IS NULL THEN '공급상품 연결 필요'
+              WHEN rd.review_flag&lt;&gt;0 OR (CASE WHEN LOWER(rd.base_unit)=LOWER(cp.base_unit) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(cp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(cp.base_unit)='ml') THEN rd.qty_per_person*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(cp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(cp.base_unit)='l') THEN rd.qty_per_person/1000 ELSE NULL END) IS NULL THEN '단위 확인'
+              WHEN cp.base_qty IS NULL OR cp.base_qty&lt;=0 THEN '포장용량 확인'
+              WHEN cp.purchase_price IS NULL OR cp.purchase_price&lt;=0 THEN '가격 확인'
+              WHEN (CASE WHEN LOWER(rd.base_unit)=LOWER(cp.base_unit) THEN rd.qty_per_person WHEN (LOWER(rd.base_unit)='kg' AND LOWER(cp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(cp.base_unit)='ml') THEN rd.qty_per_person*1000 WHEN (LOWER(rd.base_unit)='g' AND LOWER(cp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(cp.base_unit)='l') THEN rd.qty_per_person/1000 ELSE NULL END)&lt;=0 THEN '사용량 확인' END missing_reason
+    FROM the_full_order.tb_account_recipe_detail rd
+    LEFT JOIN (
+      SELECT ranked.* FROM (
+        SELECT ap.account_id,ap.mapped_ingredient_id ingredient_id,p.supplier_product_id,COALESCE(ap.link_base_unit,p.base_unit) base_unit,COALESCE(ap.link_base_qty,p.base_qty) base_qty,
+               COALESCE(sp.purchase_price,mh.purchase_price) purchase_price,
+               ROW_NUMBER() OVER(PARTITION BY ap.account_id,ap.mapped_ingredient_id
+                 ORDER BY ap.preferred_yn DESC,(mh.purchase_price&gt;0) DESC,mh.effective_from DESC,mh.price_history_id DESC,
+                          (sp.purchase_price&gt;0) DESC,ap.account_ingredient_product_id) choice_rank
+          FROM the_full_order.tb_account_ingredient_product ap
+          JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id AND p.active_yn='Y'
+          LEFT JOIN the_full_order.tb_supplier_ingredient_price_history mh ON mh.price_history_id=(
+            SELECT h.price_history_id FROM the_full_order.tb_supplier_ingredient_price_history h
+             WHERE h.supplier_product_id=p.supplier_product_id AND h.effective_from&lt;=NOW()
+               AND (h.effective_to IS NULL OR h.effective_to&gt;NOW())
+             ORDER BY h.effective_from DESC,h.price_history_id DESC LIMIT 1)
+          LEFT JOIN the_full_order.tb_supplier_site_product_price sp ON sp.supplier_price_id=(
+            SELECT h.supplier_price_id FROM the_full_order.tb_supplier_site_product_price h
+            JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
+            JOIN the_full_order.tb_supplier_account_site a ON a.supplier_account_site_id=o.supplier_account_site_id
+             WHERE a.account_id=ap.account_id AND a.active_yn='Y' AND o.active_yn='Y'
+               AND o.supplier_product_id=p.supplier_product_id AND h.effective_from&lt;=NOW()
+               AND (h.effective_to IS NULL OR h.effective_to&gt;NOW())
+             ORDER BY h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
+         WHERE ap.active_yn='Y'
+      ) ranked WHERE ranked.choice_rank=1
+    ) cp ON cp.account_id=rd.account_id AND cp.ingredient_id=rd.ingredient_id
+ </sql>
+
 	<select id="AccountMenuList" parameterType="map" resultType="hashmap">
 		SELECT T.account_id,
+			   (SELECT JSON_ARRAYAGG(CONCAT_WS(' ',rd.ingredient_name_raw,im.ingredient_name_std,im.ingredient_name_raw))
+                 FROM the_full_order.tb_account_recipe_detail rd
+                 LEFT JOIN the_full_order.tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
+                 WHERE rd.account_id=T.account_id AND rd.menu_id=T.menu_id) AS recipe_ingredient_names,
 			   T2.menu_img,
 			   T.menu_id,
 			   T.menu_name,
@@ -388,48 +358,12 @@
 			   T.menu_gubun,
 			   T.meal_plan_type,
 			   T.calories_per_serving,
-		       (SELECT ROUND(SUM(r.qty_per_person * COALESCE((
-		           SELECT ph.purchase_price
-		             FROM the_full_order.tb_supplier_ingredient_price_history ph
-		            WHERE ph.supplier_product_id = sp.supplier_product_id
-		              AND ph.effective_from &lt;= NOW()
-		              AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
-		            ORDER BY ph.effective_from DESC LIMIT 1
-		         ), 0) / NULLIF(sp.base_qty, 0)), 4)
-		          FROM the_full_order.tb_account_recipe_detail r
-		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp
-		            ON sp.supplier_product_id = (
-		              SELECT ap.supplier_product_id
-		                FROM the_full_order.tb_account_ingredient_product ap
-		                JOIN the_full_order.tb_supplier_ingredient_product sp2
-		                  ON sp2.supplier_product_id = ap.supplier_product_id
-		               WHERE ap.account_id = r.account_id
-		                 AND sp2.ingredient_id = r.ingredient_id
-		                 AND ap.active_yn = 'Y'
-		               ORDER BY ap.preferred_yn DESC, ap.account_ingredient_product_id
-		               LIMIT 1)
-		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_per_person,
-		       (SELECT CASE WHEN COUNT(*) &gt; 0 AND SUM(CASE
-		           WHEN r.qty_per_person &gt; 0 AND sp.base_qty &gt; 0 AND (SELECT ph.purchase_price
-		             FROM the_full_order.tb_supplier_ingredient_price_history ph
-		            WHERE ph.supplier_product_id = sp.supplier_product_id
-		              AND ph.effective_from &lt;= NOW()
-		              AND (ph.effective_to IS NULL OR ph.effective_to &gt; NOW())
-		            ORDER BY ph.effective_from DESC LIMIT 1) &gt; 0 THEN 1 ELSE 0 END) = COUNT(*)
-		         THEN 1 ELSE 0 END
-		          FROM the_full_order.tb_account_recipe_detail r
-		          LEFT JOIN the_full_order.tb_supplier_ingredient_product sp
-		            ON sp.supplier_product_id = (
-		              SELECT ap.supplier_product_id
-		                FROM the_full_order.tb_account_ingredient_product ap
-		                JOIN the_full_order.tb_supplier_ingredient_product sp2
-		                  ON sp2.supplier_product_id = ap.supplier_product_id
-		               WHERE ap.account_id = r.account_id
-		                 AND sp2.ingredient_id = r.ingredient_id
-		                 AND ap.active_yn = 'Y'
-		               ORDER BY ap.preferred_yn DESC, ap.account_ingredient_product_id
-		               LIMIT 1)
-		         WHERE r.account_id = T.account_id AND r.menu_id = T.menu_id) AS menu_cost_complete
+		       (SELECT CASE WHEN COUNT(*)>0 AND COUNT(c.cost_per_person)=COUNT(*) THEN ROUND(SUM(c.cost_per_person),4) END
+                 FROM (<include refid="accountRecipeCosts"/>) c WHERE c.account_id=T.account_id AND c.menu_id=T.menu_id) AS menu_cost_per_person,
+               (SELECT CASE WHEN COUNT(*)>0 AND COUNT(c.cost_per_person)=COUNT(*) THEN 1 ELSE 0 END
+                 FROM (<include refid="accountRecipeCosts"/>) c WHERE c.account_id=T.account_id AND c.menu_id=T.menu_id) AS menu_cost_complete,
+               (SELECT GROUP_CONCAT(CONCAT(COALESCE(c.ingredient_name,c.ingredient_id), ': ',c.missing_reason) SEPARATOR ', ')
+                 FROM (<include refid="accountRecipeCosts"/>) c WHERE c.account_id=T.account_id AND c.menu_id=T.menu_id AND c.cost_per_person IS NULL) AS menu_cost_reason
 		FROM the_full_order.tb_account_menu_master T
 		JOIN the_full_order.tb_menu_master T2
 		ON T2.menu_id = T.menu_id

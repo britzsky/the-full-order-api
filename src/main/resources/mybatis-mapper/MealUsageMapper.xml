@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.MealUsageMapper">
+ <select id="lockService" resultType="map">
+  SELECT * FROM the_full_order.tb_account_meal_service WHERE meal_service_id=#{meal_service_id}
+  <if test="account_id!=null">AND account_id=#{account_id}</if> FOR UPDATE
+ </select>
+ <select id="requirements" resultType="map">
+  SELECT * FROM the_full_order.tb_account_meal_ingredient_requirement WHERE meal_service_id=#{meal_service_id} ORDER BY ingredient_id,menu_id
+ </select>
+ <select id="balances" resultType="map">
+  SELECT b.*,p.product_name product_name_snapshot FROM the_full_order.tb_account_inventory_balance b
+  JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=b.account_id AND ap.account_ingredient_product_id=b.account_ingredient_product_id
+  JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+  WHERE b.account_id=#{account_id} AND ap.mapped_ingredient_id=#{ingredient_id}
+  ORDER BY b.created_at,b.inventory_balance_id FOR UPDATE
+ </select>
+ <select id="lots" resultType="map">
+  SELECT * FROM the_full_order.tb_account_inventory_lot WHERE account_id=#{account_id}
+   AND account_ingredient_product_id=#{account_ingredient_product_id} AND location_id=#{location_id}
+   AND remaining_base_qty&gt;0 ORDER BY received_date,inventory_lot_id FOR UPDATE
+ </select>
+ <select id="lockBalance" resultType="map">
+  SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} AND account_id=#{account_id} FOR UPDATE
+ </select>
+ <update id="changeBalance">
+  UPDATE the_full_order.tb_account_inventory_balance SET
+   average_unit_cost=CASE WHEN current_base_qty+#{quantity_delta}=0 THEN 0 ELSE GREATEST(inventory_amount+#{amount_delta},0)/(current_base_qty+#{quantity_delta}) END,
+   inventory_amount=CASE WHEN current_base_qty+#{quantity_delta}=0 THEN 0 ELSE GREATEST(inventory_amount+#{amount_delta},0) END,
+   current_base_qty=current_base_qty+#{quantity_delta},last_movement_at=NOW(),user_id=#{user_id}
+  WHERE inventory_balance_id=#{inventory_balance_id} AND account_id=#{account_id} AND current_base_qty+#{quantity_delta}&gt;=0
+ </update>
+ <update id="changeLot">
+  UPDATE the_full_order.tb_account_inventory_lot SET remaining_base_qty=remaining_base_qty+#{quantity_delta},
+   status=CASE WHEN status NOT IN ('AVAILABLE','CONSUMED') THEN status WHEN remaining_base_qty=0 THEN 'CONSUMED' ELSE 'AVAILABLE' END
+  WHERE inventory_lot_id=#{inventory_lot_id} AND account_id=#{account_id} AND remaining_base_qty+#{quantity_delta} BETWEEN 0 AND received_base_qty
+ </update>
+ <insert id="insertUsage">
+  INSERT INTO the_full_order.tb_account_meal_stock_usage
+   (usage_id,meal_service_id,account_id,menu_id,ingredient_id,inventory_balance_id,account_ingredient_product_id,location_id,inventory_lot_id,
+    quantity,base_unit,unit_cost_snapshot,product_name_snapshot,origin_name_snapshot,user_id)
+  VALUES(#{usage_id},#{meal_service_id},#{account_id},#{menu_id},#{ingredient_id},#{inventory_balance_id},#{account_ingredient_product_id},#{location_id},#{inventory_lot_id},
+    #{quantity},#{base_unit},#{unit_cost_snapshot},#{product_name_snapshot},#{origin_name_snapshot},#{user_id})
+ </insert>
+ <select id="activeUsage" resultType="map">
+  SELECT * FROM the_full_order.tb_account_meal_stock_usage WHERE meal_service_id=#{meal_service_id} AND reversed_at IS NULL ORDER BY inventory_balance_id,usage_id FOR UPDATE
+ </select>
+ <update id="reverseUsage">UPDATE the_full_order.tb_account_meal_stock_usage SET reversed_at=NOW() WHERE usage_id=#{usage_id} AND reversed_at IS NULL</update>
+ <insert id="movement">
+  INSERT INTO the_full_order.tb_account_inventory_movement
+   (movement_id,account_id,account_ingredient_product_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,
+    base_unit,reference_type,reference_id,movement_at,user_id,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after)
+  VALUES(#{movement_id},#{account_id},#{account_ingredient_product_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},
+   #{base_unit},'MEAL_SERVICE',#{usage_id},NOW(),#{user_id},#{unit_cost_snapshot},#{amount_delta},#{average_unit_cost_before},#{average_unit_cost_after})
+ </insert>
+ <update id="status">
+  UPDATE the_full_order.tb_account_meal_service SET status=#{status},actual_servings=#{actual_servings},user_id=#{user_id},mod_at=NOW() WHERE meal_service_id=#{meal_service_id}
+ </update>
+ <sql id="originText">
+  COALESCE(NULLIF(CONCAT_WS(' / ',NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.rawMaterialOrigin1')),''),
+   NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.rawMaterialOrigin2')),''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.originPlaceNm')),'')),''),
+   NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.origin')),''),'원산지 미확인')
+ </sql>
+ <update id="snapshotOrigins">
+  UPDATE the_full_order.tb_account_meal_ingredient_requirement r
+  JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+  LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=r.supplier_product_id
+  LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+  LEFT JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=(
+   SELECT so.supplier_offer_id FROM the_full_order.tb_supplier_site_product_offer so
+   JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=so.supplier_account_site_id
+   WHERE ss.account_id=ms.account_id AND ss.active_yn='Y' AND so.supplier_product_id=r.supplier_product_id AND so.active_yn='Y'
+    AND (so.valid_from IS NULL OR so.valid_from&lt;=CURRENT_DATE) AND (so.valid_to IS NULL OR so.valid_to&gt;=CURRENT_DATE)
+   ORDER BY so.last_synced_at DESC,so.supplier_offer_id DESC LIMIT 1)
+  SET r.product_name_snapshot=COALESCE(p.product_name,i.ingredient_name_std,i.ingredient_name_raw),r.origin_name_snapshot=<include refid="originText"/>
+  WHERE r.meal_service_id=#{meal_service_id} AND r.origin_name_snapshot IS NULL
+ </update>
+ <select id="origins" resultType="map">
+  SELECT r.menu_id,r.ingredient_id,COALESCE(r.product_name_snapshot,i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
+    COALESCE(r.origin_name_snapshot,'원산지 미확인 (보존 기록 없음)') origin_name,'SAVED' origin_source,ms.meal_service_id
+  FROM the_full_order.tb_account_meal_ingredient_requirement r
+  JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+  LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+  WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND ms.status&lt;&gt;'COMPLETED'
+  UNION ALL
+  SELECT u.menu_id,u.ingredient_id,u.product_name_snapshot,u.origin_name_snapshot,'ACTUAL',ms.meal_service_id
+  FROM the_full_order.tb_account_meal_stock_usage u JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=u.meal_service_id
+  WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND u.reversed_at IS NULL AND ms.status='COMPLETED'
+ </select>
+</mapper>

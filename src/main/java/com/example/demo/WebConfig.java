@@ -36,7 +36,7 @@ public class WebConfig implements WebMvcConfigurer {
 						"http://localhost:8092",
 						"http://172.30.1.48:8081")
 				.allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-				.allowedHeaders("Authorization", "x-refresh-token", "Content-Type", "guid")
+				.allowedHeaders("Authorization", "x-refresh-token", "Content-Type", "guid", "X-Workspace-Request")
 				.exposedHeaders("Authorization", "x-refresh-token")
 				.allowCredentials(true)
 				.maxAge(3600);

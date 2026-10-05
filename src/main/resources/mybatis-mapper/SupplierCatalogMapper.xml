@@ -29,7 +29,7 @@
                  ORDER BY ph.effective_from DESC LIMIT 1) current_price
         FROM the_full_order.tb_supplier_ingredient_product p
         JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
-        JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
+        LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
         WHERE 1=1
         <if test="supplier_product_id != null and supplier_product_id != ''">AND p.supplier_product_id=#{supplier_product_id}</if>
         <if test="supplier_id != null and supplier_id != ''">AND p.supplier_id=#{supplier_id}</if>
@@ -43,7 +43,29 @@
          minimum_order_qty,order_multiple_qty,tax_type,active_yn,user_id)
         VALUES (#{supplier_id},#{ingredient_id},#{supplier_item_code},#{product_name},#{order_unit},#{package_qty},#{package_unit},
         #{base_qty},#{base_unit},COALESCE(#{minimum_order_qty},1),COALESCE(#{order_multiple_qty},1),#{tax_type},COALESCE(#{active_yn},'Y'),#{user_id})
+        ON DUPLICATE KEY UPDATE
+        supplier_product_id=LAST_INSERT_ID(supplier_product_id),
+        ingredient_id=VALUES(ingredient_id),
+        product_name=VALUES(product_name),
+        order_unit=VALUES(order_unit),
+        package_qty=VALUES(package_qty),
+        package_unit=VALUES(package_unit),
+        base_qty=VALUES(base_qty),
+        base_unit=VALUES(base_unit),
+        minimum_order_qty=VALUES(minimum_order_qty),
+        order_multiple_qty=VALUES(order_multiple_qty),
+        tax_type=VALUES(tax_type),
+        active_yn=VALUES(active_yn),
+        user_id=VALUES(user_id),
+        mod_at=NOW()
     </insert>
+    <select id="productForUpdate" parameterType="map" resultType="hashmap">
+        SELECT * FROM the_full_order.tb_supplier_ingredient_product
+        WHERE supplier_product_id=#{supplier_product_id} FOR UPDATE
+    </select>
+    <select id="ingredientBaseUnit" parameterType="map" resultType="string">
+        SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}
+    </select>
     <update id="updateProduct" parameterType="map">
         UPDATE the_full_order.tb_supplier_ingredient_product
         <set>
@@ -72,6 +94,11 @@
         INSERT INTO the_full_order.tb_supplier_ingredient_price_history
         (supplier_product_id,purchase_price,effective_from,effective_to,user_id)
         VALUES (#{supplier_product_id},#{purchase_price},#{effective_from},#{effective_to},#{user_id})
+        ON DUPLICATE KEY UPDATE
+        price_history_id=LAST_INSERT_ID(price_history_id),
+        purchase_price=VALUES(purchase_price),
+        effective_to=VALUES(effective_to),
+        user_id=VALUES(user_id)
     </insert>
     <update id="updatePrice" parameterType="map">
         UPDATE the_full_order.tb_supplier_ingredient_price_history SET purchase_price=#{purchase_price},
@@ -80,23 +107,29 @@
     <delete id="deletePrice" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_price_history WHERE price_history_id=#{price_history_id}</delete>
 
     <select id="accountProducts" parameterType="map" resultType="hashmap">
-        SELECT ap.*,p.ingredient_id,p.supplier_item_code,p.product_name,p.order_unit,p.base_qty,p.base_unit,
+        SELECT ap.*,ap.mapped_ingredient_id ingredient_id,p.supplier_item_code,p.product_name,p.order_unit,COALESCE(ap.link_base_qty,p.base_qty) base_qty,COALESCE(ap.link_base_unit,p.base_unit) base_unit,
+               p.base_qty product_base_qty,p.base_unit product_base_unit,p.alt_base_qty,p.alt_base_unit,
                s.supplier_id,s.supplier_name,ph.purchase_price current_price
         FROM the_full_order.tb_account_ingredient_product ap
         JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
         JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
         LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
         WHERE 1=1
+        <if test="active_yn != null and active_yn != ''">AND ap.active_yn=#{active_yn}</if>
         <if test="account_id != null and account_id != ''">AND ap.account_id=#{account_id}</if>
         <if test="account_ingredient_product_id != null and account_ingredient_product_id != ''">AND ap.account_ingredient_product_id=#{account_ingredient_product_id}</if>
-        <if test="ingredient_id != null and ingredient_id != ''">AND p.ingredient_id=#{ingredient_id}</if>
-        ORDER BY p.ingredient_id,ap.preferred_yn DESC,s.supplier_name
+        <if test="ingredient_id != null and ingredient_id != ''">AND ap.mapped_ingredient_id=#{ingredient_id}</if>
+        ORDER BY ap.mapped_ingredient_id,ap.preferred_yn DESC,s.supplier_name
     </select>
     <update id="clearPreferredProduct" parameterType="map">
+        <!-- 같은 거래처에서 같은 식재료에 연결된 상품끼리만 기준상품을 해제한다 (본사 식자재 분류는 사용하지 않음).
+             DISTINCT: 같은 테이블을 갱신하면서 조회하므로 파생 테이블을 강제로 물리화한다 (MySQL 1093 회피). -->
         UPDATE the_full_order.tb_account_ingredient_product ap
-        JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+        JOIN (SELECT DISTINCT mapped_ingredient_id FROM the_full_order.tb_account_ingredient_product
+               WHERE account_id=#{account_id} AND supplier_product_id=#{supplier_product_id}) target
+          ON target.mapped_ingredient_id=ap.mapped_ingredient_id
         SET ap.preferred_yn='N',ap.mod_at=NOW()
-        WHERE ap.account_id=#{account_id} AND p.ingredient_id=(SELECT ingredient_id FROM the_full_order.tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id})
+        WHERE ap.account_id=#{account_id}
     </update>
     <insert id="insertAccountProduct" parameterType="map" useGeneratedKeys="true" keyProperty="account_ingredient_product_id">
         INSERT INTO the_full_order.tb_account_ingredient_product

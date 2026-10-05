@@ -12,11 +12,11 @@ import com.example.demo.mapper.PaymentMapper;
 public class PaymentService {
 
 	PaymentMapper paymentMapper;
-	
+
 	public PaymentService(PaymentMapper paymentMapper) {
 		this.paymentMapper = paymentMapper;
 	}
-	
+
 	public List<Map<String, Object>> SubscriptionStatus(Map<String, Object> paramMap) {
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = paymentMapper.SubscriptionStatus(paramMap);

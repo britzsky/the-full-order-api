@@ -7,12 +7,13 @@ import java.time.format.DateTimeFormatter;
 
 import org.springframework.stereotype.Component;
 
-/** Generates the 19-character transaction id required by the Welstory gateway. */
+/**
+ * Generates the 19-character transaction id required by the Welstory gateway.
+ */
 @Component
 public class WelstoryGuidGenerator {
 
-	private static final DateTimeFormatter FORMATTER =
-			DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
+	private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
 
 	private final Clock clock;
 	private long lastEpochMilli = -1;

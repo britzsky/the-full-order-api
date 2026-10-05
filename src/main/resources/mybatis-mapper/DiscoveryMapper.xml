@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.DiscoveryMapper">
+  <select id="search" resultType="map">
+    WITH recipe_matches AS (
+      SELECT rd.menu_id,
+        GROUP_CONCAT(DISTINCT CASE
+          WHEN LOCATE(#{query},im.ingredient_name_std)&gt;0 THEN im.ingredient_name_std
+          WHEN LOCATE(#{query},rd.ingredient_name_raw)&gt;0 THEN rd.ingredient_name_raw
+          ELSE im.ingredient_name_raw END ORDER BY rd.ingredient_seq SEPARATOR ', ') matched_ingredients
+      FROM the_full_order.tb_recipe_detail rd
+      LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+      WHERE LOCATE(#{query},im.ingredient_name_std)&gt;0
+         OR LOCATE(#{query},im.ingredient_name_raw)&gt;0
+         OR LOCATE(#{query},rd.ingredient_name_raw)&gt;0
+      GROUP BY rd.menu_id
+    )
+    SELECT * FROM (
+      SELECT 'MENU' entity_type,m.menu_id entity_id,m.menu_name title,'메뉴' category,
+        r.matched_ingredients
+      FROM the_full_order.tb_menu_master m
+      LEFT JOIN recipe_matches r ON r.menu_id=m.menu_id
+      WHERE m.del_yn='N' AND (LOCATE(#{query},m.menu_name)&gt;0 OR r.menu_id IS NOT NULL)
+      UNION ALL
+      SELECT 'INGREDIENT',ingredient_id,ingredient_name_std,'식재료',NULL
+      FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND active_yn='Y'
+        AND LOCATE(#{query},ingredient_name_std)&gt;0
+    ) results ORDER BY CASE WHEN title=#{query} THEN 0 WHEN LOCATE(#{query},title)&gt;0 THEN 1 ELSE 2 END,
+      CHAR_LENGTH(title),title,entity_id LIMIT #{limit}
+  </select>
+  <!-- 사용 빈도와 즐겨찾기를 집계하고 최근 반복을 줄여 추천한다. -->
+  <select id="recommendedMenus" resultType="map">
+    SELECT m.menu_id,m.menu_name,m.food_type,m.meal_plan_type,m.calories_per_serving,
+      COALESCE(u.usage_count,0) usage_count,COALESCE(u.recent_count,0) recent_count,
+      COALESCE(f.favorite,0) favorite,
+      COALESCE(f.favorite,0)*10+LEAST(COALESCE(u.usage_count,0),20)-COALESCE(u.recent_count,0)*5 score
+    FROM the_full_order.tb_account_menu_master m
+    LEFT JOIN (
+      SELECT d.account_id,d.menu_id,COUNT(*) usage_count,
+        SUM(CASE WHEN ms.meal_date&gt;=DATE_SUB(#{meal_date},INTERVAL 7 DAY) AND ms.meal_date&lt;=#{meal_date} THEN 1 ELSE 0 END) recent_count
+      FROM the_full_order.tb_account_table_meals_detail d
+      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=d.meal_service_id
+      WHERE d.account_id=#{account_id} AND ms.meal_date&lt;=#{meal_date} AND ms.status!='CANCELED'
+      GROUP BY d.account_id,d.menu_id
+    ) u ON u.account_id=m.account_id AND u.menu_id=m.menu_id
+    LEFT JOIN (SELECT account_id,menu_id,MAX(CASE WHEN `like`=1 THEN 1 ELSE 0 END) favorite
+      FROM the_full_order.tb_like_menu WHERE account_id=#{account_id} AND user_id=#{user_id}
+      GROUP BY account_id,menu_id) f ON f.account_id=m.account_id AND f.menu_id=m.menu_id
+    WHERE m.account_id=#{account_id} AND m.del_yn='N'
+    <if test="meal_plan_type != null and meal_plan_type != ''">AND m.meal_plan_type=#{meal_plan_type}</if>
+    ORDER BY score DESC,m.menu_name,m.menu_id LIMIT #{limit}
+  </select>
+</mapper>

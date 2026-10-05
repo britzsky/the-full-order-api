@@ -20,16 +20,13 @@ public class PaymentController {
 	private final String uploadDir;
 
 	@Autowired
-	public PaymentController(
-			PaymentService paymentService,
-			@Value("${file.upload-dir}") String uploadDir) {
+	public PaymentController(PaymentService paymentService, @Value("${file.upload-dir}") String uploadDir) {
 		this.paymentService = paymentService;
 		this.uploadDir = uploadDir;
 	}
-	
+
 	/*
-	 * method : SubscriptionStatus
-	 * comment : 구독상태 조회
+	 * part : 결제 method : SubscriptionStatus comment : 구독상태 조회
 	 */
 	@GetMapping("/Payment/SubscriptionStatus")
 	public String DetailList(@RequestParam Map<String, Object> paramMap) {

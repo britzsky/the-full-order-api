@@ -25,6 +25,7 @@ bin/
 out/
 !**/src/main/**/out/
 !**/src/test/**/out/
+docs/
 
 ### NetBeans ###
 /nbproject/private/
@@ -47,6 +48,15 @@ out/
 the-full-ocr-project-f7202d1e7284.json
 the-full-ocr-project-4680f824e68a.json
 
-
 rebuild_modified_tables_drop_create.sql
 seed_meal_inventory_procurement_test_data.sql
+
+**/ddl-source
+**/deliverables
+**/.tmp
+**/scripts
+
+**.txt
+**.md
+**.xlsx
+**.sql

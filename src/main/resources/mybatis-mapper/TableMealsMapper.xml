@@ -72,12 +72,15 @@
 		       D.serving_qty,
 		       D.menu_id,
 		       D.menu_name,
+		       M.calories_per_serving,
 		       D.food_type,
 		       D.menu_type,
 		       D.menu_gubun
 		  FROM the_full_order.tb_account_table_meals H
 		  LEFT JOIN the_full_order.tb_account_table_meals_detail D
 		    ON D.table_id = H.table_id
+		  LEFT JOIN the_full_order.tb_account_menu_master M
+		    ON M.account_id = H.account_id AND M.menu_id = D.menu_id
 		  LEFT OUTER JOIN the_full.tb_account_diners_number T2
 		  	ON T2.account_id = H.account_id
 		 WHERE 1 = 1

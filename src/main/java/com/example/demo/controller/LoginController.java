@@ -13,6 +13,9 @@ import com.example.demo.WebConfig;
 import com.example.demo.service.LoginService;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.example.demo.security.WorkspaceUser;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.bind.annotation.GetMapping;
 
 @RestController
 public class LoginController {
@@ -21,21 +24,19 @@ public class LoginController {
 	private final String uploadDir;
 
 	@Autowired
-	public LoginController(
-			LoginService loginService,
-			WebConfig webConfig,
+	public LoginController(LoginService loginService, WebConfig webConfig,
 			@Value("${file.upload-dir}") String uploadDir) {
 		this.loginService = loginService;
 		this.uploadDir = uploadDir;
 	}
 
 	/*
-	 * method : Login
-	 * comment : 로그인
+	 * part : 로그인 method : Login comment : 로그인
 	 */
 	@PostMapping("/User/Login")
-	public String Login(@RequestBody HashMap<String, Object> map) {
-		
+	public String Login(@RequestBody HashMap<String, Object> map, HttpServletRequest request) {
+		if (request.getSession(false) != null) request.getSession(false).invalidate();
+
 		Map<String, Object> resultMap = loginService.Login(map);
 		JsonObject obj = new JsonObject();
 
@@ -58,10 +59,13 @@ public class LoginController {
 		}
 
 		// ===== 성공 응답 =====
+		var session=request.getSession(true);
+		session.setMaxInactiveInterval(8*60*60);
+		session.setAttribute(WorkspaceUser.SESSION_KEY,WorkspaceUser.from(resultMap));
 		obj.addProperty("user_id", String.valueOf(resultMap.get("user_id")));
 		obj.addProperty("user_type", String.valueOf(resultMap.get("user_type")));
 		obj.addProperty("position", String.valueOf(resultMap.get("position")));
-		
+
 		String user_id = String.valueOf(resultMap.get("user_id"));
 		int position = Integer.parseInt(String.valueOf(resultMap.get("position")));
 
@@ -77,50 +81,58 @@ public class LoginController {
 		} else {
 			obj.addProperty("position_name", "Manager");
 		}
-		
+
 		obj.addProperty("department", String.valueOf(resultMap.get("department")));
 		obj.addProperty("account_id", String.valueOf(resultMap.get("account_id")));
 		obj.addProperty("user_name", String.valueOf(resultMap.get("user_name")));
+		obj.addProperty("account_name", String.valueOf(resultMap.get("account_name")));
 
 		obj.addProperty("code", statusCode);
 
 		return obj.toString();
 	}
-	
-	/* 
-	 * part		: 근태관리
-     * method 	: AccountCoordinateInfo
-     * comment 	: 근무지 좌표 조회.
-     */
-	@PostMapping("/User/AccountCoordinateInfo")
-    private String AccountCoordinateInfo(@RequestBody Map<String, Object> paramMap) {
-    	Map<String, Object> resultMap = new HashMap<String, Object>();
-    	resultMap = loginService.AccountCoordinateInfo(paramMap);
-    	
-    	return new Gson().toJson(resultMap);
-    }
-	
+
+	@GetMapping("/User/Session")
+	public WorkspaceUser session(HttpServletRequest request) {
+		return com.example.demo.security.WorkspaceAccess.user(request);
+	}
+
+	@PostMapping("/User/Logout")
+	public Map<String,Object> logout(HttpServletRequest request) {
+		if(request.getSession(false)!=null) request.getSession(false).invalidate();
+		return Map.of("code",200);
+	}
+
 	/*
-	 * part		: 근태관리
-	 * method : CommuteSave
-	 * comment : 출퇴근 저장
+	 * part : 근태관리 method : AccountCoordinateInfo comment : 근무지 좌표 조회.
+	 */
+	@PostMapping("/User/AccountCoordinateInfo")
+	private String AccountCoordinateInfo(@RequestBody Map<String, Object> paramMap) {
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		resultMap = loginService.AccountCoordinateInfo(paramMap);
+
+		return new Gson().toJson(resultMap);
+	}
+
+	/*
+	 * part : 근태관리 method : CommuteSave comment : 출퇴근 저장
 	 */
 	@PostMapping("/User/CommuteSave")
 	public String ApprovalSave(@RequestBody Map<String, Object> paramMap) {
 		int iResult = 0;
-    	
+
 		iResult = loginService.CommuteSave(paramMap);
-    	
-    	JsonObject obj = new JsonObject();
-    	
-    	if(iResult > 0) {
+
+		JsonObject obj = new JsonObject();
+
+		if (iResult > 0) {
 			obj.addProperty("code", 200);
 			obj.addProperty("message", "성공");
-    	} else {
-    		obj.addProperty("code", 400);
+		} else {
+			obj.addProperty("code", 400);
 			obj.addProperty("message", "실패");
-    	}
-    	
-    	return obj.toString();
+		}
+
+		return obj.toString();
 	}
 }

@@ -53,11 +53,8 @@ public class WelstoryItemLookupService {
 	private volatile CachedToken cachedToken;
 	private volatile CachedPublicIp cachedPublicIp;
 
-	public WelstoryItemLookupService(
-			WebClient.Builder webClientBuilder,
-			WelstoryGuidGenerator guidGenerator,
-			@Value("${welstory.api.base-url:}") String apiBaseUrl,
-			@Value("${welstory.api.token-url:}") String tokenUrl,
+	public WelstoryItemLookupService(WebClient.Builder webClientBuilder, WelstoryGuidGenerator guidGenerator,
+			@Value("${welstory.api.base-url:}") String apiBaseUrl, @Value("${welstory.api.token-url:}") String tokenUrl,
 			@Value("${welstory.api.revoke-url:}") String revokeUrl,
 			@Value("${welstory.api.realtime-item-url:}") String realtimeItemUrl,
 			@Value("${welstory.api.access-token:}") String configuredAccessToken,
@@ -88,11 +85,13 @@ public class WelstoryItemLookupService {
 	}
 
 	public String accessToken() {
-		if (!configuredAccessToken.isBlank()) return configuredAccessToken;
+		if (!configuredAccessToken.isBlank())
+			return configuredAccessToken;
 		ensureTokenConfiguration();
 
 		CachedToken current = cachedToken;
-		if (current != null && current.isUsable()) return current.value();
+		if (current != null && current.isUsable())
+			return current.value();
 		return refreshAccessToken();
 	}
 
@@ -111,10 +110,10 @@ public class WelstoryItemLookupService {
 	}
 
 	public JsonNode revokeConfiguredToken() {
-		String token = configuredAccessToken.isBlank()
-				? cachedToken == null ? "" : cachedToken.value()
+		String token = configuredAccessToken.isBlank() ? cachedToken == null ? "" : cachedToken.value()
 				: configuredAccessToken;
-		if (token.isBlank()) throw new IllegalStateException("폐기할 웰스토리 access token이 없습니다.");
+		if (token.isBlank())
+			throw new IllegalStateException("폐기할 웰스토리 access token이 없습니다.");
 		if (revokeUrl.isBlank() || clientId.isBlank() || clientSecret.isBlank()) {
 			throw new IllegalStateException("토큰 폐기를 위한 revoke-url, client-id, client-secret 설정이 필요합니다.");
 		}
@@ -125,13 +124,12 @@ public class WelstoryItemLookupService {
 		form.put("token", token);
 		logRequest("TOKEN_REVOKE", revokeUrl, MediaType.APPLICATION_FORM_URLENCODED_VALUE, form);
 		long startedAt = System.nanoTime();
-		Mono<JsonNode> responseMono = webClient.post().uri(revokeUrl)
-				.contentType(MediaType.APPLICATION_FORM_URLENCODED)
+		Mono<JsonNode> responseMono = webClient.post().uri(revokeUrl).contentType(MediaType.APPLICATION_FORM_URLENCODED)
 				.accept(MediaType.APPLICATION_JSON)
-				.body(BodyInserters.fromFormData("client_id", clientId)
-						.with("client_secret", clientSecret)
+				.body(BodyInserters.fromFormData("client_id", clientId).with("client_secret", clientSecret)
 						.with("token", token))
-				.exchangeToMono(clientResponse -> handleResponse("TOKEN_REVOKE", revokeUrl, "-", startedAt, clientResponse));
+				.exchangeToMono(
+						clientResponse -> handleResponse("TOKEN_REVOKE", revokeUrl, "-", startedAt, clientResponse));
 		JsonNode response = blockResponse(responseMono, "TOKEN_REVOKE", revokeUrl, "-", startedAt);
 		invalidate(token);
 		return response;
@@ -147,20 +145,17 @@ public class WelstoryItemLookupService {
 		headers.put("guid", guid);
 		logRequest("API", url, headers, request, "JSON (UTF-8 HTTP request body)");
 		long startedAt = System.nanoTime();
-		Mono<JsonNode> responseMono = webClient.post()
-				.uri(url)
-				.contentType(MediaType.APPLICATION_JSON)
-				.accept(MediaType.APPLICATION_JSON)
-				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-				.header("guid", guid)
-				.bodyValue(request)
+		Mono<JsonNode> responseMono = webClient.post().uri(url).contentType(MediaType.APPLICATION_JSON)
+				.accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("guid", guid).bodyValue(request)
 				.exchangeToMono(response -> handleResponse("API", url, guid, startedAt, response));
 		return blockResponse(responseMono, "API", url, guid, startedAt);
 	}
 
 	private synchronized String refreshAccessToken() {
 		CachedToken current = cachedToken;
-		if (current != null && current.isUsable()) return current.value();
+		if (current != null && current.isUsable())
+			return current.value();
 
 		Map<String, String> form = new LinkedHashMap<>();
 		form.put("client_id", clientId);
@@ -169,23 +164,18 @@ public class WelstoryItemLookupService {
 		form.put("grant_type", "client_credentials");
 		logRequest("TOKEN_ISSUE", tokenUrl, MediaType.APPLICATION_FORM_URLENCODED_VALUE, form);
 		long startedAt = System.nanoTime();
-		Mono<JsonNode> responseMono = webClient.post()
-				.uri(tokenUrl)
-				.contentType(MediaType.APPLICATION_FORM_URLENCODED)
+		Mono<JsonNode> responseMono = webClient.post().uri(tokenUrl).contentType(MediaType.APPLICATION_FORM_URLENCODED)
 				.accept(MediaType.APPLICATION_JSON)
-				.body(BodyInserters.fromFormData("client_id", clientId)
-						.with("client_secret", clientSecret)
-						.with("scope", "oob")
-						.with("grant_type", "client_credentials"))
-				.exchangeToMono(clientResponse -> handleResponse("TOKEN_ISSUE", tokenUrl, "-", startedAt, clientResponse));
+				.body(BodyInserters.fromFormData("client_id", clientId).with("client_secret", clientSecret)
+						.with("scope", "oob").with("grant_type", "client_credentials"))
+				.exchangeToMono(
+						clientResponse -> handleResponse("TOKEN_ISSUE", tokenUrl, "-", startedAt, clientResponse));
 		JsonNode response = blockResponse(responseMono, "TOKEN_ISSUE", tokenUrl, "-", startedAt);
 
 		String token = response == null ? "" : response.path("access_token").asText("").trim();
 		if (token.isEmpty()) {
 			String description = response == null ? "" : response.path("error_description").asText("");
-			throw new IllegalStateException(description.isBlank()
-					? "웰스토리 access token 발급에 실패했습니다."
-					: description);
+			throw new IllegalStateException(description.isBlank() ? "웰스토리 access token 발급에 실패했습니다." : description);
 		}
 		long expiresIn = Math.max(1, response.path("expires_in").asLong(3600));
 		cachedToken = new CachedToken(token, Instant.now().plusSeconds(expiresIn));
@@ -193,7 +183,8 @@ public class WelstoryItemLookupService {
 	}
 
 	private synchronized void invalidate(String token) {
-		if (cachedToken != null && cachedToken.value().equals(token)) cachedToken = null;
+		if (cachedToken != null && cachedToken.value().equals(token))
+			cachedToken = null;
 	}
 
 	private void ensureConfigured(String apiPath) {
@@ -201,11 +192,13 @@ public class WelstoryItemLookupService {
 		if (apiBaseUrl.isBlank() && (!realtimeItemApi || realtimeItemUrl.isBlank())) {
 			throw new IllegalStateException("welstory.api.base-url 설정이 필요합니다.");
 		}
-		if (configuredAccessToken.isBlank()) ensureTokenConfiguration();
+		if (configuredAccessToken.isBlank())
+			ensureTokenConfiguration();
 	}
 
 	private void ensureTokenConfiguration() {
-		if (tokenUrl.isBlank()) throw new IllegalStateException("welstory.api.token-url 설정이 필요합니다.");
+		if (tokenUrl.isBlank())
+			throw new IllegalStateException("welstory.api.token-url 설정이 필요합니다.");
 		if (clientId.isBlank() || clientSecret.isBlank()) {
 			throw new IllegalStateException("welstory.api.client-id와 client-secret 설정이 필요합니다.");
 		}
@@ -227,6 +220,11 @@ public class WelstoryItemLookupService {
 	}
 
 	private void logRequest(String type, String url, Map<String, String> headers, Object body, String wireFormat) {
+		Map<String, String> safeHeaders = new LinkedHashMap<>(headers);
+		if (safeHeaders.containsKey(HttpHeaders.AUTHORIZATION)) {
+			safeHeaders.put(HttpHeaders.AUTHORIZATION, "Bearer ***");
+		}
+		Object safeBody = sanitizeLogBody(body);
 		log.info("""
 
 				========== WELSTORY OUTBOUND REQUEST ==========
@@ -239,17 +237,33 @@ public class WelstoryItemLookupService {
 				headers     : {}
 				body        : {}
 				wireFormat  : {}
-				===============================================""",
-				type, OffsetDateTime.now(LOG_ZONE), resolveLocalIp(url), resolvePublicIp(), url, headers, body, wireFormat);
+				===============================================""", type, OffsetDateTime.now(LOG_ZONE),
+				resolveLocalIp(url), resolvePublicIp(), url, safeHeaders, safeBody, wireFormat);
 	}
 
-	private Mono<JsonNode> handleResponse(
-			String type, String url, String guid, long startedAt, ClientResponse response) {
+	private Object sanitizeLogBody(Object body) {
+		if (!(body instanceof Map<?, ?> source))
+			return body;
+		Map<String, Object> safe = new LinkedHashMap<>();
+		source.forEach((key, value) -> {
+			String name = String.valueOf(key);
+			if ("client_secret".equalsIgnoreCase(name) || "token".equalsIgnoreCase(name)
+					|| "access_token".equalsIgnoreCase(name) || "refresh_token".equalsIgnoreCase(name)) {
+				safe.put(name, "***");
+			} else {
+				safe.put(name, value);
+			}
+		});
+		return safe;
+	}
+
+	private Mono<JsonNode> handleResponse(String type, String url, String guid, long startedAt,
+			ClientResponse response) {
 		long elapsedMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
 		if (response.statusCode().isError()) {
 			return response.createException().flatMap(exception -> {
-				logResponse(type, url, guid, exception.getStatusCode().value(),
-						exception.getHeaders(), exception.getResponseBodyAsString(), elapsedMs);
+				logResponse(type, url, guid, exception.getStatusCode().value(), exception.getHeaders(),
+						exception.getResponseBodyAsString(), elapsedMs);
 				return Mono.error(exception);
 			});
 		}
@@ -257,12 +271,11 @@ public class WelstoryItemLookupService {
 		return response.bodyToMono(JsonNode.class)
 				.doOnNext(body -> logResponse(type, url, guid, response.statusCode().value(),
 						response.headers().asHttpHeaders(), body, elapsedMs))
-				.switchIfEmpty(Mono.fromRunnable(() -> logResponse(type, url, guid,
-						response.statusCode().value(), response.headers().asHttpHeaders(), "<empty>", elapsedMs)));
+				.switchIfEmpty(Mono.fromRunnable(() -> logResponse(type, url, guid, response.statusCode().value(),
+						response.headers().asHttpHeaders(), "<empty>", elapsedMs)));
 	}
 
-	private JsonNode blockResponse(
-			Mono<JsonNode> responseMono, String type, String url, String guid, long startedAt) {
+	private JsonNode blockResponse(Mono<JsonNode> responseMono, String type, String url, String guid, long startedAt) {
 		try {
 			return responseMono.block(timeout);
 		} catch (WebClientResponseException exception) {
@@ -274,8 +287,8 @@ public class WelstoryItemLookupService {
 		}
 	}
 
-	private void logCommunicationFailure(
-			String type, String url, String guid, long startedAt, RuntimeException exception) {
+	private void logCommunicationFailure(String type, String url, String guid, long startedAt,
+			RuntimeException exception) {
 		long elapsedMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
 		log.error("""
 
@@ -288,13 +301,12 @@ public class WelstoryItemLookupService {
 				errorType   : {}
 				message     : {}
 				response    : <not received>
-				===============================================""",
-				type, OffsetDateTime.now(LOG_ZONE), guid, url, elapsedMs,
-				exception.getClass().getName(), exception.getMessage(), exception);
+				===============================================""", type, OffsetDateTime.now(LOG_ZONE), guid, url,
+				elapsedMs, exception.getClass().getName(), exception.getMessage(), exception);
 	}
 
-	private void logResponse(
-			String type, String url, String guid, int status, HttpHeaders headers, Object body, long elapsedMs) {
+	private void logResponse(String type, String url, String guid, int status, HttpHeaders headers, Object body,
+			long elapsedMs) {
 		log.info("""
 
 				========== WELSTORY INBOUND RESPONSE ==========
@@ -306,8 +318,8 @@ public class WelstoryItemLookupService {
 				elapsedMs   : {}
 				headers     : {}
 				body        : {}
-				===============================================""",
-				type, OffsetDateTime.now(LOG_ZONE), guid, url, status, elapsedMs, headers, body);
+				===============================================""", type, OffsetDateTime.now(LOG_ZONE), guid, url,
+				status, elapsedMs, headers, body);
 	}
 
 	private String resolveLocalIp(String url) {
@@ -325,16 +337,17 @@ public class WelstoryItemLookupService {
 
 	private String resolvePublicIp() {
 		CachedPublicIp current = cachedPublicIp;
-		if (current != null && current.isUsable()) return current.value();
-		if (publicIpUrl.isBlank()) return "disabled";
+		if (current != null && current.isUsable())
+			return current.value();
+		if (publicIpUrl.isBlank())
+			return "disabled";
 
 		try {
-			HttpRequest request = HttpRequest.newBuilder(URI.create(publicIpUrl))
-					.timeout(Duration.ofSeconds(2))
-					.GET()
+			HttpRequest request = HttpRequest.newBuilder(URI.create(publicIpUrl)).timeout(Duration.ofSeconds(2)).GET()
 					.build();
 			String value = publicIpClient.send(request, HttpResponse.BodyHandlers.ofString()).body().trim();
-			if (value.isBlank() || value.length() > 45) return "unknown (invalid response)";
+			if (value.isBlank() || value.length() > 45)
+				return "unknown (invalid response)";
 			cachedPublicIp = new CachedPublicIp(value, Instant.now().plus(PUBLIC_IP_CACHE_DURATION));
 			return value;
 		} catch (InterruptedException exception) {

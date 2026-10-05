@@ -34,12 +34,9 @@ public class WelstoryWebSocketService {
 	private final AtomicBoolean connected = new AtomicBoolean(false);
 	private volatile String lastError = "";
 
-	public WelstoryWebSocketService(
-			@Value("${welstory.websocket.enabled:false}") boolean enabled,
-			@Value("${welstory.websocket.url:}") String websocketUrl,
-			WelstoryItemLookupService apiService,
-			ObjectMapper objectMapper,
-			ApplicationEventPublisher eventPublisher) {
+	public WelstoryWebSocketService(@Value("${welstory.websocket.enabled:false}") boolean enabled,
+			@Value("${welstory.websocket.url:}") String websocketUrl, WelstoryItemLookupService apiService,
+			ObjectMapper objectMapper, ApplicationEventPublisher eventPublisher) {
 		this.enabled = enabled;
 		this.websocketUrl = websocketUrl;
 		this.apiService = apiService;
@@ -49,7 +46,8 @@ public class WelstoryWebSocketService {
 
 	@EventListener(ApplicationReadyEvent.class)
 	public void connectWhenReady() {
-		if (!enabled) return;
+		if (!enabled)
+			return;
 		if (websocketUrl.isBlank()) {
 			lastError = "welstory.websocket.url 설정이 필요합니다.";
 			log.warn(lastError);
@@ -57,8 +55,7 @@ public class WelstoryWebSocketService {
 		}
 
 		connect()
-				.retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(5))
-						.maxBackoff(Duration.ofMinutes(1))
+				.retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(5)).maxBackoff(Duration.ofMinutes(1))
 						.doBeforeRetry(signal -> log.warn("웰스토리 WebSocket 재연결 시도: {}", signal.failure().getMessage())))
 				.subscribe(null, error -> {
 					connected.set(false);
@@ -68,18 +65,13 @@ public class WelstoryWebSocketService {
 	}
 
 	private Mono<Void> connect() {
-		return Mono.fromCallable(apiService::accessToken)
-				.subscribeOn(Schedulers.boundedElastic())
-				.flatMap(token -> new ReactorNettyWebSocketClient().execute(
-						URI.create(websocketUrl),
-						session -> {
-							ObjectNode auth = objectMapper.createObjectNode().put("token", token);
-							return session.send(Mono.just(session.textMessage(auth.toString())))
-									.thenMany(session.receive()
-											.flatMap(message -> handleMessage(message.getPayloadAsText())))
-									.then();
-						}))
-				.doOnSubscribe(ignored -> log.info("웰스토리 WebSocket 연결 시도"))
+		return Mono.fromCallable(apiService::accessToken).subscribeOn(Schedulers.boundedElastic())
+				.flatMap(token -> new ReactorNettyWebSocketClient().execute(URI.create(websocketUrl), session -> {
+					ObjectNode auth = objectMapper.createObjectNode().put("token", token);
+					return session.send(Mono.just(session.textMessage(auth.toString())))
+							.thenMany(session.receive().flatMap(message -> handleMessage(message.getPayloadAsText())))
+							.then();
+				})).doOnSubscribe(ignored -> log.info("웰스토리 WebSocket 연결 시도"))
 				.doFinally(ignored -> connected.set(false));
 	}
 
@@ -102,7 +94,8 @@ public class WelstoryWebSocketService {
 			String type = data.path("type").asText("");
 			String text = data.path("msg").path("text").asText("");
 			String emrSeq = data.path("msg").path("emrSeq").asText("");
-			if (msgKey.isEmpty()) throw new IllegalStateException("WebSocket 알람 msgKey가 없습니다.");
+			if (msgKey.isEmpty())
+				throw new IllegalStateException("WebSocket 알람 msgKey가 없습니다.");
 
 			JsonNode emergencyResponse = null;
 			if ("1".equals(type) || "3".equals(type)) {
@@ -117,13 +110,20 @@ public class WelstoryWebSocketService {
 				apiService.call("/fdapi/service/payer-alarm-response", request);
 			}
 
-			eventPublisher.publishEvent(new WelstoryAlarmEvent(
-					msgKey, type, text, emrSeq, message, emergencyResponse));
+			eventPublisher.publishEvent(new WelstoryAlarmEvent(msgKey, type, text, emrSeq, message, emergencyResponse));
 			return null;
 		}).subscribeOn(Schedulers.boundedElastic()).then();
 	}
 
-	public boolean isEnabled() { return enabled; }
-	public boolean isConnected() { return connected.get(); }
-	public String getLastError() { return lastError; }
+	public boolean isEnabled() {
+		return enabled;
+	}
+
+	public boolean isConnected() {
+		return connected.get();
+	}
+
+	public String getLastError() {
+		return lastError;
+	}
 }

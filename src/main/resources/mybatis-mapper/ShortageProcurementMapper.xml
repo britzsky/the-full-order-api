@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.ShortageProcurementMapper">
+ <sql id="ingredientColumns">i.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,i.base_unit master_unit</sql>
+ <select id="draftDemand" resultType="map">
+  SELECT rd.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw,rd.ingredient_name_raw) ingredient_name,
+         i.base_unit master_unit,rd.base_unit,
+         CASE WHEN rd.review_flag=0 THEN rd.qty_per_person*d.planned_servings END quantity,
+         m.menu_name,d.menu_id,d.meal_date
+    FROM (
+      <foreach collection="draft_meals" item="meal" separator=" UNION ALL ">
+       SELECT #{meal.menu_id} menu_id,#{meal.planned_servings} planned_servings,
+         COALESCE(#{meal.meal_date},#{date_from}) meal_date
+      </foreach>
+    ) d
+    LEFT JOIN the_full_order.tb_account_menu_master m ON m.account_id=#{account_id} AND m.menu_id=d.menu_id AND m.del_yn='N'
+    LEFT JOIN the_full_order.tb_account_recipe_detail rd ON rd.account_id=m.account_id AND rd.menu_id=m.menu_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=rd.account_id AND i.ingredient_id=rd.ingredient_id
+ </select>
+ <select id="demand" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,r.total_required_qty quantity,r.base_unit,ms.meal_date,m.menu_name
+    FROM the_full_order.tb_account_meal_ingredient_requirement r
+    JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    JOIN the_full_order.tb_account_table_meals t ON t.table_id=ms.table_id AND t.account_id=ms.account_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+    LEFT JOIN the_full_order.tb_account_menu_master m ON m.account_id=ms.account_id AND m.menu_id=r.menu_id
+   WHERE ms.account_id=#{account_id} AND ms.status NOT IN ('CANCELED','COMPLETED') AND t.status&lt;&gt;'CANCELED'
+     AND ms.meal_date BETWEEN #{date_from} AND #{date_to}
+   <if test="table_id!=null and table_id!=''">AND ms.table_id=#{table_id}</if>
+ </select>
+ <select id="stock" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,
+    GREATEST(b.current_base_qty-COALESCE((SELECT SUM(l.remaining_base_qty) FROM the_full_order.tb_account_inventory_lot l
+      WHERE l.account_id=b.account_id AND l.account_ingredient_product_id=b.account_ingredient_product_id AND l.location_id=b.location_id
+        AND (l.status NOT IN ('AVAILABLE','CONSUMED') OR l.expiration_date&lt;#{date_from})),0),0) quantity,b.base_unit
+    FROM the_full_order.tb_account_inventory_balance b
+    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=b.account_ingredient_product_id AND ap.account_id=b.account_id
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ap.account_id AND i.ingredient_id=ap.mapped_ingredient_id
+   WHERE b.account_id=#{account_id}
+ </select>
+ <select id="targets" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,ap.safe_stock_base_qty quantity,COALESCE(ap.link_base_unit,p.base_unit) base_unit
+    FROM the_full_order.tb_account_ingredient_product ap
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ap.account_id AND i.ingredient_id=ap.mapped_ingredient_id
+   WHERE ap.account_id=#{account_id} AND ap.active_yn='Y'
+ </select>
+ <select id="history" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,r.quantity,r.base_unit,ms.meal_date
+    FROM the_full_order.tb_account_meal_stock_usage r
+    JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+   WHERE ms.account_id=#{account_id} AND ms.status='COMPLETED' AND r.reversed_at IS NULL
+     AND ms.meal_date&gt;=DATE_SUB(CURRENT_DATE,INTERVAL #{average_days} DAY) AND ms.meal_date&lt;=CURRENT_DATE
+ </select>
+ <select id="incoming" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,
+         GREATEST(oi.order_qty-COALESCE(oi.received_order_qty,0),0)*oi.base_qty_per_order_unit quantity,oi.base_unit,
+         po.requested_delivery_date delivery_date,po.status order_status,oi.item_status,
+         po.purchase_order_id
+    FROM the_full_order.tb_account_purchase_order po
+    JOIN the_full_order.tb_account_purchase_order_item oi ON oi.purchase_order_id=po.purchase_order_id
+    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=oi.account_ingredient_product_id
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=po.account_id AND i.ingredient_id=COALESCE(NULLIF(oi.source_ingredient_id,''),ap.mapped_ingredient_id)
+   WHERE po.account_id=#{account_id} AND po.requested_delivery_date&lt;=#{date_to}
+     AND po.status NOT IN ('CANCELED','FAILED','RECEIVED') AND oi.item_status NOT IN ('CANCELED','FAILED','RECEIVED')
+ </select>
+</mapper>

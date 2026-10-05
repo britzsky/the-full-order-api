@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.OrderWorkflowMapper">
+  <select id="lockSourceIngredient" resultType="map">
+    SELECT im.ingredient_id,im.base_unit FROM the_full_order.tb_ingredient_master im
+    WHERE im.ingredient_id=#{source_ingredient_id} AND
+      (EXISTS (SELECT 1 FROM the_full_order.tb_account_recipe_detail r WHERE r.account_id=#{account_id} AND r.ingredient_id=im.ingredient_id)
+       OR EXISTS (SELECT 1 FROM the_full_order.tb_account_ingredient_master a WHERE a.account_id=#{account_id} AND a.ingredient_id=im.ingredient_id))
+    FOR UPDATE
+  </select>
+  <select id="sourceLinks" resultType="map">
+    SELECT ap.account_ingredient_product_id,ap.supplier_product_id FROM the_full_order.tb_account_ingredient_product ap
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    WHERE ap.account_id=#{account_id} AND ap.active_yn='Y'
+      AND ap.mapped_ingredient_id=#{source_ingredient_id} FOR UPDATE
+  </select>
+  <select id="lockAccountProduct" resultType="map">
+    SELECT ap.* FROM the_full_order.tb_account_ingredient_product ap
+    WHERE ap.account_id=#{account_id} AND ap.supplier_product_id=#{supplier_product_id} FOR UPDATE
+  </select>
+  <select id="linkContext" resultType="map">
+    SELECT ap.account_ingredient_product_id,ap.supplier_product_id,ap.mapped_ingredient_id,
+           ap.active_yn,ap.preferred_yn,ap.mod_at
+    FROM the_full_order.tb_account_ingredient_product ap
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    WHERE ap.account_id=#{account_id} AND
+      (ap.mapped_ingredient_id=#{source_ingredient_id} OR ap.supplier_product_id=#{supplier_product_id})
+    ORDER BY ap.account_ingredient_product_id FOR UPDATE
+  </select>
+  <insert id="ensureAccountProduct">
+    INSERT INTO the_full_order.tb_account_ingredient_product
+      (account_id,supplier_product_id,preferred_yn,default_location_id,active_yn,user_id)
+    VALUES(#{account_id},#{supplier_product_id},'N','L999','Y',#{user_id})
+    ON DUPLICATE KEY UPDATE account_ingredient_product_id=account_ingredient_product_id
+  </insert>
+  <update id="linkReceivedProduct">
+    UPDATE the_full_order.tb_account_ingredient_product SET mapped_ingredient_id=#{source_ingredient_id},
+      preferred_yn='Y',active_yn='Y',mod_at=NOW()
+    WHERE account_id=#{account_id} AND account_ingredient_product_id=#{account_ingredient_product_id}
+      AND supplier_product_id=#{supplier_product_id}
+      AND COALESCE(mapped_ingredient_id,'')=COALESCE(#{target_mapping_snapshot},'')
+  </update>
+  <update id="updateLinkStatus">
+    UPDATE the_full_order.tb_account_purchase_order_item SET ingredient_link_status=#{ingredient_link_status}
+    WHERE purchase_order_item_id=#{purchase_order_item_id} AND purchase_order_id=#{purchase_order_id}
+      AND ingredient_link_status='PENDING'
+  </update>
+  <select id="lockSupplier" resultType="long">SELECT supplier_id FROM the_full_order.tb_supplier WHERE supplier_id=#{supplier_id} FOR UPDATE</select>
+  <select id="clientOrderKeys" resultType="string">
+    SELECT client_ord FROM the_full_order.tb_account_purchase_order WHERE supplier_id=#{supplier_id} AND sold_to=#{sold_to}
+      AND requested_delivery_date=#{requested_delivery_date} FOR UPDATE
+  </select>
+  <select id="order" resultType="map">
+    SELECT po.*,s.supplier_code,s.supplier_name FROM the_full_order.tb_account_purchase_order po
+    JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+    WHERE po.account_id=#{account_id} AND po.purchase_order_id=#{purchase_order_id}
+  </select>
+  <select id="lockOrder" resultType="map">
+    SELECT * FROM the_full_order.tb_account_purchase_order
+    WHERE account_id=#{account_id} AND purchase_order_id=#{purchase_order_id} FOR UPDATE
+  </select>
+  <select id="orders" resultType="map">
+    SELECT po.*,s.supplier_code,s.supplier_name FROM the_full_order.tb_account_purchase_order po
+    JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id WHERE po.account_id=#{account_id}
+    <if test="purchase_order_id != null and purchase_order_id != ''">AND po.purchase_order_id=#{purchase_order_id}</if>
+    <if test="date_from != null and date_from != ''">AND po.created_at&gt;=#{date_from}</if>
+    <if test="date_to != null and date_to != ''">AND po.created_at&lt;DATE_ADD(#{date_to},INTERVAL 1 DAY)</if>
+    <if test="status != null and status != ''">AND po.status=#{status}</if>
+    <if test="supplier_id != null and supplier_id != ''">AND po.supplier_id=#{supplier_id}</if>
+    ORDER BY po.created_at DESC,po.purchase_order_id DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+  <select id="items" resultType="map">
+    SELECT i.*,po.account_id,po.supplier_id,po.sold_to,po.client_ord,p.supplier_product_id,
+           COALESCE(i.source_ingredient_id,ap.mapped_ingredient_id) ingredient_id,
+           COALESCE(i.product_name_snapshot,p.product_name) product_name,
+           ap.default_location_id,ss.supplier_account_site_id
+    FROM the_full_order.tb_account_purchase_order_item i
+    JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
+    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=i.account_ingredient_product_id
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    LEFT JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
+    WHERE po.account_id=#{account_id} AND po.purchase_order_id=#{purchase_order_id} ORDER BY i.purchase_order_item_id
+    <if test="lock_rows != null and lock_rows">FOR UPDATE</if>
+  </select>
+  <insert id="insertOrder">
+    INSERT INTO the_full_order.tb_account_purchase_order
+    (purchase_order_id,account_id,supplier_id,sold_to,client_ord,requested_delivery_date,status,total_amount,client_note,user_id,ordered_at)
+    VALUES(#{purchase_order_id},#{account_id},#{supplier_id},#{sold_to},#{client_ord},#{requested_delivery_date},'SENDING',#{total_amount},#{client_note},#{user_id},NOW())
+  </insert>
+  <insert id="insertItem">
+    INSERT INTO the_full_order.tb_account_purchase_order_item
+    (purchase_order_id,client_ord_item,account_ingredient_product_id,menu_id,supplier_item_code,order_qty,order_unit,
+     base_qty_per_order_unit,base_unit,unit_price_snapshot,line_amount,item_status,
+     source_ingredient_id,product_name_snapshot,product_snapshot,target_mapping_snapshot,ingredient_link_status,link_context_snapshot)
+    VALUES(#{purchase_order_id},#{client_ord_item},#{account_ingredient_product_id},NULLIF(#{menu_id},''),#{supplier_item_code},#{order_qty},#{order_unit},
+      #{base_qty},#{base_unit},#{purchase_price},#{line_amount},'SENDING',
+      NULLIF(#{source_ingredient_id},''),#{product_name_snapshot},#{product_snapshot},#{target_mapping_snapshot},#{ingredient_link_status},#{link_context_snapshot})
+  </insert>
+  <update id="updateOrder">
+    UPDATE the_full_order.tb_account_purchase_order SET status=#{status},supplier_result_code=#{supplier_result_code},
+      supplier_result_message=#{supplier_result_message},mod_at=NOW(),
+      confirmed_at=CASE WHEN #{status}='CONFIRMED' THEN NOW() ELSE confirmed_at END
+    WHERE account_id=#{account_id} AND purchase_order_id=#{purchase_order_id}
+      AND status NOT IN ('RECEIVED','PARTIAL_RECEIVED','CANCELED')
+  </update>
+  <update id="updateItem">
+    UPDATE the_full_order.tb_account_purchase_order_item SET item_status=#{item_status},supplier_result_code=#{supplier_result_code},
+      supplier_error_message=#{supplier_error_message},mod_at=NOW()
+    WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item}
+      AND received_order_qty=0 AND item_status!='CANCELED'
+  </update>
+  <insert id="insertExchange">
+    INSERT INTO the_full_order.tb_supplier_api_exchange(supplier_id,operation_type,correlation_id,request_fingerprint,request_payload,exchange_status,requested_at)
+    VALUES(#{supplier_id},'ORDER',#{purchase_order_id},#{fingerprint},#{request_payload},'SENDING',NOW())
+  </insert>
+  <update id="finishExchange">
+    UPDATE the_full_order.tb_supplier_api_exchange SET response_payload=#{response_payload},exchange_status=#{status},
+      provider_result_code=#{supplier_result_code},provider_result_message=#{supplier_result_message},completed_at=NOW()
+    WHERE correlation_id=#{purchase_order_id} AND operation_type='ORDER'
+  </update>
+  <insert id="insertReconciliation">
+    INSERT INTO the_full_order.tb_supplier_api_exchange
+      (supplier_id,operation_type,correlation_id,request_fingerprint,request_payload,response_payload,exchange_status,
+       provider_result_code,provider_result_message,requested_at,completed_at)
+    VALUES(#{supplier_id},'ORDER_QUERY',CONCAT('QUERY|',#{purchase_order_id},'|',UUID()),SHA2(#{response_payload},256),
+      JSON_OBJECT('purchase_order_id',#{purchase_order_id},'account_id',#{account_id},'sold_to',#{sold_to}),#{response_payload},#{status},
+      #{supplier_result_code},#{supplier_result_message},NOW(),NOW())
+  </insert>
+  <insert id="ensureBalance">
+    INSERT INTO the_full_order.tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,user_id)
+    VALUES(#{account_id},#{account_ingredient_product_id},#{location_id},0,#{base_unit},#{user_id})
+    ON DUPLICATE KEY UPDATE inventory_balance_id=inventory_balance_id
+  </insert>
+  <select id="receiptItem" resultType="map">
+    SELECT i.* FROM the_full_order.tb_goods_receipt_item i JOIN the_full_order.tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+    WHERE r.account_id=#{account_id} AND r.supplier_id=#{supplier_id} AND i.provider_line_key=#{provider_line_key} LIMIT 1
+  </select>
+  <select id="manualReceiptCount" resultType="int">
+    SELECT COUNT(*) FROM the_full_order.tb_goods_receipt_item i JOIN the_full_order.tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+    WHERE r.account_id=#{account_id} AND i.purchase_order_item_id=#{purchase_order_item_id}
+      AND r.provider_receipt_key LIKE 'MANUAL|%' AND i.inventory_movement_id IS NOT NULL
+  </select>
+  <update id="refreshReceipt">
+    UPDATE the_full_order.tb_goods_receipt r SET total_supply_amount=(SELECT COALESCE(SUM(i.supply_amount),0) FROM the_full_order.tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+      total_vat=(SELECT COALESCE(SUM(i.vat_amount),0) FROM the_full_order.tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+      total_amount=(SELECT COALESCE(SUM(i.total_amount),0) FROM the_full_order.tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+      inventory_posted_at=NOW(),mod_at=NOW() WHERE goods_receipt_id=#{goods_receipt_id}
+  </update>
+</mapper>

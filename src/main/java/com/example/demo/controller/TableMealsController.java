@@ -23,16 +23,13 @@ public class TableMealsController {
 	private final String uploadDir;
 
 	@Autowired
-	public TableMealsController(
-			TableMealsService tableMealsService,
-			@Value("${file.upload-dir}") String uploadDir) {
+	public TableMealsController(TableMealsService tableMealsService, @Value("${file.upload-dir}") String uploadDir) {
 		this.tableMealsService = tableMealsService;
 		this.uploadDir = uploadDir;
 	}
 
 	/*
-	 * method : TableMealsList
-	 * comment : 식단표 조회
+	 * part : 식단표 method : TableMealsList comment : 식단표 조회
 	 */
 	@GetMapping("/Table/TableMealsList")
 	public String TableMealsList(@RequestParam Map<String, Object> paramMap) {
@@ -41,9 +38,9 @@ public class TableMealsController {
 
 		return new Gson().toJson(resultList);
 	}
+
 	/*
-	 * method : TableMealsDetailList
-	 * comment : 식단표 상세 조회
+	 * part : 식단표 method : TableMealsDetailList comment : 식단표 상세 조회
 	 */
 	@GetMapping("/Table/TableMealsDetailList")
 	public String TableMealsDetailList(@RequestParam Map<String, Object> paramMap) {
@@ -52,9 +49,9 @@ public class TableMealsController {
 
 		return new Gson().toJson(resultList);
 	}
+
 	/*
-	 * method : DetailList
-	 * comment : 식단표 저장
+	 * part : 식단표 method : TableMealsSave comment : 식단표 저장
 	 */
 	@PostMapping(value = "/Table/TableMealsSave", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public String TableMealsSave(@RequestBody Map<String, Object> payload) {
@@ -62,7 +59,10 @@ public class TableMealsController {
 
 		return new Gson().toJson(resultMap);
 	}
-	
+
+	/*
+	 * part : 식단표 method : TableMealsSaveForm comment : 식단표 저장 (form-urlencoded 요청)
+	 */
 	@PostMapping(value = "/Table/TableMealsSave", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
 	public String TableMealsSaveForm(@RequestParam Map<String, Object> paramMap) {
 		Map<String, Object> resultMap = tableMealsService.TableMealsSave(paramMap);

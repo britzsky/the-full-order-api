@@ -32,11 +32,8 @@ public class OrderController {
 	private final String uploadDir;
 
 	@Autowired
-	public OrderController(
-			OrderService orderService,
-			WelstoryItemLookupService welstoryItemLookupService,
-			ObjectMapper objectMapper,
-			@Value("${file.upload-dir}") String uploadDir) {
+	public OrderController(OrderService orderService, WelstoryItemLookupService welstoryItemLookupService,
+			ObjectMapper objectMapper, @Value("${file.upload-dir}") String uploadDir) {
 		this.orderService = orderService;
 		this.welstoryItemLookupService = welstoryItemLookupService;
 		this.objectMapper = objectMapper;
@@ -44,8 +41,7 @@ public class OrderController {
 	}
 
 	/*
-	 * method : MenuList
-	 * comment : 메뉴 조회
+	 * part : 발주 method : MenuList comment : 메뉴 조회
 	 */
 	@GetMapping("/Order/MenuList")
 	public String MenuList(@RequestParam Map<String, Object> paramMap) {
@@ -54,9 +50,9 @@ public class OrderController {
 
 		return new Gson().toJson(resultList);
 	}
+
 	/*
-	 * method : DetailList
-	 * comment : 메뉴 식재료 조회
+	 * part : 발주 method : DetailList comment : 메뉴 식재료 조회
 	 */
 	@GetMapping("/Order/DetailList")
 	public String DetailList(@RequestParam Map<String, Object> paramMap) {
@@ -66,6 +62,9 @@ public class OrderController {
 		return new Gson().toJson(resultList);
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : itemLookup comment : 웰스토리 품목 조회 (사업장코드 미입력 시 기본 사업장 사용)
+	 */
 	@PostMapping(value = "/Order/ItemLookup", consumes = "application/json", produces = "application/json")
 	public ResponseEntity<JsonNode> itemLookup(@RequestBody JsonNode request) {
 		String validationMessage = validateItemLookupRequest(request);
@@ -76,22 +75,22 @@ public class OrderController {
 		try {
 			JsonNode response = welstoryItemLookupService.lookup(withResolvedSoldTo(request));
 			if (response == null) {
-				return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-						.body(errorBody("E5020", "웰스토리 품목 조회 응답이 없습니다."));
+				return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody("E5020", "웰스토리 품목 조회 응답이 없습니다."));
 			}
 			return ResponseEntity.ok(response);
 		} catch (WebClientResponseException e) {
 			JsonNode responseBody = parseResponseBody(e.getResponseBodyAsString());
 			return ResponseEntity.status(e.getStatusCode())
-					.body(responseBody != null
-							? responseBody
-							: errorBody("E5021", "웰스토리 API 호출에 실패했습니다."));
+					.body(responseBody != null ? responseBody : errorBody("E5021", "웰스토리 API 호출에 실패했습니다."));
 		} catch (Exception e) {
 			String message = e.getMessage() == null ? "웰스토리 품목 조회에 실패했습니다." : e.getMessage();
 			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody("E5022", message));
 		}
 	}
 
+	/*
+	 * part : 웰스토리 연동 method : soldToLookup comment : 웰스토리 사업장(soldTo) 목록 조회
+	 */
 	@PostMapping(value = "/Order/workplaceLookup", consumes = "application/json", produces = "application/json")
 	public ResponseEntity<JsonNode> soldToLookup(@RequestBody JsonNode request) {
 		JsonNode header = request == null ? null : request.path("dataHeader");
@@ -103,8 +102,7 @@ public class OrderController {
 		try {
 			JsonNode response = welstoryItemLookupService.lookupSoldTo(request);
 			return response == null
-					? ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-							.body(errorBody("E5020", "웰스토리 사업장 조회 응답이 없습니다."))
+					? ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(errorBody("E5020", "웰스토리 사업장 조회 응답이 없습니다."))
 					: ResponseEntity.ok(response);
 		} catch (Exception e) {
 			return welstoryFailure(e, "웰스토리 사업장 조회에 실패했습니다.");
@@ -120,9 +118,12 @@ public class OrderController {
 		String soldTo = requestedSoldTo(header);
 		String itemCode = header.path("itemCode").asText("").trim();
 		String deliveryDate = header.path("reqDeliveryDate").asText("").trim();
-		if (soldTo.length() > 10) return "사업장코드는 10자리 이하여야 합니다.";
-		if (itemCode.isEmpty() || itemCode.length() > 18) return "품목코드는 필수이며 18자리 이하여야 합니다.";
-		if (!deliveryDate.matches("\\d{8}")) return "입고일자는 YYYYMMDD 형식이어야 합니다.";
+		if (soldTo.length() > 10)
+			return "사업장코드는 10자리 이하여야 합니다.";
+		if (itemCode.isEmpty() || itemCode.length() > 18)
+			return "품목코드는 필수이며 18자리 이하여야 합니다.";
+		if (!deliveryDate.matches("\\d{8}"))
+			return "입고일자는 YYYYMMDD 형식이어야 합니다.";
 		try {
 			java.time.LocalDate.parse(deliveryDate, java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
 		} catch (java.time.format.DateTimeParseException e) {
@@ -135,7 +136,8 @@ public class OrderController {
 		ObjectNode normalizedRequest = request.deepCopy();
 		ObjectNode header = (ObjectNode) normalizedRequest.path("dataHeader");
 		String soldTo = requestedSoldTo(header);
-		if (soldTo.isEmpty()) soldTo = DEFAULT_SOLD_TO;
+		if (soldTo.isEmpty())
+			soldTo = DEFAULT_SOLD_TO;
 		header.put("soldTo", soldTo);
 		header.remove("solTo");
 		return normalizedRequest;
@@ -147,14 +149,14 @@ public class OrderController {
 	}
 
 	private String validatePaging(JsonNode header) {
-		if (header == null || !header.isObject()) return "dataHeader가 필요합니다.";
+		if (header == null || !header.isObject())
+			return "dataHeader가 필요합니다.";
 		int pageRow = header.path("pageRow").asInt(0);
-		if (pageRow < 1 || pageRow > 10000) return "pageRow는 1~10000 범위여야 합니다.";
+		if (pageRow < 1 || pageRow > 10000)
+			return "pageRow는 1~10000 범위여야 합니다.";
 		String contYn = header.path("contYn").asText("").trim();
-		if (!contYn.matches("Y|N")) return "contYn은 Y 또는 N이어야 합니다.";
-		if ("Y".equals(contYn) && header.path("nextKey").asText("").trim().isEmpty()) {
-			return "다음 페이지 조회 시 nextKey가 필요합니다.";
-		}
+		if (!contYn.matches("Y|N"))
+			return "contYn은 Y 또는 N이어야 합니다.";
 		return null;
 	}
 
@@ -169,9 +171,8 @@ public class OrderController {
 	}
 
 	private JsonNode errorBody(String code, String message) {
-		return objectMapper.valueToTree(Map.of(
-				"dataHeader", Map.of(),
-				"dataBody", Map.of("resCd", code, "resMsg", message)));
+		return objectMapper
+				.valueToTree(Map.of("dataHeader", Map.of(), "dataBody", Map.of("resCd", code, "resMsg", message)));
 	}
 
 	private JsonNode parseResponseBody(String body) {
