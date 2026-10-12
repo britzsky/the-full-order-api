@@ -25,8 +25,10 @@ public class StockAvailabilityService {
             var stock=byId.get(String.valueOf(row.get("ingredient_id")));
             if(stock==null) continue;
             Object unit=row.get("base_unit");
-            for(String key:List.of("required_qty","safe_stock_qty","incoming_qty","shortage_qty")) {
-                try { row.put(key,QuantityUnits.convert(new BigDecimal(stock.get(key).toString()),stock.get("base_unit"),unit)); }
+            for(String key:List.of("required_qty","safe_stock_qty","incoming_qty","shortage_qty","unconfirmed_usage_qty")) {
+                Object value=stock.get(key);
+                if(value==null) { row.put(key,"unconfirmed_usage_qty".equals(key) ? BigDecimal.ZERO : null); continue; }
+                try { row.put(key,QuantityUnits.convert(new BigDecimal(value.toString()),stock.get("base_unit"),unit)); }
                 catch(IllegalArgumentException e) { row.put(key,null); row.put("stock_status","UNKNOWN"); }
             }
             row.put("order_needed_qty",row.get("shortage_qty"));
@@ -39,7 +41,10 @@ public class StockAvailabilityService {
                 row.put("ingredient_current_qty",current);
                 if(menu) row.put("current_qty",current);
                 boolean shortage=row.get("shortage_qty")!=null && new BigDecimal(row.get("shortage_qty").toString()).signum()>0;
-                row.put("stock_status",!((Collection<?>)stock.get("issues")).isEmpty() ? "UNKNOWN" : shortage ? (current.signum()<=0 ? "RED" : "ORANGE") : "GREEN");
+                // 주 단위 사용 확정 전 지난 식사 사용량을 뺀 사용 가능 재고로 위험도를 판단한다.
+                var available=current.subtract(row.get("unconfirmed_usage_qty")==null ? BigDecimal.ZERO : new BigDecimal(row.get("unconfirmed_usage_qty").toString()));
+                row.put("available_qty",available);
+                row.put("stock_status",!((Collection<?>)stock.get("issues")).isEmpty() ? "UNKNOWN" : shortage ? (available.signum()<=0 ? "RED" : "ORANGE") : "GREEN");
             } catch(IllegalArgumentException e) { row.put("stock_status","UNKNOWN"); }
         }
     }

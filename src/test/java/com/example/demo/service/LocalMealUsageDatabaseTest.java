@@ -40,12 +40,14 @@ class LocalMealUsageDatabaseTest {
                 st.execute("USE "+schema);st.execute("SET FOREIGN_KEY_CHECKS=0");
                 String ddl=Files.readString(Path.of("ddl-source/order_ddl_local.txt")).replace("the_full_order.",schema+".");
                 Matcher tables=Pattern.compile("CREATE TABLE (?:IF NOT EXISTS )?(?:"+schema+"\\.)?(\\w+) \\([\\s\\S]*?\\) ENGINE[^;]*;").matcher(ddl);
-                Set<String> needed=Set.of("tb_supplier","tb_supplier_ingredient_product","tb_account_ingredient_product","tb_account_inventory_balance","tb_account_inventory_movement","tb_account_inventory_lot","tb_account_meal_service","tb_account_meal_ingredient_requirement","tb_account_meal_stock_usage","tb_ingredient_master","tb_supplier_site_product_offer","tb_supplier_product_availability","tb_supplier_account_site","tb_account_table_meals","tb_account_menu_master","tb_account_recipe_detail","tb_account_table_meals_detail","tb_account_meal_menu_cost_snapshot","tb_supplier_ingredient_price_history","tb_supplier_site_product_price","tb_like_ingredients","tb_account_ingredient_master","tb_account_purchase_order","tb_account_purchase_order_item");
+                Set<String> needed=Set.of("tb_supplier","tb_account_planning_cost","tb_supplier_ingredient_product","tb_account_ingredient_product","tb_account_inventory_balance","tb_account_inventory_movement","tb_account_inventory_lot","tb_account_meal_service","tb_account_meal_ingredient_requirement","tb_account_meal_stock_usage","tb_ingredient_master","tb_supplier_site_product_offer","tb_supplier_product_availability","tb_supplier_account_site","tb_account_table_meals","tb_account_menu_master","tb_account_recipe_detail","tb_account_table_meals_detail","tb_account_meal_menu_cost_snapshot","tb_supplier_ingredient_price_history","tb_supplier_site_product_price","tb_like_ingredients","tb_account_ingredient_master","tb_account_purchase_order","tb_account_purchase_order_item");
                 Set<String> created=new HashSet<>();
                 while(tables.find())if(needed.contains(tables.group(1))){st.execute(tables.group());created.add(tables.group(1));}
                 assertThat(created).containsAll(needed);
                 insert(c,schema,"tb_supplier",Map.of("supplier_id",1,"supplier_code","TEST"));
                 insert(c,schema,"tb_ingredient_master",Map.of("ingredient_id","I","base_unit","g"));
+                // 사용 이력·부족량 SQL은 거래처 식재료 기준(10/2)이라 거래처 식재료 행이 있어야 한다
+                insert(c,schema,"tb_account_ingredient_master",Map.of("account_id","A","ingredient_id","I","base_unit","g"));
                 insert(c,schema,"tb_supplier_ingredient_product",Map.of("supplier_product_id",1,"supplier_id",1,"ingredient_id","I","base_unit","g","supplier_item_code","OLD","product_name","old product"));
                 // 거래처 연결(mapped_ingredient_id)이 있어야 해당 식재료 재고로 인정된다. 본사 분류(ingredient_id)만으로는 연결되지 않는다.
                 insert(c,schema,"tb_account_ingredient_product",Map.of("account_ingredient_product_id",1,"account_id","A","supplier_product_id",1,"mapped_ingredient_id","I"));

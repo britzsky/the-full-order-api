@@ -59,6 +59,14 @@ public class MenuService {
 		return menuMapper.IngredientsSave(paramMap);
 	};
 
+	// 거래처 레시피는 거래처 식재료 기준단위(거래처에서 추가한 식재료는 본사에 없다)
+	private void normalizeAccountRecipe(Map<String, Object> row) {
+		String base = menuMapper.accountIngredientBaseUnit(row);
+		if (base == null)
+			throw new IllegalArgumentException("식재료 기준단위를 확인해주세요.");
+		QuantityUnits.recipe(row, base);
+	}
+
 	private void normalizeRecipe(Map<String, Object> row) {
 		String base = menuMapper.ingredientBaseUnit(row);
 		if (base == null)
@@ -73,7 +81,7 @@ public class MenuService {
 
 	// 거래처 메뉴 식재료 저장
 	public int AccountIngredientsSave(Map<String, Object> paramMap) {
-		normalizeRecipe(paramMap);
+		normalizeAccountRecipe(paramMap);
 		return menuMapper.AccountIngredientsSave(paramMap);
 	};
 
@@ -89,6 +97,7 @@ public class MenuService {
 
 	// 거래처 메뉴 조회
 	public List<Map<String, Object>> AccountMenuList(Map<String, Object> paramMap) {
+		validateCostDate(paramMap);
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = menuMapper.AccountMenuList(paramMap);
 		return resultList;
@@ -103,6 +112,7 @@ public class MenuService {
 
 	// 거래처 메뉴 연결 리스트 조회
 	public List<Map<String, Object>> AccountDetailList(Map<String, Object> paramMap) {
+		validateCostDate(paramMap);
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = menuMapper.AccountDetailList(paramMap);
 		availability.enrich(resultList, paramMap, true);
@@ -112,6 +122,17 @@ public class MenuService {
 				.findFirst().ifPresent(o -> row.put("origin_name",o.get("origin_name")));
 		}
 		return resultList;
+	}
+
+	private void validateCostDate(Map<String, Object> params) {
+		Object value = params.get("cost_date");
+		if (value == null) return;
+		try {
+			java.time.LocalDate.parse(value.toString());
+		} catch (java.time.format.DateTimeParseException ex) {
+			throw new org.springframework.web.server.ResponseStatusException(
+				org.springframework.http.HttpStatus.BAD_REQUEST, "원가 기준일은 YYYY-MM-DD 형식이어야 합니다.");
+		}
 	}
 
 	// 나만의 메뉴 조회

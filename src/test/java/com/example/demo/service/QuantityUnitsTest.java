@@ -74,24 +74,42 @@ class QuantityUnitsTest {
     }
 
     // 실제 아워홈 개발 응답의 goodsz/odrConvqty 조합
-    @Test void ourhomeSpecIsAcceptedOnlyWhenWeightMatchesConversionQuantity() {
+    @Test void ourhomeConversionQuantityAlwaysMeansGrams() {
         assertThat(first("PK", "EA(450g)", "450")).isEqualTo("450g");
         assertThat(first("PK", "PK.(20kg)", "20000")).isEqualTo("20000g");
         assertThat(first("BOX", "BOX(4kg내외_국내산)", "4000")).isEqualTo("4000g");
         assertThat(first("PK", "PK.(12g4ea)", "48")).isEqualTo("48g");
         assertThat(first("PK", "PK.(개당20g*20)", "400")).isEqualTo("400g");
-        assertThat(first("PK", "EA(450㎖)", "450")).isEqualTo("450ml");
+        assertThat(first("PK", "EA(450㎖)", "450")).as("용량 표기는 보조 규격 ml").isEqualTo("450g,450ml");
         assertThat(first("EA", "EA(14kg)", "14000")).isEqualTo("1EA,14000g");
         assertThat(first("EA", "KG(원물/덩어리_호주)", "1000")).isEqualTo("1EA,1000g");
-        assertThat(first("BOX", "PK.(77*24mm/30ea)", "30")).isEqualTo("30EA");
+        assertThat(first("BOX", "PK.(77*24mm/30ea)", "30")).isEqualTo("30g");
         assertThat(first("KG", "KG(국내산)", "1000")).isEqualTo("1000g");
     }
 
-    @Test void ourhomeSpecIsNotGuessedWithoutMatchingEvidence() {
-        assertThat(first("PK", "BOX", "600")).isEmpty();              // 규격에 중량 없음
-        assertThat(first("PK", "EA(450g)", "10")).isEmpty();          // 환산수량과 불일치
-        assertThat(first("PK", "EA(45cm*500m)", "1")).isEmpty();
+    @Test void ourhomeConfirmedMassDoesNotDependOnDisplaySpecification() {
+        assertThat(first("PK", "BOX", "600")).isEqualTo("600g");
+        assertThat(first("PK", "EA(450g)", "10")).isEqualTo("10g");
+        assertThat(first("PK", "EA(45cm*500m)", "1")).isEqualTo("1g");
         assertThat(first("PK", "EA(450g)", "")).isEmpty();
-        assertThat(first("EA", "EA(8oz)", "1")).isEqualTo("1EA");
+        assertThat(first("EA", "EA(8oz)", "1")).isEqualTo("1EA,1g");
+        assertThat(first("PK", "", "0")).isEmpty();
+        assertThat(first("PK", "", "-1")).isEmpty();
+        assertThat(first("PK", "", "invalid")).isEmpty();
+        assertThat(first("L", "1L", "1030")).isEqualTo("1030g,1000ml");
+        assertThat(QuantityUnits.packFor(QuantityUnits.ourhomePacks("PK", "450ml", "450"), "ml").quantity()).isEqualByComparingTo("450");
+    }
+
+    // 2026-10-08 주스 등 음료: goodsz의 ㎖·ℓ 표기를 용량 규격으로 읽는다(환산중량 g를 ml로 추정하지 않음).
+    @Test void ourhomeVolumeSpecificationAddsMillilitrePack() {
+        assertThat(first("EA", "EA(1.5ℓ)", "1500")).as("EA 음료는 1EA + ml").isEqualTo("1EA,1500ml");
+        assertThat(first("EA", "EA(946㎖_미국)", "946")).isEqualTo("1EA,946ml");
+        assertThat(first("BOTTLE", "병(3000㎖_미국)", "3000")).isEqualTo("3000g,3000ml");
+        assertThat(first("BOX", "BOX(296㎖*12ea_미국)", "3552")).as("낱개 용량 × 입수").isEqualTo("3552g,3552ml");
+        assertThat(first("PK", "PK.(163㎖*6ea_미국)", "978")).isEqualTo("978g,978ml");
+        assertThat(first("BOX", "BOX(200㎖)", "4800")).as("낱개 용량을 박스 용량으로 오인하지 않음(환산중량과 불일치)").isEqualTo("4800g");
+        assertThat(first("EA", "EA(14kg)", "14000")).as("용량 표기 없으면 기존대로").isEqualTo("1EA,14000g");
+        assertThat(first("PK", "PK.(2lb)", "907")).as("lb를 L로 읽지 않음").isEqualTo("907g");
+        assertThat(QuantityUnits.packFor(QuantityUnits.ourhomePacks("EA", "EA(1.5ℓ)", "1500"), "ml").quantity()).isEqualByComparingTo("1500");
     }
 }

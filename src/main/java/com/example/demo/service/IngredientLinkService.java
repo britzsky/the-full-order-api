@@ -12,8 +12,9 @@ import com.example.demo.mapper.SupplierCatalogMapper;
 public class IngredientLinkService {
     private final IngredientLinkMapper links;
     private final SupplierCatalogMapper catalog;
-    public IngredientLinkService(IngredientLinkMapper links, SupplierCatalogMapper catalog) {
-        this.links=links; this.catalog=catalog;
+    private final PlanningCostService planningCosts;
+    public IngredientLinkService(IngredientLinkMapper links, SupplierCatalogMapper catalog, PlanningCostService planningCosts) {
+        this.links=links; this.catalog=catalog; this.planningCosts=planningCosts;
     }
     private String text(Object value) { return value == null ? "" : value.toString().trim(); }
     private void require(Map<String,Object> b,String... fields) {
@@ -68,6 +69,13 @@ public class IngredientLinkService {
         else { targetPatch.put("account_ingredient_product_id",target.get("account_ingredient_product_id"));catalog.updateAccountProduct(targetPatch); }
         links.setIngredient(body);
         links.ensureInventory(body);
+        if(body.get("planning_cost") instanceof Map<?,?> confirmation) {
+            var cost=new HashMap<String,Object>();
+            confirmation.forEach((key,value)->cost.put(key.toString(),value));
+            cost.put("account_id",body.get("account_id"));cost.put("ingredient_id",body.get("ingredient_id"));
+            cost.put("supplier_product_id",body.get("supplier_product_id"));cost.put("user_id",body.get("user_id"));
+            planningCosts.confirm(cost);
+        }
         if(old!=null) deactivate(body,old);
         return Map.of("code",200,"message",old==null?"연결했습니다.":"교체했습니다.");
     }

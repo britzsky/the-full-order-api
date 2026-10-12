@@ -48,6 +48,7 @@ class ReceiptPostingServiceTest {
         when(orders.items(anyMap())).thenReturn(List.of(item));
         item.put("link_context_snapshot",OrderWorkflowService.linkContextFingerprint(List.of()));
         when(orders.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
+        when(orders.lockAccountProduct(anyMap())).thenReturn(Map.of("account_ingredient_product_id",7L));
         when(mapper.insertGoodsReceiptItem(anyMap())).thenReturn(1);
         when(mapper.inventoryBalanceForUpdate(anyMap())).thenReturn(
             Map.of("current_base_qty",3000,"average_unit_cost",1),
@@ -62,12 +63,13 @@ class ReceiptPostingServiceTest {
             && new java.math.BigDecimal("4000").compareTo((java.math.BigDecimal)p.get("base_received_qty"))==0));
         verify(orders).updateLinkStatus(argThat(p -> "LINKED".equals(p.get("ingredient_link_status"))));
     }
-    @Test void laterUserMappingIsPreservedButPurchasedStockStillArrives() {
+    @Test void otherSupplierLinkDoesNotBlockAdditionalProductReceipt() {
         var row=successfulReceipt();
         when(orders.sourceLinks(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",20L)));
+        when(orders.linkReceivedProduct(anyMap())).thenReturn(1);
         assertThat(service.post(row)).isTrue();
-        verify(orders,never()).linkReceivedProduct(anyMap());
-        verify(orders).updateLinkStatus(argThat(p -> "CONFLICT".equals(p.get("ingredient_link_status"))));
+        verify(orders).linkReceivedProduct(anyMap());
+        verify(orders).updateLinkStatus(argThat(p -> "LINKED".equals(p.get("ingredient_link_status"))));
         verify(mapper).upsertInventoryAtAverageCost(anyMap());
     }
     @Test void changedTargetMappingIsNotOverwritten() {
@@ -77,7 +79,7 @@ class ReceiptPostingServiceTest {
     }
     @Test void userUnlinkAfterOrderIsNotUndoneByReceipt() {
         var row=successfulReceipt();
-        when(orders.linkContext(anyMap())).thenReturn(List.of(Map.of("active_yn","N","mod_at","changed")));
+        when(orders.linkContext(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",10L,"active_yn","N","mod_at","changed")));
         service.post(row);
         verify(orders,never()).linkReceivedProduct(anyMap());
         verify(orders).updateLinkStatus(argThat(p -> "CONFLICT".equals(p.get("ingredient_link_status"))));

@@ -40,6 +40,18 @@ class MealUsageServiceTest {
         service.complete(input);
         assertThat(allocated.get(0)).containsEntry("inventory_lot_id",5).containsEntry("origin_name_snapshot","국내산 (입고 당시)");
     }
+    @Test void fifoUsesEarlierReceiptAcrossDifferentSupplierProducts() {
+        setup();
+        var other = new HashMap<>(balance); other.put("inventory_balance_id",8); other.put("account_ingredient_product_id",9);
+        when(mapper.balances(anyMap())).thenReturn(List.of(balance,other));
+        when(mapper.lots(anyMap())).thenAnswer(i -> {
+            Map<String,Object> p=i.getArgument(0);
+            return List.of(Map.of("inventory_lot_id",p.get("account_ingredient_product_id"),"remaining_base_qty",1000,
+                "status","AVAILABLE","received_date",p.get("account_ingredient_product_id").equals(9)?"2026-09-01":"2026-09-20"));
+        });
+        service.complete(input);
+        assertThat(allocated).singleElement().satisfies(p -> assertThat(p).containsEntry("account_ingredient_product_id",9).containsEntry("inventory_lot_id",9));
+    }
     @Test void insufficientStockDoesNotMarkCompleted() {
         setup();balance.put("current_base_qty",BigDecimal.ZERO);
         assertThatThrownBy(()->service.complete(input)).hasMessageContaining("재고가 부족");
@@ -63,5 +75,49 @@ class MealUsageServiceTest {
         setup();when(mapper.lots(anyMap())).thenReturn(List.of(Map.of("remaining_base_qty",2000)));
         assertThatThrownBy(()->service.complete(input)).hasMessageContaining("LOT 수량");
         verify(mapper,never()).changeBalance(anyMap());
+    }
+    @Test void futureMealCannotBeConfirmed() {
+        setup(); meal.put("meal_date",MealUsageService.today().plusDays(1).toString());
+        assertThatThrownBy(()->service.complete(input)).hasMessageContaining("아직 지나지 않은 식사");
+        verify(mapper,never()).insertUsage(anyMap());
+    }
+    @Test void testSwitchAllowsFutureMealWithSameDeduction() {
+        setup(); service.setAllowUnserved(true);
+        String tomorrow=MealUsageService.today().plusDays(1).toString();
+        meal.put("meal_date",tomorrow);
+        when(mapper.weekMeals(anyMap())).thenReturn(List.of(weekMeal(1,tomorrow,"DRAFT")));
+        @SuppressWarnings("unchecked") var meals=(List<Map<String,Object>>)service.week(Map.of("account_id","A","table_id","T")).get("meals");
+        assertThat(meals.get(0)).containsEntry("served",false).containsEntry("confirmable",true);
+        service.completeWeek(new HashMap<>(Map.of("account_id","A","table_id","T","meals",List.of(Map.of("meal_service_id",1,"actual_servings",3)))));
+        assertThat((BigDecimal)balance.get("current_base_qty")).isEqualByComparingTo("700");
+    }
+    private Map<String,Object> weekMeal(int id,String date,String status) {
+        return new HashMap<>(Map.of("meal_service_id",id,"table_id","T","meal_date",date,"meal_slot","중식","status",status,"planned_servings",2,"needs_reconfirm",0));
+    }
+    @Test void weekMarksOnlyServedDraftMealsConfirmable() {
+        String today=MealUsageService.today().toString(), tomorrow=MealUsageService.today().plusDays(1).toString();
+        when(mapper.weekMeals(anyMap())).thenReturn(List.of(weekMeal(1,today,"DRAFT"),weekMeal(2,tomorrow,"DRAFT"),weekMeal(3,today,"COMPLETED")));
+        @SuppressWarnings("unchecked") var meals=(List<Map<String,Object>>)service.week(Map.of("account_id","A","table_id","T")).get("meals");
+        assertThat(meals).extracting(m->m.get("confirmable")).containsExactly(true,false,false);
+        assertThat(meals.get(1)).containsEntry("served",false);
+    }
+    @Test void completeWeekConfirmsEveryServedMealWithActualServings() {
+        setup(); String today=MealUsageService.today().toString();
+        meal.put("meal_date",today);
+        when(mapper.weekMeals(anyMap())).thenReturn(List.of(weekMeal(1,today,"DRAFT")));
+        var result=service.completeWeek(new HashMap<>(Map.of("account_id","A","table_id","T","meals",List.of(Map.of("meal_service_id",1,"actual_servings",3)))));
+        assertThat(result).containsEntry("completed_count",1);
+        assertThat((BigDecimal)balance.get("current_base_qty")).as("0.1kg × 실제 3명 = 300g 차감").isEqualByComparingTo("700");
+        assertThat(meal).containsEntry("status","COMPLETED");
+    }
+    @Test void completeWeekRejectsMealsThatAreNotConfirmableAndNamesShortMeal() {
+        setup(); String today=MealUsageService.today().toString();
+        meal.put("meal_date",today); meal.put("meal_slot","중식");
+        when(mapper.weekMeals(anyMap())).thenReturn(List.of(weekMeal(1,today,"DRAFT")));
+        assertThatThrownBy(()->service.completeWeek(new HashMap<>(Map.of("account_id","A","table_id","T","meals",List.of(Map.of("meal_service_id",9))))))
+            .hasMessageContaining("확정할 수 없는 식사");
+        balance.put("current_base_qty",new BigDecimal("100"));
+        assertThatThrownBy(()->service.completeWeek(new HashMap<>(Map.of("account_id","A","table_id","T"))))
+            .hasMessageContaining(today+" 중식").hasMessageContaining("재고가 부족합니다");
     }
 }

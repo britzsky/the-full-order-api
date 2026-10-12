@@ -89,10 +89,13 @@ public class AccountMenuRecipeService {
 		return Map.of("code", 200, "message", "success", "saved_count", changed, "menu_id", b.get("menu_id"));
 	}
 
+	/** 레시피에 쓸 거래처 식재료를 준비한다. 거래처에 이미 있으면 사용 상태로, 없으면 본사 식자재에서 복사한다 */
 	public int ensureMenuIngredient(Map<String, Object> row) {
 		require(row, "account_id", "ingredient_id");
+		if (mapper.accountIngredientExists(row) > 0)
+			return mapper.activateAccountIngredient(row);
 		if (mapper.ingredientBaseUnit(row) == null)
-			throw new IllegalArgumentException("식자재 마스터를 찾을 수 없습니다.");
+			throw new IllegalArgumentException("식자재를 찾을 수 없습니다.");
 		return mapper.ensureMenuIngredient(row);
 	}
 
@@ -149,7 +152,7 @@ public class AccountMenuRecipeService {
 	}
 
 	private void normalize(Map<String, Object> b) {
-		String base = mapper.ingredientBaseUnit(b);
+		String base = mapper.accountIngredientBaseUnit(b);
 		if (base == null)
 			throw new IllegalArgumentException("식재료 기준단위를 확인해주세요.");
 		QuantityUnits.recipe(b, base);

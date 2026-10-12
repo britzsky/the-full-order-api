@@ -109,7 +109,13 @@ public class OurhomeSiteService {
             response = bytes == null ? null : json.readTree(new String(bytes, StandardCharsets.UTF_8));
         } catch (Exception exception) {
             // Provider errors can echo tokenInfo. Do not expose the raw body or exception message.
-            log.warn("Ourhome {} call failed: {}", path, exception.getClass().getSimpleName());
+            String kind = exception instanceof org.springframework.web.reactive.function.client.WebClientResponseException http
+                    ? "HTTP " + http.getStatusCode().value()
+                    : exception instanceof IllegalStateException && String.valueOf(exception.getMessage()).contains("Timeout") ? "응답 시간 초과"
+                    : exception.getClass().getSimpleName();
+            log.warn("Ourhome {} call failed: {}", path, kind);
+            if (path.endsWith("/setOrderList"))
+                throw new IllegalStateException("아워홈 주문 전송 응답을 받지 못했습니다(" + kind + ").");
             throw new IllegalStateException("아워홈 조회에 실패했습니다. 연결 상태와 서버 인증 설정을 확인해 주세요.");
         }
         if (response == null || !response.isObject()) {
@@ -120,7 +126,8 @@ public class OurhomeSiteService {
 
     /** 인증값은 주문 스냅샷과 분리한다. 전송 재시도는 호출자가 하지 않는다. */
     public JsonNode submitOrder(JsonNode params) {
-        return exchange("/api/chaeum/v1/setOrderList", json.convertValue(params, Map.class), false);
+        // 아워홈은 업무 거절(rtnCd<0)을 HTTP 4xx 본문으로 돌려준다. 본문을 읽어야 거절과 응답 유실을 구분할 수 있다.
+        return exchange("/api/chaeum/v1/setOrderList", json.convertValue(params, Map.class), true);
     }
 
     public Site requireSite(String code) { return site(code); }
@@ -180,10 +187,14 @@ public class OurhomeSiteService {
         if (!List.of("N", "Y").contains(more) || ("Y".equals(more)
                 && (cursor.isBlank() || cursor.equals(nextKey) || result.path("data").isEmpty())))
             throw new IllegalStateException("아워홈 상품의 다음 페이지 정보를 확인해 주세요.");
-        var products = fields(result, List.of("goodcd", "goodnm", "goodsz", "boxInQty", "originPlaceNm",
-                "taxYn", "salsUcost", "salsUcostKg", "orderdtInfo", "ordInfo", "keepTemp", "deliveyType",
+        var products = fields(result, List.of("goodcd", "goodnm", "goodsz", "goodSz", "boxInQty", "originPlaceNm",
+                "taxYn", "salsUcost", "salsUcostKg", "SALS_UCOST_KG", "orderdtInfo", "ordInfo", "keepTemp", "deliveyType",
                 "odrUnit", "odrConvqty", "goodStatus", "goodStatusNm", "vanNm", "unquantityYn",
                 "odrupYn", "odrupYnDesc", "decOdrupYn", "ordTime", "img1", "img2", "imageRoute"));
+        for (var product : products) {
+            if (product.get("goodsz").isBlank()) product.put("goodsz", product.get("goodSz"));
+            if (product.get("salsUcostKg").isBlank()) product.put("salsUcostKg", product.get("SALS_UCOST_KG"));
+        }
         if (products.stream().anyMatch(row -> row.get("goodcd").isBlank()))
             throw new IllegalStateException("아워홈 상품 응답에 상품 코드가 없습니다.");
         return new ProductResult(checkedAt(), site.siteCode(), date.toString(), result.path("totalRow").asInt(0),

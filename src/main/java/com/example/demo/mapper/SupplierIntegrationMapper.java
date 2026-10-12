@@ -31,6 +31,8 @@ public interface SupplierIntegrationMapper {
 	Long supplierIdByCode(Map<String, Object> params);
 
 	int upsertSupplierProduct(Map<String, Object> params);
+	int refreshUnusedOurhomePack(Map<String, Object> params);
+	int preserveOurhomeMassOption(Map<String, Object> params);
 
 	Map<String, Object> orderLineForReceipt(Map<String, Object> params);
 
@@ -54,7 +56,7 @@ public interface SupplierIntegrationMapper {
 
 	Long supplierProductId(Map<String, Object> params);
 
-	int upsertAccountProduct(Map<String, Object> params);
+	int refreshAccountProductLead(Map<String, Object> params);
 
 	int markSyncStarted(Map<String, Object> params);
 
@@ -65,4 +67,13 @@ public interface SupplierIntegrationMapper {
 	List<Map<String, Object>> scheduledCatalogTargets();
 
 	List<Map<String, Object>> scheduledReceiptTargets();
+
+	// 아워홈 동기화 빠른 경로: 기존 상태 일괄 조회, 변경 없는 판매조건 일괄 갱신, 가격·판매상태 묶음 저장
+	List<Map<String, Object>> ourhomeSiteOffers(Map<String, Object> params);
+
+	int touchOffers(Map<String, Object> params);
+
+	int insertOfferPrices(Map<String, Object> params);
+
+	int upsertAvailabilities(Map<String, Object> params);
 }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import org.springframework.dao.DuplicateKeyException;
@@ -53,6 +54,7 @@ public class OrderWorkflowService {
 		List<Map<String, Object>> orders = mapper.orders(p);
 		for (Map<String, Object> order : orders)
 			order.put("items", mapper.items(order));
+		for (Map<String, Object> order : orders) order.put("preference_changes", preferenceChanges(order));
 		return Map.of("orders", orders, "limit", p.get("limit"), "offset", p.get("offset"));
 	}
 
@@ -234,7 +236,9 @@ public class OrderWorkflowService {
 		try {
 			response = isOurhome ? ourhome.submit(request, p, rows) : api.call("/fdapi/service/payer-soldto-order", request);
 		} catch (RuntimeException e) {
-			finishUnknown(p, "응답을 확인하지 못했습니다. 발주서에서 주문 대사 후 확인하세요.");
+			// 응답 유실(시간 초과·5xx 등)은 접수 여부를 알 수 없으므로 재전송하지 않는다. 원인 종류는 대사·문의용으로 남긴다.
+			String reason = e instanceof IllegalStateException && e.getMessage() != null && e.getMessage().length() <= 200 ? " " + e.getMessage() : "";
+			finishUnknown(p, ("응답을 확인하지 못했습니다." + reason + " 발주서에서 주문 대사 후 확인하세요.").trim());
 			return result(p, "UNKNOWN", true);
 		}
 		try {
@@ -256,6 +260,7 @@ public class OrderWorkflowService {
             var rows = mapper.items(p);
             JsonNode response = ourhome.reconcile(p, rows);
             if (!response.path("dataBody").path("data").isEmpty()) recordResponse(p, rows, response, true);
+            else if (notFoundLongEnough(p)) recordResponse(p, rows, notFoundResponse(p, rows), true);
             return result(p, text(p.get("status")), false);
         }
         if (!"WELSTORY".equals(p.get("supplier_code")))
@@ -352,13 +357,48 @@ public class OrderWorkflowService {
 		p.put("supplier_result_message", response.path("dataBody").path("resMsg").asText(""));
 		p.put("response_payload", response.toString());
 		tx.executeWithoutResult(s -> {
+			mapper.lockOrder(p);
 			rows.forEach(mapper::updateItem);
+			for (var row : mapper.items(p)) {
+				if (Set.of("ORDERED", "CONFIRMED").contains(text(row.get("item_status")))) {
+					row.put("account_id", p.get("account_id"));
+					new OrderProductLinking(mapper, json).apply(row, true);
+				}
+			}
 			mapper.updateOrder(p);
 			if (!reconcile)
 				mapper.finishExchange(p);
             else
                 mapper.insertReconciliation(p);
 		});
+	}
+
+	/** 아워홈 주문 조회에 없는 접수 불명확 주문을 미접수로 확정하기 전 대기 시간(공급사 반영 지연 대비). */
+	static final java.time.Duration NOT_FOUND_GRACE = java.time.Duration.ofMinutes(5);
+
+	/** 접수 불명확(UNKNOWN/SENDING) 주문이 전송 후 대기 시간이 지났는지. 조회는 성공했는데 공급사 주문 목록에 없을 때만 쓴다. */
+	static boolean notFoundLongEnough(Map<String, Object> p) {
+		if (!Set.of("UNKNOWN", "SENDING").contains(text(p.get("status")))) return false;
+		Object at = p.get("ordered_at") == null ? p.get("created_at") : p.get("ordered_at");
+		if (at == null) return false;
+		try {
+			LocalDateTime ordered = at instanceof LocalDateTime time ? time
+					: at instanceof java.sql.Timestamp stamp ? stamp.toLocalDateTime()
+					: LocalDateTime.parse(at.toString().replace(' ', 'T'));
+			return ordered.plus(NOT_FOUND_GRACE).isBefore(LocalDateTime.now());
+		} catch (RuntimeException e) { return false; }
+	}
+
+	/** 공급사 주문 조회에 없어 미접수로 확정하는 품목별 결과(대사). */
+	private JsonNode notFoundResponse(Map<String, Object> p, List<Map<String, Object>> rows) {
+		ObjectNode response = json.createObjectNode();
+		var body = response.putObject("dataBody").put("resCd", "NOT_FOUND").put("resMsg", "공급사 주문 조회에 없음");
+		var data = body.putArray("data");
+		for (var row : rows)
+			data.addObject().put("clientOrd", text(p.get("client_ord"))).put("clientOrdItem", text(row.get("client_ord_item")))
+					.put("itemCode", text(row.get("supplier_item_code"))).put("resCd", "NOT_FOUND")
+					.put("errorMsg", "아워홈 주문 조회에 없어 미접수로 처리했습니다. 필요하면 다시 발주하세요.");
+		return response;
 	}
 
 	private void finishUnknown(Map<String, Object> p, String message) {
@@ -395,7 +435,31 @@ public class OrderWorkflowService {
 					"RECEIVED", "PARTIAL_RECEIVED", "NOT_RECEIVED", "CANCELED").contains(text(i.get("item_status"))));
 		}
 		return Map.of("purchase_order_id", p.get("purchase_order_id"), "status", status, "replayed", replay, "message",
-				text(p.get("supplier_result_message")), "requires_reconciliation", unresolved);
+				text(p.get("supplier_result_message")), "requires_reconciliation", unresolved,
+				"preference_changes", preferenceChanges(p));
+	}
+
+	private List<Map<String,Object>> preferenceChanges(Map<String,Object> p) {
+		List<Map<String,Object>> changes = new ArrayList<>();
+		var linking = new OrderProductLinking(mapper, json);
+		for (var row : mapper.items(p)) {
+			var change = linking.snapshot(row).path("automatic_preference");
+			if (change.isObject()) changes.add(Map.of("client_ord_item", text(row.get("client_ord_item")),
+				"ingredient_id", text(row.get("source_ingredient_id")), "product_name", text(row.get("product_name")),
+				"undone", change.path("undone").asBoolean()));
+		}
+		return changes;
+	}
+
+	public Map<String,Object> undoPreference(Map<String,Object> input) {
+		required(input, "account_id"); required(input, "purchase_order_id"); required(input, "client_ord_item");
+		return tx.execute(status -> {
+			if (mapper.lockOrder(input) == null) throw new IllegalArgumentException("발주서를 찾을 수 없습니다.");
+			var row = mapper.items(input).stream().filter(item -> text(item.get("client_ord_item")).equals(text(input.get("client_ord_item"))))
+				.findFirst().orElseThrow(() -> new IllegalArgumentException("발주 품목을 찾을 수 없습니다."));
+			new OrderProductLinking(mapper, json).undo(row);
+			return Map.of("code", 200, "message", "이전 우선 상품으로 되돌렸습니다.");
+		});
 	}
 
 	private void prepareProduct(Map<String, Object> row) {
@@ -403,19 +467,39 @@ public class OrderWorkflowService {
 		if (!text(row.get("source_ingredient_id")).isBlank()) {
 			Map<String, Object> source = mapper.lockSourceIngredient(row);
 			if (source == null || source.isEmpty()) throw new IllegalArgumentException("거래처의 원본 식자재를 찾을 수 없습니다.");
-			QuantityUnits.convert(number(row.get("base_qty")), row.get("base_unit"), source.get("base_unit"));
-			List<Map<String, Object>> links = mapper.sourceLinks(row);
-			boolean selected = links.stream().anyMatch(l -> text(l.get("supplier_product_id")).equals(text(row.get("supplier_product_id"))));
-			if (!links.isEmpty() && !selected) throw new IllegalArgumentException("식자재 상품 연결이 변경되었습니다. 다시 조회해주세요.");
-			if (links.isEmpty()) row.put("ingredient_link_status", "PENDING");
+			var packs = new ArrayList<QuantityUnits.Pack>();
+			packs.add(new QuantityUnits.Pack(number(row.get("base_qty")), text(row.get("base_unit"))));
+			packs.add(new QuantityUnits.Pack(number(row.get("alt_base_qty")), text(row.get("alt_base_unit"))));
+			var pack = QuantityUnits.packFor(packs, source.get("base_unit"));
+			if (pack == null) throw new IllegalArgumentException("상품을 식재료 기준단위로 환산할 수 없습니다.");
+			row.put("base_qty", pack.quantity()); row.put("base_unit", pack.baseUnit());
+			row.put("ingredient_link_status", "PENDING");
 		}
 		mapper.ensureAccountProduct(row);
 		Map<String, Object> product = mapper.lockAccountProduct(row);
 		if (product == null) throw new IllegalArgumentException("거래처 상품을 등록하지 못했습니다.");
 		row.put("account_ingredient_product_id", product.get("account_ingredient_product_id"));
 		row.put("target_mapping_snapshot", product.get("mapped_ingredient_id"));
-		row.put("link_context_snapshot", "PENDING".equals(row.get("ingredient_link_status"))
-				? linkContextFingerprint(mapper.linkContext(row)) : null);
+		var context = "PENDING".equals(row.get("ingredient_link_status")) ? mapper.linkContext(row) : List.<Map<String,Object>>of();
+		row.put("link_context_snapshot", "PENDING".equals(row.get("ingredient_link_status")) ? linkContextFingerprint(context) : null);
+		if ("PENDING".equals(row.get("ingredient_link_status"))) {
+			var stockUnits = mapper.productStockUnits(row);
+			if (!stockUnits.isEmpty()) {
+				String stockUnit = QuantityUnits.unit(stockUnits.get(0));
+				if (stockUnits.stream().anyMatch(unit -> !QuantityUnits.unit(unit).equals(stockUnit)))
+					throw new IllegalArgumentException("기존 재고의 단위를 확인해주세요.");
+				row.put("base_qty", QuantityUnits.convert(number(row.get("base_qty")), row.get("base_unit"), stockUnit));
+				row.put("base_unit", stockUnit);
+			}
+			ObjectNode snapshot = new OrderProductLinking(mapper, json).snapshot(row);
+			snapshot.set("link_context", json.valueToTree(context.stream().map(link -> {
+				Map<String,String> values = new LinkedHashMap<>();
+				link.forEach((key,value) -> values.put(key, text(value)));
+				return values;
+			}).toList()));
+			snapshot.put("base_qty", number(row.get("base_qty"))); snapshot.put("base_unit", text(row.get("base_unit")));
+			row.put("product_snapshot", snapshot.toString());
+		}
 		if ("PENDING".equals(row.get("ingredient_link_status")) && !text(product.get("mapped_ingredient_id")).isBlank()
 				&& !text(product.get("mapped_ingredient_id")).equals(text(row.get("source_ingredient_id"))))
 			throw new IllegalArgumentException("선택 상품은 다른 식자재에 연결되어 있습니다. 상품 연결을 먼저 확인해주세요.");

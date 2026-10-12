@@ -2,11 +2,12 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.AccountMenuRecipeMapper">
  <select id="origins" parameterType="map" resultType="hashmap">
-  SELECT r.menu_id,r.ingredient_id,COALESCE(p.product_name,i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
+  SELECT r.menu_id,r.ingredient_id,COALESCE(p.product_name,ai.ingredient_name_std,ai.ingredient_name_raw,i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
          p.supplier_product_id,p.supplier_item_code,o.provider_attributes
   FROM the_full_order.tb_account_recipe_detail r
-  JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
-  LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountRecipeCosts"/>) cost ON cost.account_recipe_detail_id=r.account_recipe_detail_id
+  LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=r.ingredient_id
+  LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+  LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountRecipeCosts"><property name="costDateSql" value="COALESCE(CAST(#{cost_date} AS DATETIME),NOW())"/></include>) cost ON cost.account_recipe_detail_id=r.account_recipe_detail_id
   LEFT JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=r.account_id AND ap.supplier_product_id=cost.supplier_product_id
   LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
   LEFT JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=(
@@ -54,6 +55,13 @@
  <select id="menus" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_menu_master WHERE account_id=#{account_id}<if test="menu_id!=null and menu_id!=''"> AND menu_id=#{menu_id}</if><if test="meal_plan_type!=null and meal_plan_type!=''"> AND meal_plan_type=#{meal_plan_type}</if><if test="include_deleted == null or !include_deleted.equals(&quot;Y&quot;)"> AND del_yn='N'</if> ORDER BY menu_name</select>
  <insert id="upsertMenu" parameterType="map">INSERT INTO the_full_order.tb_account_menu_master(account_id,menu_id,menu_name_raw,menu_name,food_type,food_type_reason,menu_type,menu_gubun,meal_plan_type,calories_per_serving,del_yn,user_id) VALUES(#{account_id},#{menu_id},#{menu_name_raw},#{menu_name},#{food_type},#{food_type_reason},#{menu_type},#{menu_gubun},COALESCE(#{meal_plan_type},0),#{calories_per_serving},COALESCE(#{del_yn},'N'),#{user_id}) ON DUPLICATE KEY UPDATE menu_name_raw=VALUES(menu_name_raw),menu_name=VALUES(menu_name),food_type=VALUES(food_type),food_type_reason=VALUES(food_type_reason),menu_type=VALUES(menu_type),menu_gubun=VALUES(menu_gubun),meal_plan_type=VALUES(meal_plan_type),calories_per_serving=COALESCE(VALUES(calories_per_serving),calories_per_serving),del_yn=VALUES(del_yn),user_id=VALUES(user_id),mod_at=NOW()</insert>
  <update id="deleteMenu" parameterType="map">UPDATE the_full_order.tb_account_menu_master SET del_yn='Y',user_id=#{user_id},mod_at=NOW() WHERE account_id=#{account_id} AND menu_id=#{menu_id}</update>
+ <!-- 거래처 레시피 기준단위: 거래처 식재료 우선(거래처에서 추가한 식재료는 본사에 없다), 없으면 본사 식자재 -->
+ <select id="accountIngredientBaseUnit" parameterType="map" resultType="string">
+  SELECT COALESCE((SELECT base_unit FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}),
+                  (SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}))
+ </select>
+ <update id="activateAccountIngredient" parameterType="map">UPDATE the_full_order.tb_account_ingredient_master SET active_yn='Y',user_id=#{user_id},mod_at=NOW() WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id} AND active_yn&lt;&gt;'Y'</update>
+ <select id="accountIngredientExists" parameterType="map" resultType="int">SELECT COUNT(*) FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}</select>
  <select id="ingredientBaseUnit" parameterType="map" resultType="string">SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}</select>
  <select id="recipeById" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_recipe_detail WHERE account_recipe_detail_id=#{account_recipe_detail_id}</select>
  <select id="recipeDetails" parameterType="map" resultType="hashmap">SELECT r.*,i.ingredient_name_std FROM the_full_order.tb_account_recipe_detail r JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=r.account_id AND i.ingredient_id=r.ingredient_id WHERE r.account_id=#{account_id}<if test="menu_id!=null and menu_id!=''"> AND r.menu_id=#{menu_id}</if><if test="recipe_id!=null and recipe_id!=''"> AND r.recipe_id=#{recipe_id}</if> ORDER BY r.menu_id,r.ingredient_seq</select>

@@ -5,13 +5,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 import com.example.demo.security.WorkspaceAccess;
+import com.example.demo.service.MealPlanAlertService;
 
 @RestController
 @RequestMapping("/v2/workspace")
 public class WorkspaceController {
     private final JdbcTemplate jdbc;
     private final WorkspaceAccess access;
-    public WorkspaceController(JdbcTemplate jdbc,WorkspaceAccess access) { this.jdbc=jdbc;this.access=access; }
+    private final MealPlanAlertService mealPlanAlerts;
+    public WorkspaceController(JdbcTemplate jdbc,WorkspaceAccess access,MealPlanAlertService mealPlanAlerts) { this.jdbc=jdbc;this.access=access;this.mealPlanAlerts=mealPlanAlerts; }
+    /** 머리글 종 알림(다음 주 식단표 미작성). 발주 마감은 프런트가 /Procurement/DeadlineAlerts 결과를 함께 보여준다. 본사가 거래처를 고르지 않으면 전체 거래처. */
+    @GetMapping("/alerts")
+    public Map<String,Object> alerts(@RequestParam(name="account_id",defaultValue="") String account_id,HttpServletRequest request) {
+        var user=WorkspaceAccess.user(request);
+        String account=user.headquarters()?account_id:user.accountId();
+        access.checkAccount(user,account);
+        return Map.of("alerts",mealPlanAlerts.alerts(account),"checked_at",java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")).toString());
+    }
     @GetMapping("/tasks")
     public Map<String,Object> tasks(@RequestParam(name="account_id",defaultValue="") String account_id,HttpServletRequest request) {
         var user=WorkspaceAccess.user(request);

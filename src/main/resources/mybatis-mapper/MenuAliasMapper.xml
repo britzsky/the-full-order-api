@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.MenuAliasMapper">
+ <!-- 삭제(del_yn='Y')된 메뉴로 가는 별칭은 매칭에 쓰지 않는다. -->
+ <select id="aliases" parameterType="map" resultType="hashmap">
+  SELECT a.alias_id,a.account_id,a.alias_key,a.alias_name,a.menu_id,m.menu_name,a.created_at,a.user_id
+    FROM the_full_order.tb_account_menu_alias a
+    JOIN the_full_order.tb_account_menu_master m ON m.account_id=a.account_id AND m.menu_id=a.menu_id AND m.del_yn='N'
+   WHERE a.account_id=#{account_id}<if test="menu_id!=null and menu_id!=''"> AND a.menu_id=#{menu_id}</if>
+   ORDER BY a.alias_name
+ </select>
+ <select id="activeMenuName" parameterType="map" resultType="string">
+  SELECT menu_name FROM the_full_order.tb_account_menu_master WHERE account_id=#{account_id} AND menu_id=#{menu_id} AND del_yn='N'
+ </select>
+ <!-- 같은 표기를 다른 메뉴로 다시 고르면 마지막 선택으로 바꾼다. 유일키는 (account_id, alias_key) 하나뿐이다. -->
+ <insert id="upsertAlias" parameterType="map">
+  INSERT INTO the_full_order.tb_account_menu_alias (account_id,alias_key,alias_name,menu_id,user_id)
+  VALUES (#{account_id},#{alias_key},#{alias_name},#{menu_id},#{user_id})
+  ON DUPLICATE KEY UPDATE alias_name=VALUES(alias_name),menu_id=VALUES(menu_id),user_id=VALUES(user_id)
+ </insert>
+ <delete id="deleteAlias" parameterType="map">
+  DELETE FROM the_full_order.tb_account_menu_alias WHERE account_id=#{account_id} AND alias_id=#{alias_id}
+ </delete>
+</mapper>

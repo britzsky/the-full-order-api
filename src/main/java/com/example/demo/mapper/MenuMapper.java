@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 @Mapper
 public interface MenuMapper {
 	String ingredientBaseUnit(Map<String, Object> params);
+	String accountIngredientBaseUnit(Map<String, Object> row);
 
 	String NowDateKey();
 
@@ -36,6 +37,8 @@ public interface MenuMapper {
 	List<Map<String, Object>> AccountIngredientsList(Map<String, Object> paramMap);
 
 	List<Map<String, Object>> AccountDetailList(Map<String, Object> paramMap);
+
+	Map<String, Object> productPlanningPrice(Map<String, Object> paramMap);
 
 	List<Map<String, Object>> LikeMenuList(Map<String, Object> paramMap);
 

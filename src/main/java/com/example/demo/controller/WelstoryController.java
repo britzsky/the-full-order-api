@@ -97,11 +97,12 @@ public class WelstoryController {
 	}
 
 	/*
-	 * part : 웰스토리 연동 method : orderTransaction comment : 주문 전송 (신규 N / 수정 U)
+	 * part : 웰스토리 연동 method : orderTransaction comment : (사용 중지 2026-10-07) 웰스토리 직접 주문 전송. 내부 발주서·입고·재고·상품 연결에 남지 않아 중복 발주 위험이 있어 막음. 주문은 발주하기(/Procurement/OrdersBatch 통합 발주) 사용
 	 */
 	@PostMapping("/OrderTransaction")
-	public ResponseEntity<JsonNode> orderTransaction(@RequestBody JsonNode request) {
-		return execute("/fdapi/service/payer-soldto-order", request, validateOrder(request));
+	public ResponseEntity<?> orderTransaction(@RequestBody JsonNode request) {
+		return ResponseEntity.status(org.springframework.http.HttpStatus.GONE).body(java.util.Map.of("code", 410,
+				"message", "웰스토리 직접 주문은 사용하지 않습니다. 발주하기 화면에서 주문해주세요(발주서·입고·재고에 함께 기록됩니다)."));
 	}
 
 	/*

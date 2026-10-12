@@ -9,6 +9,12 @@ public interface AccountMenuRecipeMapper {
 	List<Map<String, Object>> origins(Map<String, Object> p);
 	String ingredientBaseUnit(Map<String, Object> row);
 
+	String accountIngredientBaseUnit(Map<String, Object> row);
+
+	int activateAccountIngredient(Map<String, Object> row);
+
+	int accountIngredientExists(Map<String, Object> row);
+
 	Map<String, Object> recipeById(Map<String, Object> row);
 
 	List<Map<String, Object>> ingredients(Map<String, Object> p);

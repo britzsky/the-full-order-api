@@ -20,6 +20,9 @@ public interface InventoryMapper {
 
 	int hasNonAdjustMovement(Map<String, Object> paramMap);
 
+	// 기초재고 추정 단가(공급가·최근 입고 기반). inventory_balance_id를 주면 한 행만.
+	List<Map<String, Object>> openingCostEstimates(Map<String, Object> paramMap);
+
 	int updateInventoryValue(Map<String, Object> paramMap);
 
 	int insertValuedMovement(Map<String, Object> paramMap);
@@ -35,6 +38,8 @@ public interface InventoryMapper {
 	int deleteInventory(Map<String, Object> paramMap);
 
 	List<Map<String, Object>> movements(Map<String, Object> paramMap);
+
+	List<Map<String, Object>> movementSummary(Map<String, Object> paramMap);
 
 	int insertMovement(Map<String, Object> paramMap);
 }

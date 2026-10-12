@@ -26,6 +26,16 @@ class OurhomeOrderAdapterTest {
         assertThat(adapter.normalize(raw,order,List.of(row),false).toString()).contains("REJECTED");
         line.put("extnOrderKey","OTHER");assertThat(adapter.normalize(raw,order,List.of(row),false).path("dataBody").path("data")).isEmpty();
     }
+    @Test void wholeRequestRejectionMarksEveryLineRejectedWithProviderMessage(){
+        var raw=json.createObjectNode().put("rtnCd",-1).put("rtnMsg","주문 마감 시간이 지났습니다.");
+        var body=adapter.normalize(raw,order,List.of(row),false).path("dataBody");
+        assertThat(body.path("resCd").asText()).isEqualTo("REJECTED");
+        assertThat(body.path("data").get(0).path("resCd").asText()).isEqualTo("REJECTED");
+        assertThat(body.path("data").get(0).path("errorMsg").asText()).isEqualTo("주문 마감 시간이 지났습니다.");
+        var secret=json.createObjectNode().put("rtnCd",-1).put("rtnMsg","invalid clientToken abc");
+        assertThat(adapter.normalize(secret,order,List.of(row),false).path("dataBody").path("data").get(0).path("errorMsg").asText()).doesNotContain("abc");
+        assertThat(adapter.normalize(raw,order,List.of(row),true).path("dataBody").path("data")).as("조회(대사)에는 적용 안 함").isEmpty();
+    }
     @Test void duplicateResultIdentityIsNotAccepted(){var raw=raw();((ObjectNode)raw.path("result")).withArray("data").add(raw.path("result").path("data").get(0).deepCopy());assertThat(adapter.normalize(raw,order,List.of(row),false).path("dataBody").path("data")).isEmpty();}
     @Test void requestUsesStableExternalKeysAndDecimalStringsWithoutToken(){
         for(String code:List.of("FU0UP","FU0TT")) {

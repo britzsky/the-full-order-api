@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Mapper;
 public interface MealUsageMapper {
     Map<String,Object> lockService(Map<String,Object> p);
     List<Map<String,Object>> requirements(Map<String,Object> p);
+    List<Map<String,Object>> weekMeals(Map<String,Object> p);
+    List<Map<String,Object>> unreceivedOrders(Map<String,Object> p);
     List<Map<String,Object>> balances(Map<String,Object> p);
     List<Map<String,Object>> lots(Map<String,Object> p);
     List<Map<String,Object>> activeUsage(Map<String,Object> p);

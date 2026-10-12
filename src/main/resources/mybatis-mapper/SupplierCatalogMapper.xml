@@ -2,7 +2,8 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.SupplierCatalogMapper">
     <select id="suppliers" parameterType="map" resultType="hashmap">
-        SELECT * FROM the_full_order.tb_supplier WHERE 1=1
+        <!-- 직접구매(DIRECT)는 거래처 자체 상품용 시스템 공급사라 본사 공급처 관리 목록에서 뺀다 -->
+        SELECT * FROM the_full_order.tb_supplier WHERE supplier_type&lt;&gt;'DIRECT'
         <if test="supplier_id != null and supplier_id != ''">AND supplier_id=#{supplier_id}</if>
         <if test="active_yn != null and active_yn != ''">AND active_yn=#{active_yn}</if>
         ORDER BY supplier_name
@@ -30,7 +31,7 @@
         FROM the_full_order.tb_supplier_ingredient_product p
         JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
         LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
-        WHERE 1=1
+        WHERE s.supplier_type&lt;&gt;'DIRECT'
         <if test="supplier_product_id != null and supplier_product_id != ''">AND p.supplier_product_id=#{supplier_product_id}</if>
         <if test="supplier_id != null and supplier_id != ''">AND p.supplier_id=#{supplier_id}</if>
         <if test="ingredient_id != null and ingredient_id != ''">AND p.ingredient_id=#{ingredient_id}</if>

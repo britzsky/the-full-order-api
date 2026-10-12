@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -246,10 +247,12 @@ public class WelstoryCatalogSyncService {
 		mapper.upsertSupplierProduct(p);
 		Long productId = mapper.supplierProductId(p);
 		p.put("supplier_product_id", productId);
-		mapper.upsertAccountProduct(p);
+		mapper.refreshAccountProductLead(p);
 		p.put("delivery_type", first(row, "deliveryType"));
 		p.put("cutoff_code", first(row, "closeCode"));
-		p.put("cutoff_time", null);
+		// 가이드 closeCode 표(M01 11시, N01·F01 17시). 해당없음·미정의 코드는 시각 없음(확인 필요).
+		LocalTime close = OrderAvailability.providerCutoff("WELSTORY", first(row, "closeCode"));
+		p.put("cutoff_time", close == null ? null : close.toString());
 		p.put("decimal_order_allowed", "Y".equalsIgnoreCase(first(row, "decYN")) ? "Y" : "N");
 		String stop = first(row, "stopType");
 		p.put("product_status", stop.isBlank() ? "ACTIVE" : "STOPPED");

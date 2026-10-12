@@ -64,6 +64,25 @@ class InventoryOpeningTest {
         assertThatThrownBy(()->service.update(body(120,"EA"))).hasMessageContaining("기초재고 등록");
         verify(mapper,never()).insertValuedMovement(anyMap());
     }
+    @Test void openingWithoutUnitCostUsesSupplierEstimateAndMarksHistory() {
+        stock(90,0,0);
+        when(mapper.openingCostEstimates(anyMap())).thenReturn(java.util.List.of(Map.of("inventory_balance_id",259L,"price_unit","EA","unit_cost",196.33,"cost_source","SITE_PRICE")));
+        var result=service.opening(body(3,"PAC"));
+        verify(mapper).updateInventoryValue(argThat(p->eq(p.get("average_unit_cost"),"196.33") && eq(p.get("inventory_amount"),"17669.70")));
+        verify(mapper).insertValuedMovement(argThat(p->"OPENING".equals(p.get("movement_type")) && "OPENING_ESTIMATED".equals(p.get("reference_type"))));
+        assertThat(result).containsEntry("cost_estimated",true);
+    }
+    @Test void openingWithoutUnitCostOrEstimateAsksForPrice() {
+        stock(90,0,0);
+        assertThatThrownBy(()->service.opening(body(90,"EA"))).hasMessageContaining("직접 입력");
+        verify(mapper,never()).updateInventoryValue(anyMap());
+    }
+    @Test void estimateIsConvertedToStockUnit() {
+        assertThat(InventoryService.estimatedCost(Map.of("unit_cost",8460,"price_unit","kg"),"g")).isEqualByComparingTo("8.46");
+        assertThat(InventoryService.estimatedCost(Map.of("unit_cost",8.46,"price_unit","g"),"kg")).isEqualByComparingTo("8460");
+        assertThat(InventoryService.estimatedCost(Map.of("unit_cost",100,"price_unit","EA"),"g")).isNull();
+        assertThat(InventoryService.estimatedCost(null,"g")).isNull();
+    }
     @Test void unchangedQuantityOnlyUpdatesFieldsWithoutHistory() {
         stock(90,200,18000);service.update(body(3,"PAC"));
         verify(mapper).updateInventory(anyMap());

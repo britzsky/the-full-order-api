@@ -43,6 +43,61 @@ class ShortageProcurementServiceTest {
         assertThat(preview.path("item_amount").decimalValue()).isEqualByComparingTo("3000");
         assertThat(preview.path("items").get(0).path("vat_amount").decimalValue()).isZero();
     }
+    @Test void pastUnconfirmedMealUsageIsDeductedFromAvailableStock() {
+        // 주 단위 확정 전: 월·화에 이미 쓴 60g은 재고 75g에 아직 남아 있으므로 사용 가능 재고는 15g이다.
+        when(mapper.unconfirmedUsage(anyMap())).thenReturn(List.of(raw(60)));
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("current_qty").decimalValue()).as("기록상 현재고는 그대로").isEqualByComparingTo("75");
+        assertThat(row.path("unconfirmed_usage_qty").decimalValue()).isEqualByComparingTo("60");
+        assertThat(row.path("available_qty").decimalValue()).isEqualByComparingTo("15");
+        assertThat(row.path("shortage_qty").decimalValue()).as("220 + 확정 대기 60").isEqualByComparingTo("280");
+    }
+    @Test void blockedOfferShowsRealReasonInsteadOfSupplierSaleStatus() {
+        // 아워홈 판매상태 문구('발주가능')가 있어도 부족량이 없어 막힌 것이면 그 이유를 보여준다.
+        when(mapper.demand(anyMap())).thenReturn(List.of());
+        when(mapper.targets(anyMap())).thenReturn(List.of());
+        when(mapper.incoming(anyMap())).thenReturn(List.of());
+        criteria.put("source","STOCK"); criteria.put("include_sufficient",true);
+        offer.put("availability_reason","발주가능");
+        when(mapper.stock(anyMap())).thenReturn(List.of(raw(500)));
+        var candidate=result().path("ingredients").get(0).path("offers").get(0);
+        assertThat(candidate.path("orderable").asBoolean()).isFalse();
+        assertThat(candidate.path("orderability_reason").asText()).startsWith("부족량이 없습니다");
+    }
+    @Test void stockSourceOrdersEmptyStockWithoutHistoryAsManualQuantity() {
+        criteria.put("source","STOCK");
+        when(mapper.stock(anyMap())).thenReturn(List.of());
+        when(mapper.incoming(anyMap())).thenReturn(List.of());
+        when(mapper.targets(anyMap())).thenReturn(List.of(raw(0)));
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("quantity_basis").asText()).isEqualTo("MANUAL");
+        assertThat(row.path("issues").isEmpty()).as("필요량 미산정으로 막지 않음").isTrue();
+        var offer=row.path("offers").get(0);
+        assertThat(offer.path("orderable").asBoolean()).isTrue();
+        assertThat(offer.path("recommended_qty").decimalValue()).as("기본값은 최소 발주수량").isEqualByComparingTo("1");
+        verify(mapper,never()).demand(anyMap());verify(mapper,never()).history(anyMap());
+        assertThat(json.valueToTree(service.preview(request(5))).path("items").get(0).path("order_qty").decimalValue()).as("수량은 사용자가 정함").isEqualByComparingTo("5");
+        assertThatThrownBy(()->service.preview(request(1000))).hasMessageContaining("너무 큽니다");
+    }
+    @Test void stockSourceUsesSafetyStockGapWhenConfigured() {
+        criteria.put("source","STOCK");
+        when(mapper.stock(anyMap())).thenReturn(List.of());
+        when(mapper.incoming(anyMap())).thenReturn(List.of());
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("quantity_basis").asText()).isEqualTo("CALCULATED");
+        assertThat(row.path("shortage_qty").decimalValue()).as("안전재고 20 − 재고 0").isEqualByComparingTo("20");
+        assertThatThrownBy(()->service.preview(request(2))).as("계산된 행은 권장수량 상한 유지").hasMessageContaining("권장 발주수량");
+        when(mapper.stock(anyMap())).thenReturn(List.of(raw(50)));
+        assertThat(result().path("ingredients").isEmpty()).as("재고가 안전재고 이상이면 제외").isTrue();
+    }
+    @Test void stockStatusSeparatesUnmetDemandFromSafetyStockGap() {
+        assertThat(result().path("ingredients").get(0).path("stock_status").asText()).as("필요량 300 > 재고 75 + 입고 25").isEqualTo("RED");
+        when(mapper.demand(anyMap())).thenReturn(List.of(raw(40),raw(50)));
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("shortage_qty").decimalValue()).isEqualByComparingTo("10");
+        assertThat(row.path("stock_status").asText()).as("필요량 90은 채우고 안전재고 20만 미달").isEqualTo("YELLOW");
+        assertThat(ShortageProcurementService.stockStatus(java.math.BigDecimal.ZERO,java.math.BigDecimal.TEN)).isEqualTo("GREEN");
+    }
     @Test void stoppedProductsCannotReachPreviewAndUnknownVatIsNotInvented() {
         offer.put("orderable_yn","N");offer.put("product_status","STOPPED");offer.put("availability_reason","QA STOP");
         assertThat(result().path("ingredients").get(0).path("offers").get(0).path("orderable").asBoolean()).isFalse();

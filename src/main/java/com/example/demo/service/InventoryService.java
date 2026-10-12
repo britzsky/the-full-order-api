@@ -29,18 +29,81 @@ public class InventoryService {
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = inventoryMapper.AccountInventoryList(paramMap);
 		availability.enrich(resultList, paramMap, false);
+		addOpeningEstimates(resultList, paramMap);
 		return resultList;
 	}
 
+	/** 기초재고 등록 가능한 행에 공급가 기반 추정 단가(재고 기준단위당)와 출처·기준일을 붙인다. */
+	private void addOpeningEstimates(List<Map<String, Object>> rows, Map<String, Object> params) {
+		if (rows == null || rows.stream().noneMatch(row -> "Y".equals(String.valueOf(row.get("opening_available")))))
+			return;
+		Map<String, Object> key = new java.util.HashMap<>();
+		key.put("account_id", params.get("account_id"));
+		key.put("inventory_balance_id", params.get("inventory_balance_id"));
+		Map<String, Map<String, Object>> estimates = new java.util.HashMap<>();
+		for (Map<String, Object> estimate : inventoryMapper.openingCostEstimates(key))
+			estimates.put(String.valueOf(estimate.get("inventory_balance_id")), estimate);
+		for (Map<String, Object> row : rows) {
+			if (!"Y".equals(String.valueOf(row.get("opening_available"))))
+				continue;
+			Map<String, Object> estimate = estimates.get(String.valueOf(row.get("inventory_balance_id")));
+			BigDecimal cost = estimatedCost(estimate, row.get("base_unit"));
+			if (cost == null)
+				continue;
+			row.put("estimated_unit_cost", cost);
+			row.put("estimated_cost_source", estimate.get("cost_source"));
+			row.put("estimated_cost_date", estimate.get("cost_date") == null ? null : estimate.get("cost_date").toString());
+		}
+	}
+
+	/** 추정 단가를 재고 기준단위당 금액으로 환산한다 (원/kg → 원/g 등). 환산할 수 없거나 단가가 없으면 null. */
+	static BigDecimal estimatedCost(Map<String, Object> estimate, Object stockUnit) {
+		if (estimate == null || estimate.get("unit_cost") == null)
+			return null;
+		BigDecimal cost = decimal(estimate.get("unit_cost"));
+		if (cost.signum() <= 0)
+			return null;
+		try {
+			// 1 재고단위가 가격단위로 몇인지 곱한다: 원/kg × 0.001 = 원/g
+			return cost.multiply(QuantityUnits.convert(BigDecimal.ONE, stockUnit, estimate.get("price_unit")))
+					.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros();
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
+	}
+
 	public List<Map<String, Object>> movements(Map<String, Object> params) {
-		require(params,"account_id");
+		Map<String, Object> query=movementFilter(params);
 		int limit=Integer.parseInt(String.valueOf(params.getOrDefault("limit",50)));
 		int offset=Integer.parseInt(String.valueOf(params.getOrDefault("offset",0)));
 		if(limit<1 || limit>200 || offset<0) throw new IllegalArgumentException("이력 조회 범위를 확인해주세요.");
-		params.put("limit",limit);params.put("offset",offset);
+		query.put("limit",limit);query.put("offset",offset);
+		return inventoryMapper.movements(query);
+	}
+
+	// 재고 변동 이력과 같은 조건의 구분별 건수·수량·금액 합계
+	public List<Map<String, Object>> movementSummary(Map<String, Object> params) {
+		return inventoryMapper.movementSummary(movementFilter(params));
+	}
+
+	private static final java.util.Set<String> MOVEMENT_TYPES=java.util.Set.of("IN","OUT","ADJUST","RETURN","DISCARD","OPENING");
+
+	// 이력 조회 공통 조건: 날짜 형식 검증, movement_type은 쉼표 목록에서 허용값만 남긴다
+	private Map<String, Object> movementFilter(Map<String, Object> params) {
+		require(params,"account_id");
+		Map<String, Object> query=new java.util.HashMap<>(params);
 		for(String key:List.of("date_from","date_to")) if(params.get(key)!=null && !params.get(key).toString().isBlank())
 			java.time.LocalDate.parse(params.get(key).toString());
-		return inventoryMapper.movements(params);
+		Object keyword=params.get("keyword");
+		query.put("keyword",keyword==null ? null : keyword.toString().trim());
+		Object types=params.get("movement_type");
+		if(types!=null && !types.toString().isBlank()) {
+			List<String> allowed=java.util.Arrays.stream(types.toString().split(",")).map(String::trim).map(String::toUpperCase)
+					.filter(MOVEMENT_TYPES::contains).distinct().toList();
+			if(allowed.isEmpty()) throw new IllegalArgumentException("변동 구분을 확인해주세요.");
+			query.put("movement_types",allowed);
+		}
+		return query;
 	}
 
 	// 거래처별 재고와 분리된 본사 식자재 마스터를 조회한다.
@@ -115,10 +178,11 @@ public class InventoryService {
 	 * 기초재고 등록: 프로그램 도입 전부터 보유하던 재고를 수량과 단가(기준단위당)로 등록한다.
 	 * 입고·사용 등 ADJUST 이외 이력이 생긴 뒤에는 불가하고, 재고행당 한 번만 가능하다(이력 유니크 키).
 	 * 원산지는 당시 기록이 없으므로 LOT를 만들지 않는다(미확인).
+	 * 단가(unit_cost)를 생략하면 공급가·최근 입고 기반 추정 단가를 쓰고 이력 근거를 OPENING_ESTIMATED로 남긴다.
 	 */
 	@Transactional
 	public Map<String, Object> opening(Map<String, Object> body) {
-		require(body, "inventory_balance_id", "current_qty", "unit_cost");
+		require(body, "inventory_balance_id", "current_qty");
 		Map<String, Object> stored = inventoryMapper.inventoryForUpdate(body);
 		if (stored == null)
 			throw new IllegalArgumentException("Inventory was not found.");
@@ -126,17 +190,33 @@ public class InventoryService {
 			throw new IllegalArgumentException("이미 입고·사용·기초재고 이력이 있어 기초재고를 등록할 수 없습니다. 재고 조정을 사용해주세요.");
 		body.put("base_unit", stored.get("base_unit"));
 		normalizeCurrentQuantity(body, inventoryMapper.productPack(productKey(stored)));
-		BigDecimal unitCost = decimal(body.get("unit_cost"));
+		boolean estimated = body.get("unit_cost") == null || body.get("unit_cost").toString().isBlank();
+		BigDecimal unitCost;
+		if (estimated) {
+			Map<String, Object> key = new java.util.HashMap<>();
+			key.put("account_id", stored.get("account_id"));
+			key.put("inventory_balance_id", stored.get("inventory_balance_id"));
+			List<Map<String, Object>> estimates = inventoryMapper.openingCostEstimates(key);
+			unitCost = estimatedCost(estimates.isEmpty() ? null : estimates.get(0), stored.get("base_unit"));
+			if (unitCost == null)
+				throw new IllegalArgumentException("공급가·입고 단가가 없어 단가를 추정할 수 없습니다. 기준단위당 단가를 직접 입력해주세요.");
+		} else {
+			unitCost = decimal(body.get("unit_cost"));
+		}
 		BigDecimal after = (BigDecimal) body.get("current_base_qty");
 		if (unitCost.signum() < 0 || (after.signum() > 0 && unitCost.signum() == 0))
 			throw new IllegalArgumentException("기초재고 단가(기준단위당)를 0보다 크게 입력해주세요.");
 		BigDecimal amountAfter = after.multiply(unitCost).setScale(2, RoundingMode.HALF_UP);
 		try {
 			saveValued(body, stored, "OPENING", decimal(stored.get("current_base_qty")), after, unitCost,
-					decimal(stored.get("inventory_amount")), amountAfter, "OPENING", String.valueOf(stored.get("inventory_balance_id")));
+					decimal(stored.get("inventory_amount")), amountAfter, estimated ? "OPENING_ESTIMATED" : "OPENING",
+					String.valueOf(stored.get("inventory_balance_id")));
 		} catch (org.springframework.dao.DuplicateKeyException e) {
 			throw new IllegalArgumentException("이 재고의 기초재고는 이미 등록되었습니다.");
 		}
+		if (estimated)
+			return Map.of("code", 200, "message", "success", "id", body.get("inventory_balance_id"), "unit_cost", unitCost,
+					"cost_estimated", true);
 		return ok(body.get("inventory_balance_id"));
 	}
 

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.AccountMenuRegistrationMapper">
+ <!-- 이름 중복 확인용 거래처 활성 메뉴 -->
+ <select id="activeAccountMenus" parameterType="map" resultType="hashmap">
+  SELECT menu_id,menu_name FROM the_full_order.tb_account_menu_master WHERE account_id=#{account_id} AND del_yn='N'
+ </select>
+ <!-- 새 거래처 전용 menu_id가 본사·어느 거래처에서도 쓰이지 않는지 (본사로 반영할 때 같은 ID를 쓰기 때문) -->
+ <select id="menuIdTaken" parameterType="map" resultType="int">
+  SELECT (SELECT COUNT(*) FROM the_full_order.tb_menu_master WHERE menu_id=#{menu_id})
+       + (SELECT COUNT(*) FROM the_full_order.tb_account_menu_master WHERE menu_id=#{menu_id})
+ </select>
+ <select id="accountMenu" parameterType="map" resultType="hashmap">
+  SELECT * FROM the_full_order.tb_account_menu_master WHERE account_id=#{account_id} AND menu_id=#{menu_id}
+ </select>
+ <!-- 거래처 레시피. standard_ingredient_id가 비면 본사 식자재 마스터에 없는 식자재(본사 레시피로 옮길 수 없음) -->
+ <select id="accountRecipe" parameterType="map" resultType="hashmap">
+  SELECT r.*,i.ingredient_id standard_ingredient_id,
+         COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw,r.ingredient_name_raw,r.ingredient_id) ingredient_name
+    FROM the_full_order.tb_account_recipe_detail r
+    LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=r.ingredient_id
+   WHERE r.account_id=#{account_id} AND r.menu_id=#{menu_id}
+   ORDER BY r.ingredient_seq,r.account_recipe_detail_id
+ </select>
+ <!-- 삭제 여부와 상관없이 본사 메뉴 한 건 (같은 ID 반영 여부 판단) -->
+ <select id="standardMenu" parameterType="map" resultType="hashmap">
+  SELECT * FROM the_full_order.tb_menu_master WHERE menu_id=#{menu_id}
+ </select>
+ <select id="standardRecipe" parameterType="map" resultType="hashmap">
+  SELECT * FROM the_full_order.tb_recipe_detail WHERE menu_id=#{menu_id} ORDER BY ingredient_seq,recipe_detail_id
+ </select>
+ <select id="activeStandardMenus" parameterType="map" resultType="hashmap">
+  SELECT menu_id,menu_name FROM the_full_order.tb_menu_master WHERE del_yn='N'
+ </select>
+ <insert id="insertStandardMenu" parameterType="map">
+  INSERT INTO the_full_order.tb_menu_master
+   (menu_id,menu_name_raw,menu_name,food_type,food_type_reason,menu_type,menu_gubun,meal_plan_type,calories_per_serving,del_yn,user_id)
+  VALUES(#{menu_id},#{menu_name_raw},#{menu_name},#{food_type},#{food_type_reason},#{menu_type},#{menu_gubun},COALESCE(#{meal_plan_type},0),#{calories_per_serving},'N',#{user_id})
+ </insert>
+ <insert id="insertStandardRecipeRow" parameterType="map">
+  INSERT INTO the_full_order.tb_recipe_detail
+   (recipe_id,menu_id,ingredient_id,ingredient_seq,ingredient_name_raw,qty_raw,qty_num,qty_unit,recipe_yield_servings,qty_base,base_unit,qty_per_person,review_flag,user_id)
+  VALUES(#{recipe_id},#{menu_id},#{standard_ingredient_id},#{ingredient_seq},#{ingredient_name_raw},#{qty_raw},#{qty_num},#{qty_unit},#{recipe_yield_servings},#{qty_base},#{base_unit},#{qty_per_person},#{review_flag},#{user_id})
+ </insert>
+ <!-- 등록 창 식재료 목록: 거래처 식재료(메뉴·재고 기준). standard_yn은 본사 식자재에 같은 ID가 있는지 -->
+ <select id="accountIngredients" parameterType="map" resultType="hashmap">
+  SELECT a.ingredient_id,COALESCE(a.ingredient_name_std,a.ingredient_name_raw,i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
+         a.category_name,a.base_unit,a.storage_type,CASE WHEN i.ingredient_id IS NULL THEN 'N' ELSE 'Y' END standard_yn
+    FROM the_full_order.tb_account_ingredient_master a
+    LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=a.ingredient_id
+   WHERE a.account_id=#{account_id} AND a.active_yn='Y'
+   ORDER BY ingredient_name
+ </select>
+ <!-- 새 거래처 식재료 ID가 본사·어느 거래처에서도 쓰이지 않는지 -->
+ <select id="ingredientIdTaken" parameterType="map" resultType="int">
+  SELECT (SELECT COUNT(*) FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id})
+       + (SELECT COUNT(*) FROM the_full_order.tb_account_ingredient_master WHERE ingredient_id=#{ingredient_id})
+ </select>
+ <select id="standardIngredients" parameterType="map" resultType="hashmap">
+  SELECT ingredient_id,ingredient_name_std,ingredient_name_raw,base_unit FROM the_full_order.tb_ingredient_master
+ </select>
+ <!-- 본사 반영 때 본사에 없는 거래처 식재료를 같은 ID로 본사 식자재에 추가 -->
+ <insert id="insertStandardIngredient" parameterType="map">
+  INSERT INTO the_full_order.tb_ingredient_master(ingredient_id,ingredient_name_raw,ingredient_name_std,category_name,base_unit,storage_type,user_id)
+  SELECT ingredient_id,COALESCE(ingredient_name_raw,ingredient_name_std),COALESCE(ingredient_name_std,ingredient_name_raw),category_name,base_unit,storage_type,#{user_id}
+    FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
+ </insert>
+</mapper>

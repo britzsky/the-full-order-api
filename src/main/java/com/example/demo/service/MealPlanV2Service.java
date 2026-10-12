@@ -98,7 +98,7 @@ public class MealPlanV2Service {
 		if ("CANCELED".equals(b.get("status"))) {
 			for (var row : mapper.services(b)) usage.cancel(row);
 		} else if (b.containsKey("status") && !"DRAFT".equals(b.get("status"))) {
-			throw new IllegalArgumentException("사용 확정은 끼니별 사용 확정 기능을 이용하세요.");
+			throw new IllegalArgumentException("사용 확정은 식사별 사용 확정 기능을 이용하세요.");
 		}
 		validateMealPlanType(b);
 		return changed(mapper.updatePlan(b), b.get("table_id"));
@@ -166,7 +166,7 @@ public class MealPlanV2Service {
 		req(b, "meal_service_id", "table_id", "account_id", "menu_id", "menu_name");
 		usage.reopen(b);
 		if (mapper.countCompatibleMenu(b) == 0) {
-			throw new IllegalArgumentException("메뉴의 식단 유형이 선택한 끼니의 식단 유형과 다릅니다.");
+			throw new IllegalArgumentException("메뉴의 식단 유형이 선택한 식사의 식단 유형과 다릅니다.");
 		}
 		mapper.insertDetail(b);
 		validateServiceCost(b);
@@ -250,7 +250,7 @@ public class MealPlanV2Service {
 		BigDecimal budget = decimal(result.get("meal_budget_per_person"));
 		String source = String.valueOf(result.get("budget_source"));
 		if (!"INCLUDED_IN_DIET_PRICE".equals(source) && cost.compareTo(budget) > 0) {
-			throw new IllegalArgumentException("1인 원가 " + cost + "원이 거래처 끼니 단가 " + budget + "원을 초과합니다.");
+			throw new IllegalArgumentException("1인 원가 " + cost + "원이 거래처 식사 단가 " + budget + "원을 초과합니다.");
 		}
 	}
 

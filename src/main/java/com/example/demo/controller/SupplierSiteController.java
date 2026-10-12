@@ -79,6 +79,14 @@ public class SupplierSiteController {
 			return ResponseEntity.badRequest().body(Map.of("code", 400, "message", exception.getMessage()));
 		} catch (IllegalStateException exception) {
 			return ResponseEntity.status(502).body(Map.of("code", 502, "message", exception.getMessage()));
+		} catch (org.springframework.web.reactive.function.client.WebClientResponseException exception) {
+			// 공급사 서버가 오류 응답(예: 웰스토리 500)을 준 경우. 우리 서버 오류(500)로 보이지 않게 공급사 상태를 알려준다. 기존 목록은 그대로 유지된다.
+			return ResponseEntity.status(502).body(Map.of("code", 502, "provider_status", exception.getStatusCode().value(),
+					"message", "공급사 서버가 오류를 반환했습니다(HTTP " + exception.getStatusCode().value()
+							+ "). 기존 사업장 목록은 그대로입니다. 잠시 후 다시 시도하고, 계속되면 공급사에 확인해주세요."));
+		} catch (org.springframework.web.reactive.function.client.WebClientRequestException exception) {
+			return ResponseEntity.status(502).body(Map.of("code", 502,
+					"message", "공급사 서버에 연결하지 못했습니다. 네트워크·접속 허용 설정을 확인해주세요. 기존 사업장 목록은 그대로입니다."));
 		}
 	}
 }

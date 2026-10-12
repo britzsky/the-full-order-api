@@ -71,6 +71,17 @@ public class OurhomeOrderAdapter {
         boolean topOk=raw.path("rtnCd").isIntegralNumber() && raw.path("rtnCd").asInt()==0;
         body.put("resCd",topOk?"S0000":"UNKNOWN").put("resMsg","아워홈 품목별 접수 결과를 확인하세요.");
         var data=body.putArray("data"); JsonNode source=raw.path("result").path("data");
+        // 요청 전체 거절(rtnCd<0, 품목 결과 없음): 아워홈이 처리하지 않은 주문이므로 품목 모두 거절로 기록한다.
+        boolean wholeRejected=!lookup && raw.path("rtnCd").isIntegralNumber() && raw.path("rtnCd").asInt()<0
+            && (!source.isArray() || source.isEmpty());
+        if(wholeRejected) {
+            String message=raw.path("rtnMsg").asText("").strip();
+            if(message.isEmpty() || message.length()>200 || message.toLowerCase().contains("token")) message="아워홈 접수 거절(사유 확인 필요)";
+            body.put("resCd","REJECTED").put("resMsg",message);
+            for(var row:rows) data.addObject().put("clientOrd",text(p.get("client_ord"))).put("clientOrdItem",text(row.get("client_ord_item")))
+                .put("itemCode",text(row.get("supplier_item_code"))).put("resCd","REJECTED").put("provider_verified",false).put("errorMsg",message);
+            return response;
+        }
         for(var row:rows) {
             List<JsonNode> matches=new ArrayList<>();
             if(source.isArray()) for(JsonNode item:source)

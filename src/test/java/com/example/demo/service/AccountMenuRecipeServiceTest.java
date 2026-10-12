@@ -10,6 +10,7 @@ class AccountMenuRecipeServiceTest {
     @Test void registerRecipeWithoutSupplierDoesNotCreateProductsOrInventory() {
         var mapper=mock(AccountMenuRecipeMapper.class);
         when(mapper.ingredientBaseUnit(anyMap())).thenReturn("g");
+        when(mapper.accountIngredientBaseUnit(anyMap())).thenReturn("g"); // 레시피 기준단위는 거래처 식재료 우선
         var ingredient=new HashMap<String,Object>(Map.of("ingredient_id","I","base_unit","g","qty_base",50,"qty_num",50,"qty_unit","g"));
         var body=new HashMap<String,Object>(Map.of("account_id","A","menu_id","M","menu_name","메뉴","recipe_id",1,"ingredients",List.of(ingredient)));
         assertThat(new AccountMenuRecipeService(mapper).registerMenu(body).get("code")).isEqualTo(200);

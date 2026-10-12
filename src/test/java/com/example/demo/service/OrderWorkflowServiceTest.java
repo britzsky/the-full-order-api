@@ -85,6 +85,23 @@ class OrderWorkflowServiceTest {
         assertThatThrownBy(() -> service.order(payload)).hasMessageContaining("원본 식자재");
         verify(api,never()).call(eq("/fdapi/service/payer-soldto-order"),any());
     }
+    @Test void anotherSupplierProductCanBeOrderedForAlreadyLinkedIngredient() {
+        ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","ONION");
+        when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
+        when(mapper.sourceLinks(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",99L)));
+        assertThat(service.order(payload).get("status")).isEqualTo("ORDERED");
+        verify(mapper).insertItem(argThat(row -> "PENDING".equals(row.get("ingredient_link_status"))));
+    }
+    @Test void orderAutomaticallyChoosesAlternatePackAndPreservesExistingStockUnit() {
+        ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","ONION");
+        when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
+        var offer = new HashMap<>(catalog.offers(Map.of()).get(0));
+        offer.put("base_qty",1); offer.put("base_unit","EA"); offer.put("alt_base_qty",2000); offer.put("alt_base_unit","g");
+        when(catalog.offers(anyMap())).thenReturn(List.of(offer));
+        when(mapper.productStockUnits(anyMap())).thenReturn(List.of("kg"));
+        service.order(payload);
+        verify(mapper).insertItem(argThat(row -> "kg".equals(row.get("base_unit")) && new BigDecimal("2").compareTo((BigDecimal)row.get("base_qty"))==0));
+    }
     @Test void directNewProductPurchaseDoesNotRequireExistingInventory() {
         var offer=new HashMap<>(catalog.offers(Map.of()).get(0));
         offer.remove("account_ingredient_product_id");
@@ -141,5 +158,27 @@ class OrderWorkflowServiceTest {
         verify(mapper,never()).updateOrder(anyMap());verify(mapper,never()).updateItem(anyMap());verify(mapper,never()).finishExchange(anyMap());
         saved.put("status","UNKNOWN");
         assertThat(service.reconcile(Map.of("account_id","ACCOUNT","purchase_order_id","saved")).get("status")).isEqualTo("UNKNOWN");
+    }
+    @Test void ourhomeOrderMissingFromSupplierLookupBecomesNotAcceptedAfterGracePeriod() {
+        OurhomeOrderAdapter ourhome=mock(OurhomeOrderAdapter.class);service.setOurhome(ourhome);
+        Map<String,Object> saved=new HashMap<>(Map.of("account_id","ACCOUNT","purchase_order_id","oh","supplier_code","OURHOME",
+            "status","UNKNOWN","sold_to","FU0UR","requested_delivery_date","2026-10-09","client_ord","OH-1"));
+        saved.put("ordered_at",java.time.LocalDateTime.now().minusMinutes(10));
+        when(mapper.order(anyMap())).thenReturn(saved);
+        when(mapper.items(anyMap())).thenReturn(List.of(new HashMap<>(Map.of("client_ord_item","1","supplier_item_code","25004786","order_qty",1,"item_status","SENDING"))));
+        var empty=json.createObjectNode();empty.putObject("dataBody").putArray("data");
+        when(ourhome.reconcile(anyMap(),anyList())).thenReturn(empty);
+        service.reconcile(Map.of("account_id","ACCOUNT","purchase_order_id","oh"));
+        verify(mapper).updateItem(argThat(item->"FAILED".equals(item.get("item_status"))&&"NOT_FOUND".equals(item.get("supplier_result_code"))));
+        assertThat(saved.get("status")).isEqualTo("FAILED");
+    }
+    @Test void recentOurhomeUnknownOrderIsNotClosedByEmptyLookup() {
+        Map<String,Object> recent=new HashMap<>(Map.of("status","UNKNOWN"));
+        recent.put("ordered_at",java.time.LocalDateTime.now().minusMinutes(1));
+        assertThat(OrderWorkflowService.notFoundLongEnough(recent)).as("5분 전에는 확정하지 않음").isFalse();
+        recent.put("ordered_at",java.sql.Timestamp.valueOf(java.time.LocalDateTime.now().minusMinutes(6)));
+        assertThat(OrderWorkflowService.notFoundLongEnough(recent)).isTrue();
+        recent.put("status","ORDERED");
+        assertThat(OrderWorkflowService.notFoundLongEnough(recent)).as("접수 확인된 주문은 대상 아님").isFalse();
     }
 }

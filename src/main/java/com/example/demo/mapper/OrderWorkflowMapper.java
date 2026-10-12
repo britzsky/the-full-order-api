@@ -14,6 +14,11 @@ public interface OrderWorkflowMapper {
 	int ensureAccountProduct(Map<String, Object> params);
 	int linkReceivedProduct(Map<String, Object> params);
 	int updateLinkStatus(Map<String, Object> params);
+	int clearSourcePreferred(Map<String, Object> params);
+	int setSourcePreferred(Map<String, Object> params);
+	int updateProductSnapshot(Map<String, Object> params);
+	int newerAcceptedSourceOrders(Map<String, Object> params);
+	List<String> productStockUnits(Map<String, Object> params);
 	Map<String, Object> order(Map<String, Object> params);
 
 	Map<String, Object> lockOrder(Map<String, Object> params);

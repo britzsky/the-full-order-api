@@ -6,7 +6,33 @@
   <if test="account_id!=null">AND account_id=#{account_id}</if> FOR UPDATE
  </select>
  <select id="requirements" resultType="map">
-  SELECT * FROM the_full_order.tb_account_meal_ingredient_requirement WHERE meal_service_id=#{meal_service_id} ORDER BY ingredient_id,menu_id
+  SELECT r.*,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name
+    FROM the_full_order.tb_account_meal_ingredient_requirement r
+    JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+   WHERE r.meal_service_id=#{meal_service_id} ORDER BY r.ingredient_id,r.menu_id
+ </select>
+ <!-- 주(식단표) 식사 목록. 수정 저장으로 확정이 풀린(복원 이력이 있는) 미확정 식사는 재확정 필요로 표시한다. -->
+ <select id="weekMeals" resultType="map">
+  SELECT s.meal_service_id,s.table_id,DATE_FORMAT(s.meal_date,'%Y-%m-%d') meal_date,s.meal_slot,s.status,s.planned_servings,s.actual_servings,
+         CASE WHEN s.status NOT IN ('COMPLETED','CANCELED') AND EXISTS(
+           SELECT 1 FROM the_full_order.tb_account_meal_stock_usage u
+             JOIN the_full_order.tb_account_meal_service o ON o.meal_service_id=u.meal_service_id
+            WHERE o.account_id=s.account_id AND o.table_id=s.table_id AND o.meal_date=s.meal_date AND o.meal_slot=s.meal_slot
+              AND u.reversed_at IS NOT NULL) THEN 1 ELSE 0 END needs_reconfirm
+    FROM the_full_order.tb_account_meal_service s
+    JOIN the_full_order.tb_account_table_meals t ON t.table_id=s.table_id AND t.account_id=s.account_id
+   WHERE s.account_id=#{account_id} AND s.table_id=#{table_id} AND t.status&lt;&gt;'CANCELED'
+   ORDER BY s.meal_date,s.meal_slot,s.meal_service_id
+ </select>
+ <!-- 사용 확정 전에 입고 확정이 필요한 발주(납품일이 확정 대상 마지막 날 이전인 미입고·부분입고). -->
+ <select id="unreceivedOrders" resultType="map">
+  SELECT po.purchase_order_id,s.supplier_name,DATE_FORMAT(po.requested_delivery_date,'%Y-%m-%d') delivery_date,po.status
+    FROM the_full_order.tb_account_purchase_order po
+    JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+   WHERE po.account_id=#{account_id} AND po.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')
+     AND po.requested_delivery_date&lt;=#{date_to}
+   ORDER BY po.requested_delivery_date,po.purchase_order_id LIMIT 50
  </select>
  <select id="balances" resultType="map">
   SELECT b.*,p.product_name product_name_snapshot FROM the_full_order.tb_account_inventory_balance b

@@ -63,6 +63,11 @@ public class ProcurementController {
 		return execute(() -> workflow.reconcile(params));
 	}
 
+	@PostMapping("/UndoPreference")
+	public ResponseEntity<?> undoPreference(@RequestBody Map<String, Object> params) {
+		return execute(() -> workflow.undoPreference(params));
+	}
+
 	/*
 	 * part : 발주관리 method : receive comment : 발주서 입고 처리 (재고·LOT 반영, 원산지 보존)
 	 */

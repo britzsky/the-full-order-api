@@ -38,17 +38,27 @@ class LocalWorkspaceReadOnlyTest {
             var session=new MockHttpSession();
             session.setAttribute(WorkspaceUser.SESSION_KEY,new WorkspaceUser("readonly-test","2",""));
             request.setSession(session);
-            var tasks=new WorkspaceController(jdbc,access).tasks("__READONLY_NONEXISTENT__",request);
+            var tasks=new WorkspaceController(jdbc,access,new com.example.demo.service.MealPlanAlertService(jdbc)).tasks("__READONLY_NONEXISTENT__",request);
             assertThat(tasks).containsEntry("role","HEADQUARTERS");
             assertThat((List<?>)tasks.get("accounts")).isEmpty();
+            // 다음 주 식단표 미작성 SQL: 목요일 기준 실제 거래처 전체(본사) 조회가 스키마와 맞는지(읽기 전용)
+            var mealAlerts=new com.example.demo.service.MealPlanAlertService(jdbc);
+            var thursday=java.time.Clock.fixed(java.time.Instant.parse("2026-10-08T00:00:00Z"),java.time.ZoneOffset.UTC);
+            var all=mealAlerts.alertsAt("",thursday);
+            System.out.println("MEAL_NEXT_WEEK alerts(all accounts, 2026-10-08) = "+all.size()+" "+all.stream().map(a->a.get("account_name")).toList());
+            assertThat(mealAlerts.alertsAt("__READONLY_NONEXISTENT__",thursday)).isEmpty();
             var site=new WorkspaceUser("readonly-test","3","__READONLY_NONEXISTENT__");
             for(String key:List.of("inventory_balance_id","account_ingredient_product_id","account_recipe_detail_id","meal_service_id","purchase_order_id","table_id","supplier_account_site_id","procurement_cart_id","meal_detail_id","supplier_offer_id","procurement_cart_item_id","purchase_order_item_id"))
                 access.checkResource(site,key,"0");
             var cfg=new Configuration(new Environment("workspace-read-only",new JdbcTransactionFactory(),ds));
-            String resource="mybatis-mapper/InventoryMapper.xml";
-            try(var stream=Files.newInputStream(resources.resolve(resource))){new XMLMapperBuilder(stream,cfg,resource,cfg.getSqlFragments()).parse();}
+            // InventoryMapper가 MenuMapper.accountProductPlanningPrices 조각을 include하므로 함께 읽는다
+            for(String resource:List.of("mybatis-mapper/MenuMapper.xml","mybatis-mapper/InventoryMapper.xml"))
+                try(var stream=Files.newInputStream(resources.resolve(resource))){new XMLMapperBuilder(stream,cfg,resource,cfg.getSqlFragments()).parse();}
             try(var sql=new SqlSessionFactoryBuilder().build(cfg).openSession(connection)) {
                 assertThat(sql.getMapper(InventoryMapper.class).movements(Map.of("account_id","__READONLY_NONEXISTENT__","date_from","2026-10-01","date_to","2026-10-01","limit",50,"offset",0))).isEmpty();
+                var filtered=Map.<String,Object>of("account_id","__READONLY_NONEXISTENT__","keyword","양파","movement_types",java.util.List.of("IN","OUT"),"ingredient_id","X","limit",50,"offset",0);
+                assertThat(sql.getMapper(InventoryMapper.class).movements(filtered)).isEmpty();
+                assertThat(sql.getMapper(InventoryMapper.class).movementSummary(filtered)).isEmpty();
                 sql.rollback();
             }
         }

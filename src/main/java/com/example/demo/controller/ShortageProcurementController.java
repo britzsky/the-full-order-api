@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.example.demo.service.DeadlineAlertService;
 import com.example.demo.service.ShortageProcurementService;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -10,9 +11,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 @RequestMapping("/Procurement")
 public class ShortageProcurementController {
 	private final ShortageProcurementService service;
+	private final DeadlineAlertService deadlineAlerts;
 
-	public ShortageProcurementController(ShortageProcurementService service) {
+	public ShortageProcurementController(ShortageProcurementService service, DeadlineAlertService deadlineAlerts) {
 		this.service = service;
+		this.deadlineAlerts = deadlineAlerts;
+	}
+
+	/*
+	 * part : 부족 발주 method : deadlineAlerts comment : 발주 마감 알림 대상. 저장된 식단 기준 부족 식재료의 우선 공급상품 다음 마감(공급사 가이드 규칙)이 within_hours(기본 24) 안이면 공급사·사업장·마감·납품일별로 반환. 발주하면 부족량에서 빠져 자동 해제
+	 */
+	@GetMapping("/DeadlineAlerts")
+	public ResponseEntity<?> deadlineAlerts(@RequestParam Map<String, Object> p) {
+		try {
+			return ResponseEntity.ok(deadlineAlerts.alerts(p));
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+		}
 	}
 
 	/*

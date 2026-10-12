@@ -57,8 +57,9 @@
       LEFT JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=ss.account_id AND ap.supplier_product_id=p.supplier_product_id
       LEFT JOIN the_full_order.tb_account_ingredient_master aim ON aim.account_id=ss.account_id
              AND aim.ingredient_id=ap.mapped_ingredient_id
+      <!-- 이 거래처 재고만 합산(전체 거래처 재고를 매 요청 집계하지 않음) -->
       LEFT JOIN (SELECT account_id,account_ingredient_product_id,SUM(current_base_qty) current_base_qty
-                   FROM the_full_order.tb_account_inventory_balance GROUP BY account_id,account_ingredient_product_id) inv
+                   FROM the_full_order.tb_account_inventory_balance WHERE account_id=#{account_id} GROUP BY account_id,account_ingredient_product_id) inv
              ON inv.account_id=ss.account_id AND inv.account_ingredient_product_id=ap.account_ingredient_product_id
       LEFT JOIN the_full_order.tb_supplier_site_product_price pr ON pr.supplier_price_id=(
              SELECT pr2.supplier_price_id FROM the_full_order.tb_supplier_site_product_price pr2
@@ -70,6 +71,11 @@
      WHERE ss.account_id=#{account_id} AND ss.active_yn='Y' AND o.active_yn='Y' AND p.active_yn='Y'
        AND (o.valid_from IS NULL OR o.valid_from&lt;=#{delivery_date}) AND (o.valid_to IS NULL OR o.valid_to&gt;=#{delivery_date})
      <if test="ingredient_id!=null and ingredient_id!=''">AND ap.mapped_ingredient_id=#{ingredient_id}</if>
+     <!-- 부족량 계산: 계산 대상 식재료에 연결된 상품만(사업장 전체 상품 1만여 건을 읽지 않음). 빈 목록은 호출하지 않는다. -->
+     <if test="ingredient_ids!=null">AND ap.mapped_ingredient_id IN <foreach collection="ingredient_ids" item="id" open="(" separator="," close=")">#{id}</foreach></if>
+     <!-- 화면 검색: 서버가 만든 정규화 단어·동의어 패턴으로 먼저 좁힌다(정렬·최종 판정은 서비스의 ProductNameMatch). -->
+     <if test="name_patterns!=null">AND (<foreach collection="name_patterns" item="pat" separator=" OR ">LOWER(REPLACE(p.product_name,' ','')) LIKE CONCAT('%',#{pat},'%') OR LOWER(p.supplier_item_code) LIKE CONCAT('%',#{pat},'%') OR LOWER(s.supplier_name) LIKE CONCAT('%',#{pat},'%')</foreach>)</if>
+     <if test="offer_ids!=null">AND o.supplier_offer_id IN <foreach collection="offer_ids" item="id" open="(" separator="," close=")">#{id}</foreach></if>
      <if test="supplier_id!=null and supplier_id!=''">AND s.supplier_id=#{supplier_id}</if>
      <if test="supplier_code!=null and supplier_code!=''">AND s.supplier_code=#{supplier_code}</if>
      <if test="external_site_code!=null and external_site_code!=''">AND ss.external_site_code=#{external_site_code}</if>
@@ -104,6 +110,33 @@
     VALUES (#{supplier_offer_id},COALESCE(#{price_context_type},'DATE'),#{price_context_value},#{purchase_price},
       COALESCE(#{currency},'KRW'),#{tax_type},#{effective_from},#{effective_to},#{price_provider_attributes})
     ON DUPLICATE KEY UPDATE purchase_price=VALUES(purchase_price),tax_type=VALUES(tax_type),effective_to=VALUES(effective_to),observed_at=NOW()
+  </insert>
+  <!-- 아워홈 동기화 빠른 경로: 이 사업장의 기존 상품·판매조건 상태를 한 번에 읽는다(변경 여부 판단용) -->
+  <select id="ourhomeSiteOffers" parameterType="map" resultType="hashmap">
+    SELECT p.supplier_item_code,p.supplier_product_id,p.alt_base_qty,p.alt_base_unit,o.supplier_offer_id,o.lead_time_days,o.cutoff_time,o.provider_attributes
+      FROM the_full_order.tb_supplier_site_product_offer o
+      JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=o.supplier_product_id
+     WHERE o.supplier_account_site_id=#{supplier_account_site_id}
+  </select>
+  <!-- 변경 없는 상품: 판매조건은 그대로 두고 동기화 시각·리비전만 한꺼번에 갱신 -->
+  <update id="touchOffers" parameterType="map">
+    UPDATE the_full_order.tb_supplier_site_product_offer SET last_synced_at=NOW(),provider_revision=#{provider_revision},active_yn='Y'
+     WHERE supplier_account_site_id=#{supplier_account_site_id} AND supplier_offer_id IN
+     <foreach collection="offer_ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </update>
+  <!-- 납품일 가격·판매상태 묶음 저장(행마다 상품 원문 JSON을 반복 저장하지 않고 그날 값만) -->
+  <insert id="insertOfferPrices" parameterType="map">
+    INSERT INTO the_full_order.tb_supplier_site_product_price
+      (supplier_offer_id,price_context_type,price_context_value,purchase_price,currency,tax_type,effective_from,effective_to,provider_attributes)
+    VALUES <foreach collection="rows" item="r" separator=",">(#{r.supplier_offer_id},'DATE',#{r.price_context_value},#{r.purchase_price},'KRW',#{r.tax_type},#{r.effective_from},#{r.effective_to},#{r.price_provider_attributes})</foreach>
+    ON DUPLICATE KEY UPDATE purchase_price=VALUES(purchase_price),tax_type=VALUES(tax_type),effective_to=VALUES(effective_to),observed_at=NOW()
+  </insert>
+  <insert id="upsertAvailabilities" parameterType="map">
+    INSERT INTO the_full_order.tb_supplier_product_availability
+      (supplier_offer_id,delivery_date,orderable_yn,status_code,status_reason,checked_at,expires_at,provider_attributes)
+    VALUES <foreach collection="rows" item="r" separator=",">(#{r.supplier_offer_id},#{r.delivery_date},COALESCE(#{r.orderable_yn},'Y'),#{r.availability_status_code},#{r.availability_status_reason},NOW(),NULL,#{r.availability_provider_attributes})</foreach>
+    ON DUPLICATE KEY UPDATE orderable_yn=VALUES(orderable_yn),status_code=VALUES(status_code),status_reason=VALUES(status_reason),
+      checked_at=NOW(),expires_at=VALUES(expires_at),provider_attributes=VALUES(provider_attributes)
   </insert>
   <insert id="upsertAvailability" parameterType="map">
     INSERT INTO the_full_order.tb_supplier_product_availability
@@ -169,12 +202,26 @@
     SELECT supplier_product_id FROM the_full_order.tb_supplier_ingredient_product
      WHERE supplier_id=#{supplier_id} AND supplier_item_code=#{supplier_item_code}
   </select>
-  <insert id="upsertAccountProduct" parameterType="map">
-    INSERT INTO the_full_order.tb_account_ingredient_product
-      (account_id,supplier_product_id,preferred_yn,safe_stock_base_qty,lead_time_days,default_location_id,active_yn,user_id)
-    VALUES(#{account_id},#{supplier_product_id},'N',0,#{lead_time_days},'L999','Y',#{user_id})
-    ON DUPLICATE KEY UPDATE lead_time_days=VALUES(lead_time_days),user_id=VALUES(user_id)
-  </insert>
+  <update id="refreshUnusedOurhomePack">
+    UPDATE the_full_order.tb_supplier_ingredient_product p
+    SET base_qty=#{base_qty},base_unit=#{base_unit},package_qty=#{package_qty},package_unit=#{package_unit}
+    WHERE p.supplier_product_id=#{supplier_product_id} AND #{base_qty}&gt;0
+      AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_ingredient_product ap
+        WHERE ap.supplier_product_id=p.supplier_product_id AND (ap.mapped_ingredient_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM the_full_order.tb_account_inventory_balance b WHERE b.account_ingredient_product_id=ap.account_ingredient_product_id)
+          OR EXISTS (SELECT 1 FROM the_full_order.tb_account_purchase_order_item i WHERE i.account_ingredient_product_id=ap.account_ingredient_product_id)))
+  </update>
+  <update id="preserveOurhomeMassOption">
+    UPDATE the_full_order.tb_supplier_ingredient_product SET alt_base_qty=#{confirmed_mass},alt_base_unit='g'
+    WHERE supplier_product_id=#{supplier_product_id} AND #{confirmed_mass}&gt;0 AND UPPER(base_unit) NOT IN ('G','KG')
+  </update>
+  <!-- 동기화는 거래처 사용상품을 만들지 않는다(연결·발주·레시피 등록 때 생성). 이미 쓰는 상품의 마감 일수만 맞춘다. -->
+  <update id="refreshAccountProductLead" parameterType="map">
+    UPDATE the_full_order.tb_account_ingredient_product
+       SET lead_time_days=COALESCE(#{lead_time_days},0),user_id=#{user_id}
+     WHERE account_id=#{account_id} AND supplier_product_id=#{supplier_product_id}
+       AND NOT (lead_time_days &lt;=&gt; COALESCE(#{lead_time_days},0))
+  </update>
   <insert id="markSyncStarted" parameterType="map">
     INSERT INTO the_full_order.tb_supplier_sync_checkpoint
       (supplier_id,supplier_account_site_id,sync_type,last_started_at,last_result_code,last_result_message,consecutive_failures)

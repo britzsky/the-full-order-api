@@ -13,7 +13,7 @@ import com.example.demo.mapper.SupplierCatalogMapper;
 class IngredientLinkServiceTest {
     final IngredientLinkMapper links=mock(IngredientLinkMapper.class);
     final SupplierCatalogMapper catalog=mock(SupplierCatalogMapper.class);
-    final IngredientLinkService service=new IngredientLinkService(links,catalog);
+    final IngredientLinkService service=new IngredientLinkService(links,catalog,mock(PlanningCostService.class));
     Map<String,Object> body(String action) {
         var b=new HashMap<String,Object>();
         b.put("action",action);b.put("account_id","A");b.put("ingredient_id","I");b.put("account_ingredient_product_id",10L);
@@ -151,9 +151,9 @@ class IngredientLinkServiceTest {
     @Test void catalogSyncPreservesManualDeactivation() throws Exception {
         try(var stream=getClass().getResourceAsStream("/mybatis-mapper/SupplierIntegrationMapper.xml")) {
             String xml=new String(stream.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
-            String block=xml.substring(xml.indexOf("<insert id=\"upsertAccountProduct\""));
-            block=block.substring(0,block.indexOf("</insert>"));
-            assertThat(block.substring(block.indexOf("ON DUPLICATE KEY UPDATE"))).doesNotContain("active_yn");
+            String block=xml.substring(xml.indexOf("<update id=\"refreshAccountProductLead\""));
+            block=block.substring(0,block.indexOf("</update>"));
+            assertThat(block).doesNotContain("active_yn").doesNotContain("INSERT");
         }
     }
 }

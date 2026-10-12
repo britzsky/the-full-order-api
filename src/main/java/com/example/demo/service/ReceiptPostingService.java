@@ -155,14 +155,6 @@ public class ReceiptPostingService {
 		Map<String, Object> p = new LinkedHashMap<>(current);
 		p.put("account_id", receipt.get("account_id"));
 		p.put("purchase_order_id", receipt.get("purchase_order_id"));
-		p.put("ingredient_link_status", "CONFLICT");
-		if (!text(p.get("source_ingredient_id")).isBlank() && orders.lockSourceIngredient(p) != null) {
-			List<Map<String, Object>> links = orders.sourceLinks(p);
-			boolean same = links.stream().anyMatch(l -> text(l.get("supplier_product_id")).equals(text(p.get("supplier_product_id"))));
-			boolean unchanged = text(p.get("link_context_snapshot")).equals(linkContextFingerprint(orders.linkContext(p)));
-			if (same || (unchanged && links.isEmpty() && orders.linkReceivedProduct(p) == 1)) p.put("ingredient_link_status", "LINKED");
-		}
-		// A later user mapping wins; receipt still posts to the actual purchased product.
-		orders.updateLinkStatus(p);
+		new OrderProductLinking(orders, new com.fasterxml.jackson.databind.ObjectMapper()).apply(p, false);
 	}
 }

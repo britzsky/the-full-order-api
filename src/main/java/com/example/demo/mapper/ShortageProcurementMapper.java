@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Mapper;
 public interface ShortageProcurementMapper {
 	List<Map<String, Object>> demand(Map<String, Object> params);
 
+	List<Map<String, Object>> unconfirmedUsage(Map<String, Object> params);
+
 	List<Map<String, Object>> draftDemand(Map<String, Object> params);
 
 	List<Map<String, Object>> stock(Map<String, Object> params);

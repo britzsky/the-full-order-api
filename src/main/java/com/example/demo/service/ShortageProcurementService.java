@@ -32,7 +32,8 @@ public class ShortageProcurementService {
 		if (text(p.get("account_id")).isBlank())
 			throw new IllegalArgumentException("거래처를 선택해주세요.");
 		String source = text(p.getOrDefault("source", "INVENTORY"));
-		if (!Set.of("PLAN", "INVENTORY", "DRAFT").contains(source))
+		// PLAN=저장된 식단 필요량, DRAFT=구성 중인 식단, INVENTORY=최근 사용량 기준 부족 예상, STOCK=현재 부족 재고 바로 주문
+		if (!Set.of("PLAN", "INVENTORY", "DRAFT", "STOCK").contains(source))
 			throw new IllegalArgumentException("부족량 조회 기준을 확인해주세요.");
 		if ("DRAFT".equals(source)) {
 			if (!(p.get("draft_meals") instanceof List<?> meals) || meals.isEmpty() || meals.size() > 2000)
@@ -80,7 +81,7 @@ public class ShortageProcurementService {
 	private static final class Bucket {
 		String id, name, unit;
 		BigDecimal demand = BigDecimal.ZERO, stock = BigDecimal.ZERO, incoming = BigDecimal.ZERO,
-				safety = BigDecimal.ZERO, history = BigDecimal.ZERO;
+				safety = BigDecimal.ZERO, history = BigDecimal.ZERO, unconfirmed = BigDecimal.ZERO;
 		Set<String> dates = new HashSet<>(), menus = new TreeSet<>(), issues = new LinkedHashSet<>();
 		NavigableMap<LocalDate,BigDecimal> demandByDate = new TreeMap<>(), incomingByDate = new TreeMap<>();
 		BigDecimal pending = BigDecimal.ZERO, overdue = BigDecimal.ZERO;
@@ -113,6 +114,11 @@ public class ShortageProcurementService {
 			Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
 			b.stock = b.stock.add(b.quantity(row));
 		}
+		// 주 단위 사용 확정 전까지 지난 식사 사용량은 재고에 아직 반영되지 않았으므로 사용 가능 재고에서 뺀다.
+		for (var row : mapper.unconfirmedUsage(p)) {
+			Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
+			b.unconfirmed = b.unconfirmed.add(b.quantity(row));
+		}
 		for (var row : mapper.incoming(p)) {
 			Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
 			BigDecimal quantity = b.quantity(row);
@@ -134,7 +140,8 @@ public class ShortageProcurementService {
 			b.incoming = b.incoming.add(quantity);
 			b.incomingByDate.merge(date,quantity,BigDecimal::add);
 		}
-		if (!"INVENTORY".equals(p.get("source"))) {
+		String source = text(p.get("source"));
+		if (Set.of("PLAN", "DRAFT").contains(source)) {
 			var demand = "DRAFT".equals(p.get("source")) ? mapper.draftDemand(p) : mapper.demand(p);
 			for (var row : demand) {
 				if (text(row.get("ingredient_id")).isBlank())
@@ -147,7 +154,7 @@ public class ShortageProcurementService {
 				b.demandByDate.merge(rowDate(row.get("meal_date"),LocalDate.parse(text(p.get("date_from")))),quantity,BigDecimal::add);
 				b.menus.add(text(row.get("menu_name")));
 			}
-		} else {
+		} else if ("INVENTORY".equals(source)) {
 			for (var row : mapper.history(p)) {
 				Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
 				b.history = b.history.add(b.quantity(row));
@@ -166,15 +173,18 @@ public class ShortageProcurementService {
         Map<String,Object> q = new LinkedHashMap<>(p);
         if (!text(p.get("sold_to")).isBlank()) q.put("external_site_code", p.get("sold_to"));
         q.put("orderable_only", "N");
-        List<Map<String,Object>> offers = suppliers.offers(q);
+        // 후보는 식재료에 연결된 상품뿐이므로 계산 대상 식재료로 좁혀 조회한다(사업장 전체 상품을 읽지 않음).
+        q.put("ingredient_ids", new ArrayList<>(buckets.keySet()));
+        List<Map<String,Object>> offers = buckets.isEmpty() ? List.of() : suppliers.offers(q);
 		List<Map<String, Object>> rows = new ArrayList<>();
 		int unknown = 0;
 		for (Bucket b : buckets.values()) {
-			if (!"INVENTORY".equals(p.get("source")) && b.menus.isEmpty())
+			if (Set.of("PLAN", "DRAFT").contains(source) && b.menus.isEmpty())
 				continue;
 			LocalDate delivery = LocalDate.parse(text(p.get("delivery_date")));
 			if ("INVENTORY".equals(p.get("source"))) b.demandByDate.put(delivery,b.demand);
-			BigDecimal balance = b.stock, shortage = BigDecimal.ZERO;
+			BigDecimal available = b.stock.subtract(b.unconfirmed);
+			BigDecimal balance = available, shortage = BigDecimal.ZERO, lowest = available;
 			LocalDate neededBy = null;
 			Set<LocalDate> timeline = new TreeSet<>(b.demandByDate.keySet());
 			timeline.addAll(b.incomingByDate.keySet());
@@ -185,15 +195,18 @@ public class ShortageProcurementService {
 				BigDecimal deficit = b.safety.subtract(balance).max(BigDecimal.ZERO);
 				if (deficit.signum()>0 && neededBy==null) neededBy=date;
 				shortage=shortage.max(deficit);
+				lowest=lowest.min(balance);
 				if (balance.signum()<0 && date.isBefore(delivery))
 					b.issues.add("선택한 납품일보다 먼저 재료가 필요합니다. 납품일 또는 식단을 확인해주세요.");
 			}
-			if (b.demand.add(b.safety).signum() == 0) {
+			// STOCK: 안전재고도 사용 이력도 없는데 현재고+입고예정이 없으면 '수량 직접 입력' 행으로 바로 주문할 수 있게 한다(수량 추정 안 함).
+			boolean manual = "STOCK".equals(source) && b.safety.signum() == 0 && available.add(b.incoming).signum() <= 0;
+			if (b.demand.add(b.safety).signum() == 0 && !manual) {
 				unknown++;
-				if (b.stock.signum() <= 0)
-					b.issues.add("현재고 없음 · 필요량 미산정: 식단 구성에서 메뉴와 예정 식수를 입력하거나 안전재고 기준을 설정해주세요.");
+				if (available.signum() <= 0 && !"STOCK".equals(source))
+					b.issues.add("현재고 없음 · 필요량 미산정: '현재 부족 재고' 기준으로 바로 주문하거나, 식단 구성에서 메뉴와 예정 식수를 입력하거나 안전재고 기준을 설정해주세요.");
 			}
-			if (shortage.signum() <= 0 && b.issues.isEmpty() && !Boolean.TRUE.equals(p.get("include_sufficient")))
+			if (shortage.signum() <= 0 && !manual && b.issues.isEmpty() && !Boolean.TRUE.equals(p.get("include_sufficient")))
 				continue;
 			Map<String, Object> row = new LinkedHashMap<>();
 			row.put("ingredient_id", b.id);
@@ -202,18 +215,22 @@ public class ShortageProcurementService {
 			row.put("required_qty", b.demand);
 			row.put("safe_stock_qty", b.safety);
 			row.put("current_qty", b.stock);
+			row.put("unconfirmed_usage_qty", b.unconfirmed);
+			row.put("available_qty", available);
 			row.put("incoming_qty", b.incoming);
 			row.put("pending_incoming_qty", b.pending);
 			row.put("overdue_incoming_qty", b.overdue);
 			row.put("pending_order_ids", b.pendingOrders);
 			row.put("needed_by", neededBy == null ? "" : neededBy.toString());
 			row.put("shortage_qty", shortage);
+			row.put("stock_status", manual ? "RED" : stockStatus(shortage, lowest));
+			row.put("quantity_basis", manual ? "MANUAL" : "CALCULATED");
 			row.put("menu_names", b.menus);
 			row.put("issues", b.issues);
 			List<Map<String, Object>> candidates = new ArrayList<>();
 			for (var offer : offers)
 				if (b.id.equals(text(offer.get("ingredient_id"))))
-					candidates.add(candidate(offer, b.unit, shortage, b.issues.isEmpty()));
+					candidates.add(candidate(offer, b.unit, shortage, b.issues.isEmpty(), manual));
 			candidates.sort(Comparator.comparing((Map<String, Object> c) -> !Boolean.TRUE.equals(c.get("orderable")))
 					.thenComparing(c -> !"Y".equals(text(c.get("preferred_yn"))))
 					.thenComparing(c -> number(c.get("estimated_amount"))));
@@ -230,28 +247,54 @@ public class ShortageProcurementService {
 				java.time.LocalDateTime.now().toString());
 	}
 
-	private Map<String, Object> candidate(Map<String, Object> offer, String unit, BigDecimal shortage, boolean valid) {
+	/**
+	 * 발주 화면 재고 상태. RED: 현재고+입고예정으로 필요량(식단/평균 사용량) 자체를 못 채움,
+	 * YELLOW: 필요량은 채우지만 안전재고 기준에 못 미침, GREEN: 부족 없음. 확인 필요(issues)는 별도로 표시한다.
+	 */
+	/** 수량 직접 입력(STOCK, 근거 없는 행) 발주의 상한. 발주단위 기준. */
+	static final BigDecimal MANUAL_MAX_ORDER_QTY = new BigDecimal("999");
+
+	static String stockStatus(BigDecimal shortage, BigDecimal lowestBalance) {
+		if (shortage.signum() <= 0) return "GREEN";
+		return lowestBalance.signum() < 0 ? "RED" : "YELLOW";
+	}
+
+	private Map<String, Object> candidate(Map<String, Object> offer, String unit, BigDecimal shortage, boolean valid, boolean manual) {
 		Map<String, Object> c = new LinkedHashMap<>(offer);
 		BigDecimal pack = BigDecimal.ZERO, qty = BigDecimal.ZERO;
-		String reason = text(offer.get("availability_reason"));
+		String reason = text(offer.get("availability_reason")), packError = "";
 		try {
 			pack = QuantityUnits.convert(number(offer.get("base_qty")), offer.get("base_unit"), unit);
-			qty = recommended(shortage, pack, number(offer.get("minimum_order_qty")),
+			// 수량 직접 입력 행은 최소 발주수량을 기본값으로만 제안한다(사용자가 정함).
+			qty = manual ? recommended(pack, pack, number(offer.get("minimum_order_qty")),
+					number(offer.get("order_increment_qty")), text(offer.get("decimal_order_allowed")))
+					: recommended(shortage, pack, number(offer.get("minimum_order_qty")),
 					number(offer.get("order_increment_qty")), text(offer.get("decimal_order_allowed")));
 		} catch (IllegalArgumentException e) {
 			valid = false;
 			reason = e.getMessage();
+			packError = e.getMessage();
 		}
-		boolean orderable = valid && shortage.signum() > 0 && "Y".equals(offer.get("orderable_yn"))
-				&& "ACTIVE".equals(offer.get("product_status")) && Set.of("WELSTORY", "OURHOME").contains(text(offer.get("supplier_code")));
+		boolean supplierOpen = "Y".equals(offer.get("orderable_yn")) && "ACTIVE".equals(offer.get("product_status"));
+		boolean supported = Set.of("WELSTORY", "OURHOME").contains(text(offer.get("supplier_code")));
+		boolean needed = shortage.signum() > 0 || manual;
+		boolean orderable = valid && needed && supplierOpen && supported;
 		c.put("orderable", orderable);
 		if (!orderable) {
+			// 막힌 진짜 이유를 보여준다. 공급사 판매상태 문구(예: 아워홈 '발주가능')를 다른 이유에 붙이지 않는다.
+			String blocked = !packError.isBlank() ? packError
+					: !supplierOpen ? (reason.isBlank() ? "공급사 판매 중단 또는 선택한 납품일에 발주할 수 없습니다." : reason)
+					: !supported ? "지원하지 않는 공급사입니다."
+					: !valid ? "식재료 확인 사항을 먼저 해결해주세요."
+					: !needed ? "부족량이 없습니다. 필요량 기준(식단·사용 이력·안전재고)을 확인해주세요."
+					: reason.isBlank() ? "필요량·단위·기존 주문 상태를 먼저 확인해주세요." : reason;
 			c.put("orderability_status", "UNAVAILABLE");
-			c.put("orderability_reason", reason.isBlank() ? "필요량·단위·기존 주문 상태를 먼저 확인해주세요." : reason);
+			c.put("orderability_reason", blocked);
 		}
 		c.put("availability_reason", reason);
 		c.put("package_base_qty", pack);
 		c.put("recommended_qty", qty);
+		c.put("quantity_basis", manual ? "MANUAL" : "CALCULATED");
 		c.put("estimated_amount", qty.multiply(number(offer.get("purchase_price"))).setScale(2, RoundingMode.HALF_UP));
 		return c;
 	}
@@ -303,7 +346,11 @@ public class ShortageProcurementService {
 			BigDecimal qty = number(selection.path("order_qty").asText());
 			OrderWorkflowService.validateQuantity(qty, number(offer.get("minimum_order_qty")),
 					number(offer.get("order_increment_qty")), text(offer.get("decimal_order_allowed")));
-			if (qty.compareTo(number(offer.get("recommended_qty"))) > 0)
+			if ("MANUAL".equals(offer.get("quantity_basis"))) {
+				// 수량 직접 입력 행: 부족량 근거가 없으므로 상한만 둔다(입력 실수 방지)
+				if (qty.compareTo(MANUAL_MAX_ORDER_QTY) > 0)
+					throw new IllegalArgumentException("직접 입력한 발주수량이 너무 큽니다(최대 " + MANUAL_MAX_ORDER_QTY + "). 수량을 확인해주세요: " + shortage.get("ingredient_name"));
+			} else if (qty.compareTo(number(offer.get("recommended_qty"))) > 0)
 				throw new IllegalArgumentException("현재 부족량의 권장 발주수량을 초과했습니다. 기발주량을 확인해주세요: " + id);
 			Map<String, Object> row = new LinkedHashMap<>(shortage);
 			row.remove("offers");

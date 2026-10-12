@@ -25,12 +25,57 @@ public class SupplierIntegrationService {
 		return mapper.sites(params);
 	}
 
+	/** 검색어의 단어·정규화 전체·동의어를 SQL LIKE 패턴으로(소문자, 공백 제거, LIKE 특수문자 이스케이프) */
+	static java.util.List<String> namePatterns(String keyword) {
+		java.util.LinkedHashSet<String> words = new java.util.LinkedHashSet<>();
+		var query = ProductNameMatch.query(keyword);
+		if (!query.key().isEmpty()) words.add(query.key());
+		words.addAll(query.aliases());
+		for (String token : ProductNameMatch.tokens(keyword)) {
+			String normalized = ProductNameMatch.normalize(token);
+			if (!normalized.isEmpty()) { words.add(normalized); words.addAll(ProductNameMatch.query(token).aliases()); }
+		}
+		return words.stream().limit(20).map(word -> word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")).toList();
+	}
+
 	public List<Map<String, Object>> offers(Map<String, Object> params) {
 		require(params, "account_id");
+		// ingredient_ids는 서버 내부(부족량 계산)에서 목록으로만 넘긴다. 요청 파라미터 문자열이면 무시.
+		if (params.containsKey("ingredient_ids") && !(params.get("ingredient_ids") instanceof java.util.Collection<?>))
+			params.remove("ingredient_ids");
+		params.remove("name_patterns");
+		// 화면 검색: keyword(동의어 포함)·offer_ids(쉼표 목록)·limit. 사업장 전체 상품(1만여 건, 수십 MB)을 내려보내지 않기 위함.
+		String keyword = java.util.Objects.toString(params.get("keyword"), "").trim();
+		if (keyword.length() > 100) throw new IllegalArgumentException("검색어는 100자 이하로 입력해주세요.");
+		if (!keyword.isEmpty()) params.put("name_patterns", namePatterns(keyword));
+		Object offerIds = params.get("offer_ids");
+		if (offerIds != null && !(offerIds instanceof java.util.Collection<?>)) {
+			java.util.List<Long> ids = new java.util.ArrayList<>();
+			for (String id : offerIds.toString().split(","))
+				if (id.trim().matches("\\d{1,18}")) ids.add(Long.valueOf(id.trim()));
+			if (ids.isEmpty()) return new java.util.ArrayList<>();
+			if (ids.size() > 500) throw new IllegalArgumentException("상품은 한 번에 500개까지 조회할 수 있습니다.");
+			params.put("offer_ids", ids);
+		}
+		Integer limit = null;
+		if (params.get("limit") != null && !params.get("limit").toString().isBlank()) {
+			try { limit = Integer.valueOf(params.get("limit").toString().trim()); } catch (NumberFormatException e) { limit = -1; }
+			if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit은 1~1000이어야 합니다.");
+		}
 		params.putIfAbsent("delivery_date", java.time.LocalDate.now().toString());
 		java.time.LocalDate deliveryDate = java.time.LocalDate.parse(params.get("delivery_date").toString());
 		params.put("price_at", deliveryDate.toString());
 		List<Map<String, Object>> rows = mapper.offers(params);
+		if (!keyword.isEmpty()) {
+			// SQL은 넓게 걸렀으므로 화면과 같은 규칙으로 판정·관련도순 정렬
+			java.util.Map<Map<String, Object>, Integer> scores = new java.util.IdentityHashMap<>();
+			for (Map<String, Object> row : rows)
+				scores.put(row, ProductNameMatch.searchScore(keyword, java.util.Objects.toString(row.get("product_name"), ""),
+						java.util.Objects.toString(row.get("supplier_item_code"), ""), java.util.Objects.toString(row.get("supplier_name"), "")));
+			rows = new java.util.ArrayList<>(rows.stream().filter(row -> scores.get(row) > 0)
+					.sorted(java.util.Comparator.comparing((Map<String, Object> row) -> -scores.get(row))).toList());
+		}
+		if (limit != null && rows.size() > limit) rows = new java.util.ArrayList<>(rows.subList(0, limit));
 		for (Map<String, Object> row : rows) {
 			row.put("suggested_order_qty", suggestedQuantity(row));
 			Object synced = row.get("last_synced_at");
@@ -39,7 +84,6 @@ public class SupplierIntegrationService {
 				stale = timestamp.toLocalDateTime().isBefore(java.time.LocalDateTime.now().minusHours(24));
 			row.put("stale", stale);
 			boolean orderable = "ACTIVE".equals(row.get("product_status")) && !"N".equals(row.get("orderable_yn"))
-					&& row.get("account_ingredient_product_id") != null
 					&& decimal(row.get("purchase_price")).signum() > 0 && decimal(row.get("base_qty")).signum() > 0;
 			row.put("orderable_yn", orderable ? "Y" : "N");
 			if (!orderable && (row.get("availability_reason") == null
@@ -56,8 +100,6 @@ public class SupplierIntegrationService {
 				}
 				if (decimal(row.get("purchase_price")).signum() <= 0)
 					reasons.add("선택한 납품일의 공급사 가격 없음");
-				if (row.get("account_ingredient_product_id") == null)
-					reasons.add("거래처 공급상품 연결 없음");
 				if (decimal(row.get("base_qty")).signum() <= 0)
 					reasons.add("포장 기준용량 확인 필요");
 				if (reasons.isEmpty())

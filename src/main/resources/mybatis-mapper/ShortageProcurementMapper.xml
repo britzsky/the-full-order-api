@@ -17,6 +17,17 @@
     LEFT JOIN the_full_order.tb_account_recipe_detail rd ON rd.account_id=m.account_id AND rd.menu_id=m.menu_id
     LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=rd.account_id AND i.ingredient_id=rd.ingredient_id
  </select>
+ <!-- 이미 지난 날짜인데 아직 사용 확정하지 않은 식사(주 단위 확정 전). 실제로는 소비됐으므로 재고에서 뺀다.
+      조회 기간(date_from 이후)은 demand에서 세므로 제외하고, 2주 넘게 방치된 식단은 계산하지 않는다. 식단표 필터와 무관하게 거래처 전체. -->
+ <select id="unconfirmedUsage" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,r.total_required_qty quantity,r.base_unit,ms.meal_date
+    FROM the_full_order.tb_account_meal_ingredient_requirement r
+    JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    JOIN the_full_order.tb_account_table_meals t ON t.table_id=ms.table_id AND t.account_id=ms.account_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+   WHERE ms.account_id=#{account_id} AND ms.status NOT IN ('CANCELED','COMPLETED') AND t.status&lt;&gt;'CANCELED'
+     AND ms.meal_date&lt;CURRENT_DATE AND ms.meal_date&gt;=DATE_SUB(CURRENT_DATE,INTERVAL 14 DAY) AND ms.meal_date&lt;#{date_from}
+ </select>
  <select id="demand" resultType="map">
   SELECT <include refid="ingredientColumns"/>,r.total_required_qty quantity,r.base_unit,ms.meal_date,m.menu_name
     FROM the_full_order.tb_account_meal_ingredient_requirement r

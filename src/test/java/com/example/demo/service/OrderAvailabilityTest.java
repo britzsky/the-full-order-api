@@ -22,6 +22,24 @@ class OrderAvailabilityTest {
         row.put("cutoff_time","11:00");row.put("lead_time_days",0);
         assertThat(OrderAvailability.evaluate(row,LocalDate.of(2026,10,2),before).status()).isEqualTo("REVIEW_REQUIRED");
     }
+    @Test void welstoryCloseCodesFollowProviderGuide() {
+        // 10/2 10:59:59 KST 기준, 10/3 납품(leadTime 1일) → 마감일 10/2
+        var meat=offer();meat.remove("cutoff_time");meat.put("supplier_code","WELSTORY");meat.put("cutoff_code","M01");
+        var decision=OrderAvailability.evaluate(meat,LocalDate.of(2026,10,3),before);
+        assertThat(decision.status()).isEqualTo("AVAILABLE");
+        assertThat(decision.deadline()).isEqualTo("2026-10-02T11:00");
+        assertThat(decision.reason()).contains("육류 11시 마감").contains("납품 1일 전");
+        assertThat(OrderAvailability.evaluate(meat,LocalDate.of(2026,10,3),Clock.offset(before,Duration.ofSeconds(1))).status()).isEqualTo("UNAVAILABLE");
+        for(String code:List.of("N01","F01")) {
+            var row=new HashMap<>(meat);row.put("cutoff_code",code);
+            assertThat(OrderAvailability.evaluate(row,LocalDate.of(2026,10,3),Clock.offset(before,Duration.ofHours(6))).deadline()).isEqualTo("2026-10-02T17:00");
+        }
+        var none=new HashMap<>(meat);none.put("cutoff_code"," ");
+        assertThat(OrderAvailability.evaluate(none,LocalDate.of(2026,10,3),before).status()).as("해당없음은 시각을 추정하지 않음").isEqualTo("REVIEW_REQUIRED");
+        var ourhome=new HashMap<>(meat);ourhome.put("supplier_code","OURHOME");
+        assertThat(OrderAvailability.evaluate(ourhome,LocalDate.of(2026,10,3),before).status()).as("다른 공급사 코드는 웰스토리 표 미적용").isEqualTo("REVIEW_REQUIRED");
+        assertThat(OrderAvailability.providerCutoff("WELSTORY","m01")).isEqualTo(LocalTime.of(11,0));
+    }
     @Test void leadTimeViolationAndProviderStopRemainBlocked() {
         assertThat(OrderAvailability.evaluate(offer(),LocalDate.of(2026,10,2),before).status()).isEqualTo("UNAVAILABLE");
         var row=offer();row.put("orderable_yn","N");row.put("availability_reason","수주마감");

@@ -2,14 +2,12 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.OrderWorkflowMapper">
   <select id="lockSourceIngredient" resultType="map">
-    SELECT im.ingredient_id,im.base_unit FROM the_full_order.tb_ingredient_master im
-    WHERE im.ingredient_id=#{source_ingredient_id} AND
-      (EXISTS (SELECT 1 FROM the_full_order.tb_account_recipe_detail r WHERE r.account_id=#{account_id} AND r.ingredient_id=im.ingredient_id)
-       OR EXISTS (SELECT 1 FROM the_full_order.tb_account_ingredient_master a WHERE a.account_id=#{account_id} AND a.ingredient_id=im.ingredient_id))
+    SELECT im.ingredient_id,im.base_unit FROM the_full_order.tb_account_ingredient_master im
+    WHERE im.account_id=#{account_id} AND im.ingredient_id=#{source_ingredient_id}
     FOR UPDATE
   </select>
   <select id="sourceLinks" resultType="map">
-    SELECT ap.account_ingredient_product_id,ap.supplier_product_id FROM the_full_order.tb_account_ingredient_product ap
+    SELECT ap.account_ingredient_product_id,ap.supplier_product_id,ap.preferred_yn FROM the_full_order.tb_account_ingredient_product ap
     JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
     WHERE ap.account_id=#{account_id} AND ap.active_yn='Y'
       AND ap.mapped_ingredient_id=#{source_ingredient_id} FOR UPDATE
@@ -35,16 +33,44 @@
   </insert>
   <update id="linkReceivedProduct">
     UPDATE the_full_order.tb_account_ingredient_product SET mapped_ingredient_id=#{source_ingredient_id},
-      preferred_yn='Y',active_yn='Y',mod_at=NOW()
+      link_base_qty=#{base_qty_per_order_unit},link_base_unit=#{base_unit},active_yn='Y',mod_at=NOW()
     WHERE account_id=#{account_id} AND account_ingredient_product_id=#{account_ingredient_product_id}
       AND supplier_product_id=#{supplier_product_id}
       AND COALESCE(mapped_ingredient_id,'')=COALESCE(#{target_mapping_snapshot},'')
   </update>
   <update id="updateLinkStatus">
     UPDATE the_full_order.tb_account_purchase_order_item SET ingredient_link_status=#{ingredient_link_status}
-    WHERE purchase_order_item_id=#{purchase_order_item_id} AND purchase_order_id=#{purchase_order_id}
+    WHERE client_ord_item=#{client_ord_item} AND purchase_order_id=#{purchase_order_id}
       AND ingredient_link_status='PENDING'
   </update>
+  <update id="clearSourcePreferred">
+    UPDATE the_full_order.tb_account_ingredient_product SET preferred_yn='N',mod_at=NOW()
+    WHERE account_id=#{account_id} AND mapped_ingredient_id=#{source_ingredient_id} AND preferred_yn='Y'
+  </update>
+  <update id="setSourcePreferred">
+    UPDATE the_full_order.tb_account_ingredient_product SET preferred_yn='Y',mod_at=NOW()
+    WHERE account_id=#{account_id} AND mapped_ingredient_id=#{source_ingredient_id}
+      AND supplier_product_id=#{supplier_product_id} AND active_yn='Y'
+  </update>
+  <update id="updateProductSnapshot">
+    UPDATE the_full_order.tb_account_purchase_order_item SET product_snapshot=#{product_snapshot}
+    WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item}
+  </update>
+  <select id="newerAcceptedSourceOrders" resultType="int">
+    SELECT COUNT(*) FROM the_full_order.tb_account_purchase_order_item i
+    JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
+    WHERE po.account_id=#{account_id} AND i.source_ingredient_id=#{source_ingredient_id}
+      AND i.item_status IN ('ORDERED','CONFIRMED','RECEIVED','PARTIAL_RECEIVED')
+      AND i.purchase_order_item_id &gt; (SELECT purchase_order_item_id FROM the_full_order.tb_account_purchase_order_item
+        WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item})
+  </select>
+  <select id="productStockUnits" resultType="string">
+    SELECT DISTINCT b.base_unit FROM the_full_order.tb_account_inventory_balance b
+    WHERE b.account_id=#{account_id} AND b.account_ingredient_product_id=#{account_ingredient_product_id}
+      AND (b.current_base_qty&lt;&gt;0 OR EXISTS (SELECT 1 FROM the_full_order.tb_account_inventory_lot l
+        WHERE l.account_id=b.account_id AND l.account_ingredient_product_id=b.account_ingredient_product_id
+          AND l.location_id=b.location_id AND l.remaining_base_qty&gt;0))
+  </select>
   <select id="lockSupplier" resultType="long">SELECT supplier_id FROM the_full_order.tb_supplier WHERE supplier_id=#{supplier_id} FOR UPDATE</select>
   <select id="clientOrderKeys" resultType="string">
     SELECT client_ord FROM the_full_order.tb_account_purchase_order WHERE supplier_id=#{supplier_id} AND sold_to=#{sold_to}
@@ -60,7 +86,13 @@
     WHERE account_id=#{account_id} AND purchase_order_id=#{purchase_order_id} FOR UPDATE
   </select>
   <select id="orders" resultType="map">
-    SELECT po.*,s.supplier_code,s.supplier_name FROM the_full_order.tb_account_purchase_order po
+    <!-- 발주서 화면·인쇄용 이름: 거래처명(기존 거래처 조회와 같은 the_full.tb_account, 읽기만)·공급사 사업장명 -->
+    SELECT po.*,s.supplier_code,s.supplier_name,
+           (SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=po.account_id LIMIT 1) account_name,
+           (SELECT ss.external_site_name FROM the_full_order.tb_supplier_account_site ss
+             WHERE ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
+             ORDER BY ss.active_yn DESC LIMIT 1) site_name
+      FROM the_full_order.tb_account_purchase_order po
     JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id WHERE po.account_id=#{account_id}
     <if test="purchase_order_id != null and purchase_order_id != ''">AND po.purchase_order_id=#{purchase_order_id}</if>
     <if test="date_from != null and date_from != ''">AND po.created_at&gt;=#{date_from}</if>

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.http.ResponseEntity;
 
 import com.example.demo.WebConfig;
+import com.example.demo.service.DirectPurchaseService;
 import com.example.demo.service.InventoryService;
 import com.google.gson.Gson;
 
@@ -23,11 +24,13 @@ import com.google.gson.Gson;
 public class InventoryController {
 
 	private final InventoryService inventoryService;
+	private final DirectPurchaseService directPurchaseService;
 
 	@Autowired
-	public InventoryController(InventoryService inventoryService, WebConfig webConfig,
-			@Value("${file.upload-dir}") String uploadDir) {
+	public InventoryController(InventoryService inventoryService, DirectPurchaseService directPurchaseService,
+			WebConfig webConfig, @Value("${file.upload-dir}") String uploadDir) {
 		this.inventoryService = inventoryService;
+		this.directPurchaseService = directPurchaseService;
 	}
 
 	/*
@@ -83,6 +86,14 @@ public class InventoryController {
 	}
 
 	/*
+	 * part : 재고관리 method : movementSummary comment : 재고 변동 이력 구분별 건수·수량·금액 합계 (movements와 같은 조건)
+	 */
+	@GetMapping("/v2/inventory/movements/summary")
+	public ResponseEntity<?> movementSummary(@RequestParam Map<String, Object> p) {
+		return execute(() -> inventoryService.movementSummary(p));
+	}
+
+	/*
 	 * part : 재고관리 method : move comment : 재고 수량 증감(입출고) 처리 및 이력 기록. 결과가 음수 재고가 되면 거부
 	 */
 	@PostMapping("/v2/inventory/movements")
@@ -96,6 +107,14 @@ public class InventoryController {
 	@PostMapping("/v2/inventory/opening")
 	public ResponseEntity<?> opening(@RequestBody Map<String, Object> b) {
 		return execute(() -> inventoryService.opening(b));
+	}
+
+	/*
+	 * part : 재고관리 method : directPurchase comment : 마트·쿠팡 등 직접구매 기록. 처음 사면 '직접구매' 공급사의 거래처 자체 상품을 자동으로 만들고, 결제 금액 ÷ 수량 단가로 입고(이동평균·LOT) 처리. request_key로 재시도 중복 방지
+	 */
+	@PostMapping("/v2/inventory/direct-purchases")
+	public ResponseEntity<?> directPurchase(@RequestBody Map<String, Object> b) {
+		return execute(() -> directPurchaseService.record(b));
 	}
 
 	/*

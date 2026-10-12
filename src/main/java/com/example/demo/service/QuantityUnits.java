@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** 질량·부피·개수와 포장 단위를 구분한다. 알 수 없는 차원 간 환산은 추측하지 않는다. */
@@ -109,66 +110,61 @@ public final class QuantityUnits {
 
 	/**
 	 * 아워홈 규격. goodsz는 "EA(450g)", "PK.(20kg)", "PK.(개당20g*20)", "KG(국내산)"처럼 단위(설명) 형식이고,
-	 * odrConvqty는 주문단위 1개의 환산수량이지만 단위(g/ml/개)가 따로 오지 않는다.
-	 * 규격에서 읽은 중량·용량(곱셈 포함)이 odrConvqty와 정확히 같을 때만 인정한다. 한쪽만으로는 단위를 추측하지 않는다.
-	 * 주문단위가 EA면 [1EA, 중량]; 그 외는 [중량, 개수] 순서다 (기존 EA 상품의 대표 규격 1EA를 유지하기 위함).
+	 * 공급사 2026-10-07 회신: odrConvqty는 G 단일 기준의 환산중량이다.
+	 * 규격 문구와 일치할 필요가 없으며, 용량 상품도 이 값을 ml나 개수로 해석하지 않는다.
+	 * EA 주문은 기존 대표 규격 1EA를 유지하고 확인된 그램 중량을 두 번째 규격으로 제공한다.
 	 */
 	public static List<Pack> ourhomePacks(String orderUnit, String goodsz, String convQty) {
 		String order = unit(orderUnit);
-		if (order.equals("kg") || order.equals("L") || order.equals("g") || order.equals("ml"))
-			return packs(orderUnit, "");
 		BigDecimal conv;
 		try {
 			conv = new BigDecimal(convQty == null ? "" : convQty.trim());
 		} catch (NumberFormatException e) {
 			conv = null;
 		}
-		String spec = (goodsz == null ? "" : goodsz).toUpperCase(Locale.ROOT).replace("㎖", "ML").replace("㎏", "KG")
-				.replace("ℓ", "L").replace("ｇ", "G");
-		Pack weight = null, count = null;
-		boolean ambiguous = false;
-		if (conv != null && conv.signum() > 0) {
-			List<BigDecimal[]> candidates = new ArrayList<>(); // {값, 0=g 1=ml}
-			// "KG(국내산)"처럼 숫자 없이 앞에 온 단위는 1단위다.
-			var lead = Pattern.compile("^\\s*(KG|ML|G|L)(?![A-Z])").matcher(spec);
-			if (lead.find())
-				candidates.add(amount(BigDecimal.ONE, lead.group(1)));
-			// 12G4EA, 20G*20, 28G*약46EA처럼 뒤에 붙은 개수는 곱한 값도 후보로 본다.
-			var m = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(KG|ML|G|L)(?![A-Z])(?:\\s*[*×X]?\\s*(?:약\\s*)?(\\d+)\\s*(?:EA|개|입)?)?")
-					.matcher(spec);
-			while (m.find()) {
-				BigDecimal[] single = amount(new BigDecimal(m.group(1)), m.group(2));
-				candidates.add(single);
-				if (m.group(3) != null)
-					candidates.add(new BigDecimal[] { single[0].multiply(new BigDecimal(m.group(3))), single[1] });
-			}
-			for (BigDecimal[] c : candidates) {
-				if (c[0].compareTo(conv) != 0)
-					continue;
-				String base = c[1].signum() == 0 ? "g" : "ml";
-				if (weight != null && !weight.baseUnit().equals(base))
-					ambiguous = true;
-				weight = new Pack(conv.stripTrailingZeros(), base);
-			}
-			var n = Pattern.compile("(\\d+)\\s*(?:EA|개|입)").matcher(spec);
-			while (weight == null && n.find())
-				if (new BigDecimal(n.group(1)).compareTo(conv) == 0)
-					count = new Pack(conv.stripTrailingZeros(), "EA");
-		}
 		List<Pack> result = new ArrayList<>();
+		Pack volume = ourhomeVolume(goodsz, conv);
 		if (order.equals("EA"))
 			result.add(new Pack(BigDecimal.ONE, "EA"));
-		if (weight != null && !ambiguous)
-			result.add(weight);
-		if (!order.equals("EA") && count != null)
-			result.add(count);
+		// 저장 칸은 대표·보조 두 개뿐이다. EA 발주 음료는 1EA + 용량(ml)을, 그 밖에는 환산중량(g) + 용량(ml)을 둔다.
+		if (conv != null && conv.signum() > 0 && !(order.equals("EA") && volume != null))
+			result.add(new Pack(conv.stripTrailingZeros(), "g"));
+		else if (conv == null || conv.signum() <= 0) {
+			if (!order.equals("EA"))
+				result.addAll(packs(orderUnit, ""));
+		}
+		if (volume != null && result.size() < 2)
+			result.add(volume);
 		return result;
 	}
 
-	private static BigDecimal[] amount(BigDecimal qty, String unitText) {
-		String u = unit(unitText);
-		boolean mass = u.equals("kg") || u.equals("g");
-		return new BigDecimal[] { convert(qty, u, mass ? "g" : "ml"), mass ? BigDecimal.ZERO : BigDecimal.ONE };
+	private static final Pattern OURHOME_VOLUME = Pattern.compile(
+			"(\\d+(?:\\.\\d+)?)\\s*(㎖|ml|ℓ|l)(?![a-z])(?:\\s*[*×x]\\s*(\\d+)\\s*(?:ea|개|입|병|팩)?)?", Pattern.CASE_INSENSITIVE);
+
+	/**
+	 * 아워홈 goodsz의 용량 표기(예: "EA(1.5ℓ)", "BOX(296㎖*12ea_미국)")를 발주단위 1개의 ml로 읽는다.
+	 * odrConvqty(g)를 ml로 추정하지 않는다. 공급사가 적은 용량이 환산중량과 액체 수준(비중 0.7~1.43)으로 맞을 때만
+	 * 인정해, 낱개 용량을 박스 용량으로 잘못 읽는 경우를 거른다. 환산중량이 없으면 표기만 믿는다.
+	 */
+	static Pack ourhomeVolume(String goodsz, BigDecimal conv) {
+		if (goodsz == null)
+			return null;
+		Matcher m = OURHOME_VOLUME.matcher(goodsz);
+		if (!m.find())
+			return null;
+		BigDecimal ml = new BigDecimal(m.group(1));
+		if (m.group(2).equals("ℓ") || m.group(2).equalsIgnoreCase("l"))
+			ml = ml.multiply(new BigDecimal("1000"));
+		if (m.group(3) != null)
+			ml = ml.multiply(new BigDecimal(m.group(3)));
+		if (ml.signum() <= 0)
+			return null;
+		if (conv != null && conv.signum() > 0) {
+			BigDecimal ratio = ml.divide(conv, 4, RoundingMode.HALF_UP);
+			if (ratio.compareTo(new BigDecimal("0.7")) < 0 || ratio.compareTo(new BigDecimal("1.43")) > 0)
+				return null;
+		}
+		return new Pack(ml.stripTrailingZeros(), "ml");
 	}
 
 	/** 식재료 기준단위로 환산 가능한 첫 규격. 없으면 null. */

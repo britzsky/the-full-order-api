@@ -28,7 +28,14 @@ class SupplierIntegrationServiceTest {
     @Test void independentMissingConditionsAreReportedTogether() {
         var row=offer();row.remove("account_ingredient_product_id");row.put("purchase_price",0);row.put("base_qty",0);
         assertThat(evaluate(row).get("availability_reason").toString())
-                .contains("공급사 가격 없음","거래처 공급상품 연결 없음","포장 기준용량 확인 필요");
+                .contains("공급사 가격 없음","포장 기준용량 확인 필요").doesNotContain("거래처 공급상품 연결 없음");
+    }
+    @Test void productNotYetUsedByAccountIsOrderable() {
+        // 거래처 사용상품 행은 발주 저장 때 생성되므로 판정에 필요하지 않다.
+        var row=offer();row.remove("account_ingredient_product_id");
+        var result=evaluate(row);
+        assertThat(result.get("orderable_yn")).isEqualTo("Y");
+        assertThat(String.valueOf(result.get("availability_reason"))).doesNotContain("거래처 공급상품 연결 없음");
     }
     @Test void providerAvailabilityReasonIsPreservedAndActiveProductsRemainOrderable() {
         var blocked=offer();blocked.put("orderable_yn","N");blocked.put("availability_reason","해당 납품일 배송 불가");

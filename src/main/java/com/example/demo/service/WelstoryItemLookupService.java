@@ -52,6 +52,8 @@ public class WelstoryItemLookupService {
 
 	private volatile CachedToken cachedToken;
 	private volatile CachedPublicIp cachedPublicIp;
+	/** 설정의 고정 access-token이 만료 응답을 받았으면 true. 이후 client-id/secret으로 발급한 토큰을 쓴다. */
+	private volatile boolean configuredTokenExpired;
 
 	public WelstoryItemLookupService(WebClient.Builder webClientBuilder, WelstoryGuidGenerator guidGenerator,
 			@Value("${welstory.api.base-url:}") String apiBaseUrl, @Value("${welstory.api.token-url:}") String tokenUrl,
@@ -85,7 +87,7 @@ public class WelstoryItemLookupService {
 	}
 
 	public String accessToken() {
-		if (!configuredAccessToken.isBlank())
+		if (!configuredAccessToken.isBlank() && !configuredTokenExpired)
 			return configuredAccessToken;
 		ensureTokenConfiguration();
 
@@ -101,12 +103,27 @@ public class WelstoryItemLookupService {
 		try {
 			return callOnce(apiPath, request, token);
 		} catch (WebClientResponseException exception) {
-			if (exception.getStatusCode() != HttpStatus.UNAUTHORIZED || !configuredAccessToken.isBlank()) {
+			if (!isTokenRejected(exception))
 				throw exception;
+			if (token.equals(configuredAccessToken)) {
+				// 고정 토큰 만료: client-id/secret이 있으면 새로 발급해 계속 진행, 없으면 설정 갱신을 안내한다.
+				if (tokenUrl.isBlank() || clientId.isBlank() || clientSecret.isBlank())
+					throw new IllegalStateException("웰스토리 access-token이 만료되었습니다. 설정의 welstory.api.access-token을 갱신하거나 client-id/client-secret을 설정해주세요.");
+				configuredTokenExpired = true;
 			}
 			invalidate(token);
 			return callOnce(apiPath, request, accessToken());
 		}
+	}
+
+	/**
+	 * 토큰 거부 응답. 401 외에 웰스토리 게이트웨이는 만료 토큰을 HTTP 500 + {"resCd":"EGW00123","resMsg":"기간이 만료된 token 입니다."}로 돌려준다.
+	 */
+	static boolean isTokenRejected(WebClientResponseException exception) {
+		if (exception.getStatusCode() == HttpStatus.UNAUTHORIZED)
+			return true;
+		String body = exception.getResponseBodyAsString();
+		return body.contains("EGW00123") || body.contains("만료된 token");
 	}
 
 	public JsonNode revokeConfiguredToken() {
