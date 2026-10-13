@@ -35,7 +35,8 @@ public class WebConfig implements WebMvcConfigurer {
 						"http://localhost:19090",
 						"http://localhost:8092",
 						"http://172.30.1.48:8081",
-						"http://13.236.127.178:8080")
+						"http://13.236.127.178:8080",
+						"http://13.236.127.178:8090")
 				.allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 				.allowedHeaders("Authorization", "x-refresh-token", "Content-Type", "guid", "X-Workspace-Request")
 				.exposedHeaders("Authorization", "x-refresh-token")
