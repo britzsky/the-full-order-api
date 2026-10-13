@@ -13,17 +13,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.demo.service.SupplierIntegrationService;
 import com.example.demo.service.WelstoryCatalogSyncService;
+import com.example.demo.service.WelstoryCycleSyncService;
 
 @RestController
 @RequestMapping("/v2/supplier-integration")
 public class SupplierIntegrationController {
 	private final SupplierIntegrationService service;
 	private final WelstoryCatalogSyncService welstorySyncService;
+	private final WelstoryCycleSyncService welstoryCycleService;
 
 	public SupplierIntegrationController(SupplierIntegrationService service,
-			WelstoryCatalogSyncService welstorySyncService) {
+			WelstoryCatalogSyncService welstorySyncService, WelstoryCycleSyncService welstoryCycleService) {
 		this.service = service;
 		this.welstorySyncService = welstorySyncService;
+		this.welstoryCycleService = welstoryCycleService;
 	}
 
 	/*
@@ -96,6 +99,16 @@ public class SupplierIntegrationController {
 	@PostMapping("/sync/welstory/catalog")
 	public ResponseEntity<?> syncWelstoryCatalog(@RequestBody Map<String, Object> body) {
 		return execute(() -> welstorySyncService.syncCatalog(body));
+	}
+
+	/*
+	 * part : 웰스토리 연동 method : syncWelstoryAuto comment : 순기 번호 입력 없이 오늘 순기·차순기 판가 동기화(안 받은 순기는 전체 판가, 받은 순기는 변경 판가)
+	 */
+	@PostMapping("/sync/welstory/auto")
+	public ResponseEntity<?> syncWelstoryAuto(@RequestBody Map<String, Object> body) {
+		return execute(() -> Map.of("code", 200, "sites", welstoryCycleService.syncAccount(
+				body.get("account_id") == null ? null : body.get("account_id").toString(),
+				body.get("user_id") == null ? null : body.get("user_id").toString())));
 	}
 
 	/*

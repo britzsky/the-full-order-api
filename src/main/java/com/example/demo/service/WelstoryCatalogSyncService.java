@@ -107,6 +107,78 @@ public class WelstoryCatalogSyncService {
 		}
 	}
 
+	/**
+	 * 순기 한 건(1행)만 조회해 웰스토리가 준 순기 시작·종료일을 돌려준다. DB에 저장하지 않는다.
+	 * 아직 열리지 않았거나 없는 순기면 null. 순기 번호를 찾을 때 달력 계산 대신 이 값으로 확인한다.
+	 */
+	public LocalDate[] periodDates(String soldTo, String year, String period) {
+		ObjectNode body = objectMapper.createObjectNode();
+		body.put("soldTo", soldTo).put("periodGroupYear", year).put("periodGroup", period);
+		// fetchPaged와 같은 순서: contYn=Y로 먼저, '조회 데이터 없음'이면 N으로 한 번 더
+		for (String contYn : List.of("Y", "N")) {
+			ObjectNode request = objectMapper.createObjectNode();
+			request.putObject("dataHeader").put("pageRow", 1).put("contYn", contYn).put("nextKey", "");
+			request.set("dataBody", body.deepCopy());
+			JsonNode responseBody = api.call("/fdapi/service/payer-allitem-price", request).path("dataBody");
+			String code = responseBody.path("resCd").asText("");
+			if (!code.isBlank() && !"S0000".equals(code)) {
+				if (noData(code, responseBody.path("resMsg").asText("")))
+					continue;
+				throw new IllegalStateException(responseBody.path("resMsg").asText(code));
+			}
+			JsonNode data = responseBody.path("data");
+			JsonNode row = data.isArray() ? data.path(0) : data;
+			try {
+				return new LocalDate[] { LocalDate.parse(first(row, "periodFromDt"), BASIC_DATE),
+						LocalDate.parse(first(row, "periodToDt"), BASIC_DATE) };
+			} catch (Exception e) {
+				continue;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 변경 판가(payer-chgitem-price): 요청일에 전일 대비 생성(C)·변경(U)·삭제(D)된 품목만 반영한다.
+	 * 전체 판가를 이미 받은 순기에만 쓴다. 변경이 없으면 0건.
+	 */
+	public Map<String, Object> syncChangedPrices(Map<String, Object> command) {
+		String accountId = required(command, "account_id");
+		String soldTo = required(command, "sold_to");
+		String year = required(command, "period_group_year");
+		String period = required(command, "period_group");
+		String reqDate = required(command, "req_date");
+		Long supplierId = ensureSupplier(command);
+		Map<String, Object> siteQuery = new LinkedHashMap<>();
+		siteQuery.put("account_id", accountId);
+		siteQuery.put("supplier_id", supplierId);
+		siteQuery.put("active_yn", "Y");
+		Map<String, Object> site = mapper.sites(siteQuery).stream()
+				.filter(row -> soldTo.equals(text(row.get("external_site_code")))).findFirst()
+				.orElseThrow(() -> new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다: " + soldTo));
+		Long siteId = Long.valueOf(site.get("supplier_account_site_id").toString());
+		ObjectNode body = objectMapper.createObjectNode();
+		body.put("soldTo", soldTo).put("periodGroupYear", year).put("periodGroup", period).put("reqDate", reqDate);
+		List<JsonNode> rows;
+		try {
+			rows = fetchPaged("/fdapi/service/payer-chgitem-price", body);
+		} catch (IllegalStateException e) {
+			if (noData("", e.getMessage()))
+				return Map.of("code", 200, "received_count", 0, "saved_count", 0);
+			throw e;
+		}
+		int saved = 0;
+		for (JsonNode row : rows)
+			if (upsertCatalogRow(command, supplierId, siteId, year, period, row))
+				saved++;
+		return Map.of("code", 200, "received_count", rows.size(), "saved_count", saved);
+	}
+
+	private boolean noData(String code, String message) {
+		String m = message == null ? "" : message;
+		return "EE120".equals(code) || "E1103".equals(code) || m.contains("존재하지 않습니다") || m.contains("조회 결과가 없습니다");
+	}
+
 	@Transactional
 	public Map<String, Object> syncReceipts(Map<String, Object> command) {
 		String accountId = required(command, "account_id");
@@ -261,6 +333,12 @@ public class WelstoryCatalogSyncService {
 		p.put("valid_to", date(first(row, "periodToDt"), null));
 		p.put("provider_revision", year + "-" + period);
 		p.put("provider_attributes", json(row));
+		// 변경 판가의 삭제(D) 품목: 이 사업장 판매조건만 내린다(공용 상품 마스터는 그대로)
+		if ("D".equalsIgnoreCase(first(row, "statusCd"))) {
+			p.put("active_yn", "N");
+			mapper.upsertOffer(p);
+			return true;
+		}
 		mapper.upsertOffer(p);
 		p.put("price_context_type", "CYCLE");
 		p.put("price_context_value", year + "-" + period);

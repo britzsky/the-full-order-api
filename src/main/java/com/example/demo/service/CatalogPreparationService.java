@@ -16,6 +16,9 @@ public class CatalogPreparationService {
     private OurhomeSiteService sites;
     @org.springframework.beans.factory.annotation.Autowired
     public void setSites(OurhomeSiteService sites) { this.sites=sites; }
+    private WelstoryCycleSyncService cycles;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCycles(WelstoryCycleSyncService cycles) { this.cycles=cycles; }
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(16), r -> { var t=new Thread(r,"catalog-preparation");t.setDaemon(true);return t; });
     public CatalogPreparationService(JdbcTemplate jdbc, OurhomeCatalogSyncService ourhome, WelstoryCatalogSyncService welstory) {
@@ -56,14 +59,9 @@ public class CatalogPreparationService {
             if("OURHOME".equals(site.get("supplier_code"))) {
                 command.put("siteCode",site.get("external_site_code"));command.put("deliveryDate",date.toString());ourhome.sync(command);
             } else {
-                var periods=jdbc.queryForList("""
-                    SELECT DISTINCT provider_revision FROM the_full_order.tb_supplier_site_product_offer
-                    WHERE supplier_account_site_id=? AND active_yn='Y' AND valid_from<=? AND valid_to>=?
-                      AND provider_revision REGEXP '^[0-9]{4}-[0-9]{2}$'
-                    """,id,date.toString(),date.toString());
-                if(periods.size()!=1) throw new IllegalArgumentException("본사에서 해당 납품일의 웰스토리 유효 순기를 먼저 확인·등록해주세요.");
-                String[] period=periods.get(0).get("provider_revision").toString().split("-");
-                command.put("sold_to",site.get("external_site_code"));command.put("period_group_year",period[0]);command.put("period_group",period[1]);welstory.syncCatalog(command);
+                // 납품일이 속한 순기를 웰스토리 응답 날짜로 찾아, 아직 안 받은 순기면 전체 판가를 받는다(이미 받았으면 그대로)
+                if(cycles==null) throw new IllegalArgumentException("웰스토리 순기 동기화가 설정되지 않았습니다.");
+                cycles.ensureCycle(site,date,actor);
             }
             jdbc.update("""
                 UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_succeeded_at=NOW(),last_result_code='READY',last_result_message='납품일 상품 준비 완료',consecutive_failures=0

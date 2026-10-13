@@ -32,12 +32,24 @@ class CatalogPreparationServiceTest {
             verify(ourhome,times(1)).sync(argThat(p->date.equals(p.get("deliveryDate"))&&"SITE".equals(p.get("siteCode"))));verifyNoInteractions(welstory);
         } finally { service.close(); }
     }
-    @Test void unknownWelstoryPeriodIsNotGuessedOrCalled() throws Exception {
+    @Test void welstoryPreparationFindsCycleForDeliveryDate() throws Exception {
         var db=new Database();db.supplier="WELSTORY";var ourhome=mock(OurhomeCatalogSyncService.class);var welstory=mock(WelstoryCatalogSyncService.class);
-        var service=new CatalogPreparationService(db,ourhome,welstory);
+        var cycles=mock(WelstoryCycleSyncService.class);
+        var service=new CatalogPreparationService(db,ourhome,welstory);service.setCycles(cycles);
+        try {
+            LocalDate date=LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1);
+            service.prepare("A",date.toString(),"worker");
+            assertThat(db.done.await(3,TimeUnit.SECONDS)).isTrue();assertThat(db.outcome).isEqualTo("READY");
+            verify(cycles).ensureCycle(argThat(site->"SITE".equals(site.get("external_site_code"))),eq(date),eq("worker"));verifyNoInteractions(ourhome);
+        } finally { service.close(); }
+    }
+    @Test void welstoryCycleNotOpenYetIsReportedNotGuessed() throws Exception {
+        var db=new Database();db.supplier="WELSTORY";var cycles=mock(WelstoryCycleSyncService.class);
+        when(cycles.ensureCycle(any(),any(),any())).thenThrow(new IllegalArgumentException("웰스토리에서 납품일의 순기 판가를 아직 받을 수 없습니다."));
+        var service=new CatalogPreparationService(db,mock(OurhomeCatalogSyncService.class),mock(WelstoryCatalogSyncService.class));service.setCycles(cycles);
         try {
             service.prepare("A",LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1).toString(),"worker");
-            assertThat(db.done.await(3,TimeUnit.SECONDS)).isTrue();assertThat(db.outcome).contains("유효 순기");verifyNoInteractions(ourhome,welstory);
+            assertThat(db.done.await(3,TimeUnit.SECONDS)).isTrue();assertThat(db.outcome).contains("아직 받을 수 없습니다");
         } finally { service.close(); }
     }
     @Test void rejectsUnboundedDatesBeforeDatabaseOrProviderWork() {
