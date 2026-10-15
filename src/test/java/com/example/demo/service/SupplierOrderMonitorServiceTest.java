@@ -52,4 +52,22 @@ class SupplierOrderMonitorServiceTest {
 		service.notify(order, List.of(item("1", "1"), item("2", "1")), List.of(line("1", "Y", "1", "N"), line("2", "N", "", "N")));
 		verify(notifications).supplierStatus(eq("A"), eq("PO1"), eq("아워홈 일부 출고 · 2026-10-16 · 1/2품목"), anyString());
 	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void shipmentLookupGivesStatePerItemAndOnlyForOwnOurhomeOrder() {
+		var jdbc = mock(JdbcTemplate.class);
+		var site = mock(OurhomeSiteService.class);
+		var monitor = new SupplierOrderMonitorService(jdbc, mock(OrderWorkflowService.class), site, notifications);
+		when(jdbc.queryForList(contains("WHERE po.account_id=? AND po.purchase_order_id=?"), eq("A"), eq("PO1")))
+				.thenReturn(List.of(Map.of("purchase_order_id", "PO1", "sold_to", "S", "client_ord", "C1", "delivery_date", "2026-10-16", "supplier_code", "OURHOME")));
+		when(jdbc.queryForList(contains("tb_account_purchase_order_item"), eq("PO1")))
+				.thenReturn(List.of(Map.of("client_ord_item", "1"), Map.of("client_ord_item", "2"), Map.of("client_ord_item", "3")));
+		when(site.orders("S", "2026-10-16")).thenReturn(new OurhomeSiteService.OrderResult("now", "S", "2026-10-16",
+				List.of(line("1", "Y", "2", "N"), line("2", "N", "", "Y"))));
+		var lines = (List<Map<String, Object>>) monitor.ourhomeShipment("A", "PO1").get("lines");
+		assertThat(lines).extracting(l -> l.get("state")).containsExactly("SHIPPED", "DELETED", "MISSING");
+		assertThat(lines.get(0)).containsEntry("shipped_qty", "2");
+		assertThatThrownBy(() -> monitor.ourhomeShipment("B", "PO1")).hasMessageContaining("찾을 수 없습니다");
+	}
 }

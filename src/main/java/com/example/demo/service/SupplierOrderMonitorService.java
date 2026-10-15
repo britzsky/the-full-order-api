@@ -95,6 +95,42 @@ public class SupplierOrderMonitorService {
 		return Map.of("orders", openOrders.size(), "lookups", groups.size(), "failed_lookups", failedLookups, "notified", notified);
 	}
 
+	/**
+	 * 발주서 한 장의 아워홈 품목별 출고 상태(화면 '공급사 출고' 칸). 실시간 조회만 하고 저장·재고 반영은 하지 않는다.
+	 * state: SHIPPED(출고완료, shipped_qty=clhaqty) / OPEN(출고 전) / DELETED(아워홈 삭제) / MISSING(아워홈 주문 조회에 없음)
+	 */
+	public Map<String, Object> ourhomeShipment(String account, String orderId) {
+		var found = jdbc.queryForList("""
+				SELECT po.purchase_order_id,po.sold_to,po.client_ord,DATE_FORMAT(po.requested_delivery_date,'%Y-%m-%d') delivery_date,s.supplier_code
+				FROM the_full_order.tb_account_purchase_order po JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+				WHERE po.account_id=? AND po.purchase_order_id=?
+				""", account, orderId);
+		if (found.isEmpty())
+			throw new IllegalArgumentException("발주서를 찾을 수 없습니다.");
+		var order = found.get(0);
+		if (!"OURHOME".equals(order.get("supplier_code")))
+			return Map.of("supported", false, "lines", List.of());
+		var lines = ourhome.orders(text(order.get("sold_to")), text(order.get("delivery_date"))).orders();
+		List<Map<String, Object>> result = new ArrayList<>();
+		for (var item : jdbc.queryForList("SELECT client_ord_item FROM the_full_order.tb_account_purchase_order_item WHERE purchase_order_id=? ORDER BY client_ord_item", orderId)) {
+			var matches = lines.stream().filter(l -> text(order.get("client_ord")).equals(l.get("extnOrderKey"))
+					&& text(item.get("client_ord_item")).equals(l.get("extnOrderNo"))).toList();
+			Map<String, Object> row = new LinkedHashMap<>();
+			row.put("client_ord_item", item.get("client_ord_item"));
+			if (matches.size() != 1)
+				row.put("state", "MISSING");
+			else if ("Y".equals(matches.get(0).get("delYn")))
+				row.put("state", "DELETED");
+			else if ("Y".equals(matches.get(0).get("prcsStatYn"))) {
+				row.put("state", "SHIPPED");
+				row.put("shipped_qty", matches.get(0).get("clhaqty"));
+			} else
+				row.put("state", "OPEN");
+			result.add(row);
+		}
+		return Map.of("supported", true, "checked_at", java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")).toString(), "lines", result);
+	}
+
 	private List<Map<String, Object>> items(Map<String, Object> order) {
 		return jdbc.queryForList("""
 				SELECT client_ord_item,supplier_item_code,order_qty,item_status FROM the_full_order.tb_account_purchase_order_item

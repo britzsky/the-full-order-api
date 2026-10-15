@@ -11,6 +11,12 @@ public class WorkspaceNotificationController {
     private final WorkspaceNotificationService service;
     private final WorkspaceAccess access;
     public WorkspaceNotificationController(WorkspaceNotificationService service,WorkspaceAccess access) { this.service=service;this.access=access; }
+    /** 저장된 알림만(다시 계산하지 않음) — 발주서·입고 화면의 공급사 확인 요망 띠 */
+    @GetMapping public Object list(@RequestParam(name="account_id",defaultValue="") String account,HttpServletRequest request) {
+        if(account.isBlank()) return ResponseEntity.badRequest().body(Map.of("message","거래처를 선택해주세요."));
+        access.checkAccount(WorkspaceAccess.user(request),account);
+        return service.list(account);
+    }
     @PostMapping("/refresh") public Object refresh(@RequestBody Map<String,Object> body,HttpServletRequest request) {
         String account=Objects.toString(body.get("account_id"),"");access.checkAccount(WorkspaceAccess.user(request),account);
         return service.refresh(account);

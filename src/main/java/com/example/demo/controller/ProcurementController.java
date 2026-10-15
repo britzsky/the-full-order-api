@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.demo.service.ProcurementService;
 import com.example.demo.service.OrderWorkflowService;
 import com.example.demo.service.ReceiptPostingService;
+import com.example.demo.service.SupplierOrderMonitorService;
 import com.fasterxml.jackson.databind.JsonNode;
 
 @RestController
@@ -23,12 +24,23 @@ public class ProcurementController {
 	private final ProcurementService service;
 	private final OrderWorkflowService workflow;
 	private final ReceiptPostingService receipts;
+	private final SupplierOrderMonitorService monitor;
 
 	public ProcurementController(ProcurementService service, OrderWorkflowService workflow,
-			ReceiptPostingService receipts) {
+			ReceiptPostingService receipts, SupplierOrderMonitorService monitor) {
 		this.service = service;
 		this.workflow = workflow;
 		this.receipts = receipts;
+		this.monitor = monitor;
+	}
+
+	/*
+	 * part : 발주관리 method : supplierShipment comment : 아워홈 발주서의 품목별 출고 상태 실시간 조회(재고 반영 없음)
+	 */
+	@GetMapping("/SupplierShipment")
+	public ResponseEntity<?> supplierShipment(@RequestParam(name = "account_id") String accountId,
+			@RequestParam(name = "purchase_order_id") String purchaseOrderId) {
+		return execute(() -> monitor.ourhomeShipment(accountId, purchaseOrderId));
 	}
 
 	/*
