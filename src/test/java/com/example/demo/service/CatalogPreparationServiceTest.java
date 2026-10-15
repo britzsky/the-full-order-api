@@ -57,4 +57,29 @@ class CatalogPreparationServiceTest {
         try { assertThatThrownBy(()->service.prepare("A",LocalDate.now().plusYears(1).toString(),"worker")).hasMessageContaining("31일");verifyNoInteractions(jdbc); }
         finally { service.close(); }
     }
+    @Test void scheduledPreparesNearestOurhomeDatesInlineEvenWithoutMealPlan() {
+        var today=LocalDate.now(ZoneId.of("Asia/Seoul"));
+        var prepared=new ArrayList<String>();
+        var db=new JdbcTemplate() {
+            @Override public List<Map<String,Object>> queryForList(String sql,Object... args) {
+                if(sql.contains("SELECT ss.account_id,ss.external_site_code")) return List.of(Map.of("account_id","A","external_site_code","SITE"));
+                if(sql.contains("SELECT ss.*,s.supplier_code")) return List.of(Map.of("supplier_code","OURHOME","supplier_id",1,"supplier_account_site_id",2,"account_id","A","external_site_code","SITE"));
+                return List.of();
+            }
+            @Override public List<Map<String,Object>> queryForList(String sql) { return queryForList(sql,new Object[0]); }
+            @Override public int update(String sql,Object... args) { return 1; }
+        };
+        var ourhome=mock(OurhomeCatalogSyncService.class);
+        when(ourhome.sync(any())).thenAnswer(i->{prepared.add(((Map<?,?>)i.getArgument(0)).get("deliveryDate").toString());return Map.of();});
+        var sites=mock(OurhomeSiteService.class);
+        when(sites.sites()).thenReturn(new OurhomeSiteService.SiteResult("now",List.of(new OurhomeSiteService.Site("SITE","n","h","h","c","c","r","r",
+            List.of(today.toString(),today.plusDays(3).toString(),today.plusDays(1).toString(),today.plusDays(5).toString())))));
+        var service=new CatalogPreparationService(db,ourhome,mock(WelstoryCatalogSyncService.class));service.setSites(sites);
+        try {
+            var result=service.scheduled();
+            // 오늘은 제외, 가까운 2일만 — 대기열이 아니라 배치 스레드에서 바로 끝난다
+            assertThat(prepared).containsExactly(today.plusDays(1).toString(),today.plusDays(3).toString());
+            assertThat(result).containsEntry("prepared",2).containsEntry("failed",0);
+        } finally { service.close(); }
+    }
 }
