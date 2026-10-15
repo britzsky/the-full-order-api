@@ -20,6 +20,10 @@ public class SupplierOrderMonitorService {
 	private final OrderWorkflowService orders;
 	private final OurhomeSiteService ourhome;
 	private final WorkspaceNotificationService notifications;
+	private KakaoNotificationService kakao;
+
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	public void setKakao(KakaoNotificationService kakao) { this.kakao = kakao; }
 
 	public SupplierOrderMonitorService(JdbcTemplate jdbc, OrderWorkflowService orders, OurhomeSiteService ourhome,
 			WorkspaceNotificationService notifications) {
@@ -128,19 +132,28 @@ public class SupplierOrderMonitorService {
 		}
 		int live = items.size() - deleted - missing;
 		String date = text(order.get("delivery_date"));
-		String title;
+		String quantity = changed > 0 ? " · 출고 수량 다름 " + changed + "품목" : "";
+		String status; // 업무 알림 제목과 알림톡 '상태' 변수에 같이 쓴다
 		if (deleted + missing > 0)
-			title = "아워홈 주문 확인 요망 · " + date + (deleted > 0 ? " · 아워홈 삭제 " + deleted + "품목" : "")
+			status = "주문 확인 요망" + (deleted > 0 ? " · 아워홈 삭제 " + deleted + "품목" : "")
 					+ (missing > 0 ? " · 주문 조회 안 됨 " + missing + "품목" : "");
 		else if (live > 0 && shipped == live)
-			title = "아워홈 출고완료 · " + date + " · " + shipped + "품목 입고 처리 요망" + (changed > 0 ? " · 출고 수량 다름 " + changed + "품목" : "");
+			status = "출고완료 · " + shipped + "품목 입고 처리 요망" + quantity;
 		else if (shipped > 0)
-			title = "아워홈 일부 출고 · " + date + " · " + shipped + "/" + live + "품목" + (changed > 0 ? " · 출고 수량 다름 " + changed + "품목" : "");
+			status = "일부 출고 · " + shipped + "/" + live + "품목" + quantity;
 		else {
 			notifications.resolveSupplierStatus(account, id);
 			return false;
 		}
-		notifications.supplierStatus(account, id, title, facts.toString());
+		int split = status.indexOf(" · ");
+		String title = "아워홈 " + (split < 0 ? status + " · " + date : status.substring(0, split) + " · " + date + status.substring(split));
+		String fingerprint = notifications.supplierStatus(account, id, title, facts.toString());
+		if (kakao != null && fingerprint != null)
+			try {
+				kakao.supplierStatus(account, id, fingerprint, "아워홈", date, status);
+			} catch (RuntimeException e) {
+				log.warn("아워홈 출고 상태 알림톡 실패 purchase_order_id={}: {}", id, e.getMessage());
+			}
 		return true;
 	}
 

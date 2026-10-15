@@ -24,6 +24,10 @@ public class SupplierSyncScheduler {
 	private final CatalogPreparationService preparation;
 	private final OurhomeCatalogSyncService ourhome;
 	private final SupplierOrderMonitorService monitor;
+	private KakaoNotificationService kakao;
+
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	public void setKakao(KakaoNotificationService kakao) { this.kakao = kakao; }
 	private final boolean catalogEnabled, receiptsEnabled, ourhomeSitesEnabled, ourhomeShipmentsEnabled, reconcileEnabled;
 
 	public SupplierSyncScheduler(SupplierIntegrationMapper mapper, WelstoryCatalogSyncService sync,
@@ -96,6 +100,14 @@ public class SupplierSyncScheduler {
 		var result = monitor.reconcileUnresolved();
 		if (!Integer.valueOf(0).equals(result.get("checked")))
 			log.info("접수 불명확 주문 자동 대사 결과: {}", result);
+	}
+
+	/** 발주 마감 3시간 이내 알림톡(kakao.alimtalk.enabled와 마감 템플릿 ID가 있을 때만). */
+	@Scheduled(cron = "${kakao.alimtalk.deadline.cron:0 15 7-20 * * *}", zone = "Asia/Seoul")
+	public void kakaoDeadlines() {
+		if (kakao == null || !kakao.active() || maintenance())
+			return;
+		log.info("마감 임박 알림톡 결과: {}", kakao.deadlines());
 	}
 
 	private boolean maintenance() {

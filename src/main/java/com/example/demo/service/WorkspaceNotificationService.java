@@ -82,8 +82,9 @@ public class WorkspaceNotificationService {
      * 사용자가 닫은 상태를 다시 열지 않는다 — 내용이 바뀌었을 때만 다시 연다.
      */
     @Transactional
-    public void supplierStatus(String account,String orderId,String title,String facts) {
+    public String supplierStatus(String account,String orderId,String title,String facts) {
         lock(account);
+        String fingerprint=hash(title+"|"+facts);
         jdbc.update("""
             INSERT INTO the_full_order.tb_workspace_notification(account_id,event_key,event_type,fingerprint,title,action_path)
             VALUES(?,?,'SUPPLIER_STATUS',?,?,'/order_manager/orders') ON DUPLICATE KEY UPDATE
@@ -91,7 +92,8 @@ public class WorkspaceNotificationService {
               actor_id=IF(fingerprint<>VALUES(fingerprint),NULL,actor_id),
               status=IF(fingerprint<>VALUES(fingerprint),'OPEN',status),
               fingerprint=VALUES(fingerprint),title=VALUES(title)
-            """,account,"SUPPLIER:"+orderId,hash(title+"|"+facts),title);
+            """,account,"SUPPLIER:"+orderId,fingerprint,title);
+        return fingerprint;
     }
     /** 더 확인할 것이 없어진 공급사 상태 알림(예: 반영 지연으로 안 보이던 주문이 조회됨)을 닫는다. */
     @Transactional
