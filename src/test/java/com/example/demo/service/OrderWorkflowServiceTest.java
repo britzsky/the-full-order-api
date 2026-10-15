@@ -54,7 +54,7 @@ class OrderWorkflowServiceTest {
     }
     @Test void missingDeadlineRequiresManualConfirmationBeforeAnyProviderCall() {
         var row=new HashMap<>(catalog.offers(Map.of()).get(0));row.remove("cutoff_time");when(catalog.offers(anyMap())).thenReturn(List.of(row));
-        assertThatThrownBy(()->service.order(payload)).hasMessageContaining("확인 필요");verifyNoInteractions(api);
+        assertThatThrownBy(()->service.order(payload)).hasMessageContaining("미확인 · 본사 확인 요망");verifyNoInteractions(api);
         ((ObjectNode)payload.path("items").get(0)).put("delivery_terms_confirmed",true);
         service.order(payload);
         verify(mapper).insertItem(argThat(item->Boolean.TRUE.equals(item.get("delivery_terms_confirmed"))&&item.get("product_snapshot").toString().contains("delivery_terms_confirmed")));

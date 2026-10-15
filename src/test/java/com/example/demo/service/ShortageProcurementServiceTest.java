@@ -62,7 +62,7 @@ class ShortageProcurementServiceTest {
         when(mapper.stock(anyMap())).thenReturn(List.of(raw(500)));
         var candidate=result().path("ingredients").get(0).path("offers").get(0);
         assertThat(candidate.path("orderable").asBoolean()).isFalse();
-        assertThat(candidate.path("orderability_reason").asText()).startsWith("부족량이 없습니다");
+        assertThat(candidate.path("orderability_reason").asText()).isEqualTo("부족량 없음");
     }
     @Test void stockSourceOrdersEmptyStockWithoutHistoryAsManualQuantity() {
         criteria.put("source","STOCK");
@@ -77,7 +77,7 @@ class ShortageProcurementServiceTest {
         assertThat(offer.path("recommended_qty").decimalValue()).as("기본값은 최소 발주수량").isEqualByComparingTo("1");
         verify(mapper,never()).demand(anyMap());verify(mapper,never()).history(anyMap());
         assertThat(json.valueToTree(service.preview(request(5))).path("items").get(0).path("order_qty").decimalValue()).as("수량은 사용자가 정함").isEqualByComparingTo("5");
-        assertThatThrownBy(()->service.preview(request(1000))).hasMessageContaining("너무 큽니다");
+        assertThatThrownBy(()->service.preview(request(1000))).hasMessageContaining("발주수량 초과(최대 999)");
     }
     @Test void stockSourceUsesSafetyStockGapWhenConfigured() {
         criteria.put("source","STOCK");
@@ -111,7 +111,7 @@ class ShortageProcurementServiceTest {
         assertThatThrownBy(()->service.preview(duplicate)).hasMessageContaining("중복");
         when(mapper.incoming(anyMap())).thenReturn(List.of(raw(500)));
         assertThat(result().path("ingredients").isEmpty()).isTrue();
-        assertThatThrownBy(()->service.preview(request(3))).hasMessageContaining("부족량이 변경");
+        assertThatThrownBy(()->service.preview(request(3))).hasMessageContaining("부족량 변경됨");
     }
     @Test void periodicDemandUsesDailyTotalsAndConversionErrorsBlockOrdering() {
         criteria.put("source","INVENTORY");criteria.put("coverage_days",2);
@@ -181,12 +181,12 @@ class ShortageProcurementServiceTest {
         assertThatThrownBy(()->service.preview(request(3))).hasMessageContaining("발주 불가");
         when(mapper.incoming(anyMap())).thenReturn(List.of());
         criteria.put("delivery_date",LocalDate.now().plusDays(1).toString());
-        assertThat(result().path("ingredients").get(0).path("issues").toString()).contains("납품일보다 먼저");
+        assertThat(result().path("ingredients").get(0).path("issues").toString()).contains("필요일이 납품일보다 빠름 · 납품일자 확인 요망");
     }
     @Test void reviewProductIsNotRecommendedAndNeedsExplicitPreviewConfirmation() {
         offer.put("orderability_status","REVIEW_REQUIRED");
         assertThat(result().path("ingredients").get(0).path("recommended_offer_id").isNull()).isTrue();
-        assertThatThrownBy(()->service.preview(request(3))).hasMessageContaining("납품·마감");
+        assertThatThrownBy(()->service.preview(request(3))).hasMessageContaining("납품일자·마감 조건 확인 요망");
         var body=request(3);((com.fasterxml.jackson.databind.node.ObjectNode)body.path("items").get(0)).put("delivery_terms_confirmed",true);
         assertThat(json.valueToTree(service.preview(body)).path("items").get(0).path("delivery_terms_confirmed").asBoolean()).isTrue();
     }

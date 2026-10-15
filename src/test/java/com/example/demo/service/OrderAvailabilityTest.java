@@ -28,7 +28,8 @@ class OrderAvailabilityTest {
         var decision=OrderAvailability.evaluate(meat,LocalDate.of(2026,10,3),before);
         assertThat(decision.status()).isEqualTo("AVAILABLE");
         assertThat(decision.deadline()).isEqualTo("2026-10-02T11:00");
-        assertThat(decision.reason()).contains("육류 11시 마감").contains("납품 1일 전");
+        assertThat(decision.reason()).isEqualTo("D-1 · 육류 11시 마감 · 마감 10/2 11:00");
+        assertThat(OrderAvailability.ruleLabel(meat)).isEqualTo("D-1 · 육류 11시 마감");
         assertThat(OrderAvailability.evaluate(meat,LocalDate.of(2026,10,3),Clock.offset(before,Duration.ofSeconds(1))).status()).isEqualTo("UNAVAILABLE");
         for(String code:List.of("N01","F01")) {
             var row=new HashMap<>(meat);row.put("cutoff_code",code);
@@ -48,7 +49,7 @@ class OrderAvailabilityTest {
     }
     @Test void reviewRequiresExplicitManualConfirmation() {
         var row=offer();row.remove("cutoff_time");
-        assertThatThrownBy(()->OrderAvailability.requireAvailable(row,LocalDate.now().plusDays(3),false)).hasMessageContaining("확인 필요");
+        assertThatThrownBy(()->OrderAvailability.requireAvailable(row,LocalDate.now().plusDays(3),false)).hasMessageContaining("미확인 · 본사 확인 요망");
         assertThatCode(()->OrderAvailability.requireAvailable(row,LocalDate.now().plusDays(3),true)).doesNotThrowAnyException();
     }
 }

@@ -36,9 +36,9 @@ public final class OrderAvailability {
     }
     static Decision evaluate(Map<String,Object> row, LocalDate delivery, Clock clock) {
         var now = clock.instant().atZone(ZoneId.of("Asia/Seoul")).toLocalDateTime();
-        if (delivery.isBefore(now.toLocalDate())) return blocked("지난 납품일입니다. 납품일을 변경해주세요.", "");
+        if (delivery.isBefore(now.toLocalDate())) return blocked("지난 납품일 · 납품일자 변경 요망", "");
         if ("N".equals(row.get("orderable_yn")) || !"ACTIVE".equals(row.get("product_status")))
-            return blocked(Objects.toString(row.get("availability_reason"), "공급사 판매상태를 확인해주세요."), "");
+            return blocked(Objects.toString(row.get("availability_reason"), "공급사 판매상태 확인 요망"), "");
         int lead;
         try {
             lead = Integer.parseInt(Objects.toString(row.get("lead_time_days"), ""));
@@ -46,17 +46,17 @@ public final class OrderAvailability {
         } catch (RuntimeException e) { return review(); }
         var deadlineDate = delivery.minusDays(lead);
         if (now.toLocalDate().isAfter(deadlineDate))
-            return blocked("납품일 " + delivery + "의 준비기간 " + lead + "일을 확보할 수 없습니다. 납품일을 변경해주세요.", "");
+            return blocked(dLabel(lead) + " 품목 · 준비기간 부족 · 납품일자 변경 요망", "");
         // Zero is also the legacy database default, so it cannot establish same-day delivery.
         if (lead == 0) return review();
         LocalTime cutoff = cutoffTime(row);
         if (cutoff == null) return review();
         String label = "WELSTORY".equals(Objects.toString(row.get("supplier_code"), ""))
                 ? WELSTORY_CLOSE_LABELS.getOrDefault(Objects.toString(row.get("cutoff_code"), "").trim().toUpperCase(), "") : "";
-        String rule = label.isEmpty() ? "" : " · " + label + " (납품 " + lead + "일 전)";
+        String rule = dLabel(lead) + (label.isEmpty() ? "" : " · " + label);
         var deadline = deadlineDate.atTime(cutoff);
-        if (!now.isBefore(deadline)) return blocked("발주 마감 " + deadline + " (한국시간)이 지났습니다" + rule + ". 납품일을 변경해주세요.", deadline.toString());
-        return new Decision("AVAILABLE", "발주 마감 " + deadline + " (한국시간)" + rule + " · 접수 시 공급사 재검증", deadline.toString());
+        if (!now.isBefore(deadline)) return blocked(rule + " · 마감 " + shortTime(deadline) + " 지남 · 납품일자 변경 요망", deadline.toString());
+        return new Decision("AVAILABLE", rule + " · 마감 " + shortTime(deadline), deadline.toString());
     }
     /** 저장된 마감시각, 없으면 공급사 가이드로 확인된 마감 코드의 시각. 모르면 null. */
     static LocalTime cutoffTime(Map<String,Object> row) {
@@ -77,18 +77,23 @@ public final class OrderAvailability {
         return cutoff == null ? null : delivery.minusDays(lead).atTime(cutoff);
     }
 
-    /** 사람이 읽는 마감 규칙. 예: "육류 11시 마감 (납품 1일 전)", "납품 2일 전 16:30" */
+    /** 사람이 읽는 마감 규칙. 예: "D-1 · 육류 11시 마감", "D-2 16:30" */
     public static String ruleLabel(Map<String,Object> row) {
         String lead = Objects.toString(row.get("lead_time_days"), "");
         String code = Objects.toString(row.get("cutoff_code"), "").trim().toUpperCase();
         if ("WELSTORY".equals(Objects.toString(row.get("supplier_code"), "")) && WELSTORY_CLOSE_LABELS.containsKey(code))
-            return WELSTORY_CLOSE_LABELS.get(code) + " (납품 " + lead + "일 전)";
+            return "D-" + lead + " · " + WELSTORY_CLOSE_LABELS.get(code);
         LocalTime cutoff = cutoffTime(row);
-        return "납품 " + lead + "일 전" + (cutoff == null ? "" : " " + cutoff);
+        return "D-" + lead + (cutoff == null ? "" : " " + cutoff);
     }
 
+    /** 준비기간 표기: 납품일 N일 전까지 주문 → "D-N" (공급사 API의 D-1·D1 표기를 하나로). */
+    static String dLabel(int lead) { return "D-" + lead; }
+    /** 마감 일시 표기: "10/15 11:00" (한국시간). */
+    static String shortTime(LocalDateTime time) { return String.format("%d/%d %02d:%02d", time.getMonthValue(), time.getDayOfMonth(), time.getHour(), time.getMinute()); }
+
     private static Decision review() {
-        return new Decision("REVIEW_REQUIRED", "납품일별 준비기간·마감시각 확인 필요 · 본사에서 공급사 조건을 확인한 뒤 갱신해주세요.", "");
+        return new Decision("REVIEW_REQUIRED", "준비기간·마감시각 미확인 · 본사 확인 요망", "");
     }
     private static Decision blocked(String reason, String deadline) { return new Decision("UNAVAILABLE", reason, deadline); }
     public static void requireAvailable(Map<String,Object> row, LocalDate delivery, boolean confirmed) {

@@ -30,7 +30,7 @@ public class WorkspaceNotificationService {
             String status=order.get("status").toString(),id=order.get("purchase_order_id").toString();
             boolean unknown=Set.of("SENDING","UNKNOWN","PARTIAL_FAILED").contains(status);
             String key="ORDER:"+id;active.add(key);
-            put(account,key,"TASK",(unknown?"주문 접수 확인 필요 · ":"입고 확인 필요 · ")+order.get("requested_delivery_date"),"/order_manager/orders",status+"|"+order.get("requested_delivery_date"));
+            put(account,key,"TASK",(unknown?"주문 접수 확인 요망 · ":"입고 확인 요망 · ")+order.get("requested_delivery_date"),"/order_manager/orders",status+"|"+order.get("requested_delivery_date"));
         }
         for(var meal:jdbc.queryForList("SELECT meal_service_id,meal_slot,meal_date FROM the_full_order.tb_account_meal_service WHERE account_id=? AND meal_date=CURRENT_DATE AND status='DRAFT'",account)) {
             String key="MEAL:"+meal.get("meal_service_id");active.add(key);
