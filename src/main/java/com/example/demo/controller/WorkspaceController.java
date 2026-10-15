@@ -44,6 +44,54 @@ public class WorkspaceController {
             """+scope+" ORDER BY pending_orders DESC,due_receipts DESC,a.account_name LIMIT 500",args);
         return Map.of("role",user.headquarters()?"HEADQUARTERS":"SITE","accounts",rows,"checked_at",java.time.LocalDateTime.now().toString());
     }
+    /**
+     * 홈 오른쪽 거래처 카드: 거래처명·로그인 사용자 이름·담당자(the_full.tb_account_info)·이달 예산/사용/여유.
+     * 예산 = 기존 ERP 예산관리(the_full.tb_account_budget_management)의 이번 달 실 예산 부여 합계(없으면 예산부여). 읽기만 한다.
+     * 사용 = 이번 달 납품일의 접수·입고 품목 금액(실패·취소·미입고·접수 불명확 제외) + 이번 달 직접구매 금액.
+     */
+    @GetMapping("/account-summary")
+    public Map<String,Object> accountSummary(@RequestParam(name="account_id",defaultValue="") String account_id,HttpServletRequest request) {
+        var user=WorkspaceAccess.user(request);
+        String account=user.headquarters()?account_id:user.accountId();
+        if(account.isBlank()) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,"거래처를 선택해주세요.");
+        access.checkAccount(user,account);
+        var month=java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul"));
+        var from=month.atDay(1);var to=month.atEndOfMonth();
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("account_id",account);
+        result.put("month",month.toString());
+        result.put("account_name",first("SELECT account_name FROM the_full.tb_account WHERE account_id=?",account));
+        result.put("user_name",first("SELECT user_name FROM the_full.tb_user WHERE user_id=?",user.userId()));
+        var info=jdbc.queryForList("SELECT manager_name,manager_tel,manager_name2,manager_tel2 FROM the_full.tb_account_info WHERE account_id=? LIMIT 1",account);
+        result.put("manager_name",info.isEmpty()?null:info.get(0).get("manager_name"));
+        result.put("manager_tel",info.isEmpty()?null:info.get(0).get("manager_tel"));
+        var budget=jdbc.queryForList("SELECT budget_total,budget_grant FROM the_full.tb_account_budget_management WHERE account_id=? AND year=? AND month=? AND day IS NULL LIMIT 1",account,month.getYear(),month.getMonthValue());
+        long total=budget.isEmpty()?0:number(budget.get(0).get("budget_total")), grant=budget.isEmpty()?0:number(budget.get(0).get("budget_grant"));
+        Long amount=total>0?Long.valueOf(total):grant>0?Long.valueOf(grant):null;
+        result.put("budget",amount);
+        result.put("budget_source",total>0?"실 예산 부여 합계":grant>0?"예산부여":"미등록");
+        long orders=number(first("""
+            SELECT COALESCE(SUM(i.line_amount),0) FROM the_full_order.tb_account_purchase_order po
+            JOIN the_full_order.tb_account_purchase_order_item i ON i.purchase_order_id=po.purchase_order_id
+            WHERE po.account_id=? AND po.requested_delivery_date BETWEEN ? AND ?
+              AND i.item_status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','RECEIVED')
+            """,account,from,to));
+        long direct=number(first("""
+            SELECT COALESCE(SUM(amount_delta),0) FROM the_full_order.tb_account_inventory_movement
+            WHERE account_id=? AND reference_type='DIRECT_PURCHASE' AND movement_at>=? AND movement_at<?
+            """,account,from,to.plusDays(1)));
+        result.put("used_orders",orders);result.put("used_direct",direct);result.put("used",orders+direct);
+        result.put("remaining",amount==null?null:amount-orders-direct);
+        return result;
+    }
+    private Object first(String sql,Object... args) {
+        var rows=jdbc.queryForList(sql,args);
+        return rows.isEmpty()?null:rows.get(0).values().iterator().next();
+    }
+    private static long number(Object value) {
+        if(value==null) return 0;
+        try { return Math.round(Double.parseDouble(value.toString())); } catch(NumberFormatException e) { return 0; }
+    }
     /** 홈 달력: 한 달의 날짜별 발주서(납품일 기준 입고 완료/진행 중)와 식단 끼니 수. 거래처 한 곳만. */
     @GetMapping("/calendar")
     public Map<String,Object> calendar(@RequestParam(name="account_id",defaultValue="") String account_id,
