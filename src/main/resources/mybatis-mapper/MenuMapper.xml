@@ -22,6 +22,10 @@
                  FROM the_full_order.tb_recipe_detail rd
                  LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
                  WHERE rd.menu_id=T.menu_id) AS recipe_ingredient_names,
+			   (SELECT JSON_ARRAYAGG(COALESCE(NULLIF(rd.ingredient_name_raw,''),NULLIF(im.ingredient_name_std,''),im.ingredient_name_raw))
+                 FROM the_full_order.tb_recipe_detail rd
+                 LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+                 WHERE rd.menu_id=T.menu_id) AS recipe_ingredient_list,
 			   T.del_yn,
 			   T.food_type,
 			   T.food_type_reason,
@@ -424,6 +428,10 @@
                  FROM the_full_order.tb_account_recipe_detail rd
                  LEFT JOIN the_full_order.tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
                  WHERE rd.account_id=T.account_id AND rd.menu_id=T.menu_id) AS recipe_ingredient_names,
+			   (SELECT JSON_ARRAYAGG(COALESCE(NULLIF(rd.ingredient_name_raw,''),NULLIF(im.ingredient_name_std,''),im.ingredient_name_raw))
+                 FROM the_full_order.tb_account_recipe_detail rd
+                 LEFT JOIN the_full_order.tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
+                 WHERE rd.account_id=T.account_id AND rd.menu_id=T.menu_id) AS recipe_ingredient_list,
 			   T2.menu_img,
 			   CASE WHEN T2.menu_id IS NULL THEN 'N' ELSE 'Y' END AS standard_yn,
 			   T.menu_id,
