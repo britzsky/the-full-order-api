@@ -28,7 +28,7 @@ class OurhomeCatalogSyncServiceTest {
         service.sync(input);
         verify(sites).saveProviderSite(eq(2L),argThat(p->"FU0UP".equals(p.get("external_site_code"))),any());
         verify(sites).requireOrAssign(eq("A"),eq("OURHOME"),eq("FU0UP"),any());
-        verify(mapper).upsertOffer(argThat(p->Long.valueOf(7L).equals(p.get("supplier_account_site_id"))&&"Y".equals(p.get("active_yn"))));
+        verify(mapper).upsertOffer(argThat(p->Long.valueOf(7L).equals(p.get("supplier_site_id"))&&"Y".equals(p.get("active_yn"))));
         verify(mapper).upsertSupplierProduct(argThat(p->p.get("base_qty").toString().equals("0")&&p.get("ingredient_id")==null));
         verify(mapper).insertOfferPrices(argThat(p->{ var r=((List<Map<String,Object>>)p.get("rows")).get(0); return r.get("effective_from").toString().equals("2099-10-01T00:00")&&r.get("effective_to").toString().equals("2099-10-02T00:00"); }));
         verify(mapper).upsertAvailabilities(anyMap());

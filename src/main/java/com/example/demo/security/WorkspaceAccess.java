@@ -67,8 +67,11 @@ public class WorkspaceAccess {
             for(String owner:owners) checkAccount(user,owner);
         }
         if("supplier_offer_id".equals(key)) {
-            var owners=jdbc.queryForList("SELECT s.account_id FROM the_full_order.tb_supplier_site_product_offer o JOIN the_full_order.tb_supplier_account_site s ON s.supplier_account_site_id=o.supplier_account_site_id WHERE o.supplier_offer_id=?",String.class,value);
-            for(String owner:owners) checkAccount(user,owner);
+            // 상품 제공 조건은 사업장 단위로 여러 거래처가 함께 쓴다 → 내 거래처가 그 사업장에 연결된 적이 있으면 허용
+            var exists=jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_offer WHERE supplier_offer_id=?",Integer.class,value);
+            var mine=jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_offer o JOIN the_full_order.tb_supplier_account_site s ON s.supplier_site_id=o.supplier_site_id WHERE o.supplier_offer_id=? AND s.account_id=?",Integer.class,value,user.accountId());
+            if(exists!=null && exists>0 && (mine==null || mine==0))
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,"다른 거래처의 업무에 접근할 수 없습니다.");
         }
         if("procurement_cart_item_id".equals(key)) {
             var owners=jdbc.queryForList("SELECT c.account_id FROM the_full_order.tb_account_procurement_cart_item i JOIN the_full_order.tb_account_procurement_cart c ON c.procurement_cart_id=i.procurement_cart_id WHERE i.procurement_cart_item_id=?",String.class,value);

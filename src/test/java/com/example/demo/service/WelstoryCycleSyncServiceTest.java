@@ -14,7 +14,7 @@ class WelstoryCycleSyncServiceTest {
         LocalDate from = LocalDate.of(2026, 1, 5).plusDays(21L * (group - 1));
         return new LocalDate[] { from, from.plusDays(20) };
     }
-    static final Map<String, Object> SITE = Map.of("supplier_account_site_id", 7L, "supplier_id", 1L, "account_id", "A", "external_site_code", "A0199240");
+    static final Map<String, Object> SITE = Map.of("supplier_account_site_id", 3L, "supplier_site_id", 7L, "supplier_id", 1L, "account_id", "A", "external_site_code", "A0199240");
 
     WelstoryCatalogSyncService provider(int openUntil) {
         var sync = mock(WelstoryCatalogSyncService.class);
@@ -73,5 +73,27 @@ class WelstoryCycleSyncServiceTest {
         service.syncSite(SITE, today, "SYSTEM", new HashMap<>());
         verify(sync).syncChangedPrices(argThat(c -> "14".equals(c.get("period_group")) && today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE).equals(c.get("req_date"))));
         verify(sync, times(1)).syncCatalog(any());
+    }
+
+    /** 같은 웰스토리 사업장을 쓰는 거래처가 둘이어도 새벽 배치는 그 사업장 판가를 한 번만 받는다(상품·판가는 사업장 단위 저장). */
+    @Test void nightlyBatchFetchesSharedSiteOnce() {
+        var jdbc = emptyDb();
+        when(jdbc.queryForList(contains("FROM the_full_order.tb_supplier_account_site ss"))).thenReturn(List.of(
+                Map.of("supplier_account_site_id", 3L, "supplier_site_id", 7L, "supplier_id", 1L, "account_id", "A", "external_site_code", "A0199240"),
+                Map.of("supplier_account_site_id", 4L, "supplier_site_id", 7L, "supplier_id", 1L, "account_id", "B", "external_site_code", "A0199240")));
+        var sync = mock(WelstoryCatalogSyncService.class);
+        // 어느 해든 1월 5일부터 3주 순기(오늘 날짜에 의존하지 않게)
+        when(sync.periodDates(eq("A0199240"), anyString(), anyString())).thenAnswer(inv -> {
+            int year = Integer.parseInt(inv.getArgument(1)), group = Integer.parseInt(inv.getArgument(2));
+            if (group < 1 || group > 18) return null;
+            LocalDate from = LocalDate.of(year, 1, 5).plusDays(21L * (group - 1));
+            return new LocalDate[] { from, from.plusDays(20) };
+        });
+        when(sync.syncCatalog(any())).thenReturn(Map.of("saved_count", 1));
+        var results = new WelstoryCycleSyncService(jdbc, sync).syncAll("SYSTEM");
+        assertThat(results).hasSize(1);
+        verify(sync, atMost(2)).syncCatalog(any()); // 현재·다음 순기까지 한 사업장분만
+        verify(sync, atLeastOnce()).syncCatalog(argThat(c -> "A".equals(c.get("account_id"))));
+        verify(sync, never()).syncCatalog(argThat(c -> "B".equals(c.get("account_id"))));
     }
 }

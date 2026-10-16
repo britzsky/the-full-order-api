@@ -58,6 +58,8 @@ public interface SupplierIntegrationMapper {
 
 	int refreshAccountProductLead(Map<String, Object> params);
 
+	Long siteIdOfMapping(Map<String, Object> params);
+
 	int markSyncStarted(Map<String, Object> params);
 
 	int markSyncSucceeded(Map<String, Object> params);

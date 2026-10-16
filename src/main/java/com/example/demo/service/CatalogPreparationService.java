@@ -43,11 +43,12 @@ public class CatalogPreparationService {
             JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
             WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
             """,account)) {
-            String type="PREPARE_"+date; Object supplier=site.get("supplier_id"), id=site.get("supplier_account_site_id");
-            jdbc.update("INSERT IGNORE INTO the_full_order.tb_supplier_sync_checkpoint(supplier_id,supplier_account_site_id,sync_type) VALUES(?,?,?)",supplier,id,type);
+            // 준비 기록은 사업장 마스터 단위: 같은 사업장을 쓰는 다른 거래처가 이미 준비했으면 건너뛴다(공급사 재조회 없음)
+            String type="PREPARE_"+date; Object supplier=site.get("supplier_id"), id=site.get("supplier_site_id");
+            jdbc.update("INSERT IGNORE INTO the_full_order.tb_supplier_sync_checkpoint(supplier_id,supplier_site_id,sync_type) VALUES(?,?,?)",supplier,id,type);
             int claimed=jdbc.update("""
                 UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_started_at=NOW(),last_result_code='PREPARING',last_result_message='납품일 상품 준비 중'
-                WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
+                WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
                   AND (last_started_at IS NULL OR last_result_code<>'PREPARING' OR last_started_at<DATE_SUB(NOW(),INTERVAL 30 MINUTE))
                   AND (last_succeeded_at IS NULL OR last_succeeded_at<DATE_SUB(NOW(),INTERVAL 12 HOUR))
                   AND (last_failed_at IS NULL OR last_failed_at<DATE_SUB(NOW(),INTERVAL 5 MINUTE))
@@ -60,7 +61,7 @@ public class CatalogPreparationService {
         return counts;
     }
     private boolean run(Map<String,Object> site,LocalDate date,String actor,String type) {
-        Object id=site.get("supplier_account_site_id"), supplier=site.get("supplier_id");
+        Object id=site.get("supplier_site_id"), supplier=site.get("supplier_id");
         try {
             Map<String,Object> command=new HashMap<>();command.put("account_id",site.get("account_id"));command.put("user_id",actor);
             if("OURHOME".equals(site.get("supplier_code"))) {
@@ -72,7 +73,7 @@ public class CatalogPreparationService {
             }
             jdbc.update("""
                 UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_succeeded_at=NOW(),last_result_code='READY',last_result_message='납품일 상품 준비 완료',consecutive_failures=0
-                WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
+                WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
                 """,supplier,id,type);
             return true;
         } catch(RuntimeException e) { failed(supplier,id,type,e instanceof IllegalArgumentException ? e.getMessage() : "상품 준비에 실패했습니다. 본사 연동 설정과 공급사 응답을 확인해주세요."); return false; }
@@ -80,7 +81,7 @@ public class CatalogPreparationService {
     private void failed(Object supplier,Object id,String type,String message) {
         jdbc.update("""
             UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_failed_at=NOW(),last_result_code='REVIEW_REQUIRED',last_result_message=?,consecutive_failures=consecutive_failures+1
-            WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
+            WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
             """,message,supplier,id,type);
     }
     public Map<String,Object> status(String account,String value) {
@@ -89,7 +90,7 @@ public class CatalogPreparationService {
             SELECT s.supplier_code,s.supplier_name,ss.external_site_name,c.last_succeeded_at,c.last_failed_at,
               COALESCE(c.last_result_code,'NOT_PREPARED') status,c.last_result_message message
             FROM the_full_order.tb_supplier_account_site ss JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
-            LEFT JOIN the_full_order.tb_supplier_sync_checkpoint c ON c.supplier_account_site_id=ss.supplier_account_site_id AND c.sync_type=?
+            LEFT JOIN the_full_order.tb_supplier_sync_checkpoint c ON c.supplier_id=ss.supplier_id AND c.supplier_site_id=ss.supplier_site_id AND c.sync_type=?
             WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
             ""","PREPARE_"+date,account);
         return Map.of("delivery_date",date.toString(),"suppliers",rows);

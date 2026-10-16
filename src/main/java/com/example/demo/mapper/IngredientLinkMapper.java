@@ -29,6 +29,6 @@ public interface IngredientLinkMapper {
     @Select("SELECT ap.* FROM the_full_order.tb_account_ingredient_product ap WHERE ap.account_id=#{account_id} AND ap.supplier_product_id=#{supplier_product_id} FOR UPDATE")
     Map<String,Object> lockProductLink(Map<String,Object> params);
 
-    @Select("SELECT o.supplier_product_id FROM the_full_order.tb_supplier_site_product_offer o JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=o.supplier_account_site_id WHERE ss.account_id=#{account_id} AND ss.active_yn='Y' AND o.active_yn='Y' AND o.supplier_offer_id=#{supplier_offer_id}")
+    @Select("SELECT o.supplier_product_id FROM the_full_order.tb_supplier_site_product_offer o JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_site_id=o.supplier_site_id WHERE ss.account_id=#{account_id} AND ss.active_yn='Y' AND o.active_yn='Y' AND o.supplier_offer_id=#{supplier_offer_id}")
     Long offerProduct(Map<String,Object> params);
 }

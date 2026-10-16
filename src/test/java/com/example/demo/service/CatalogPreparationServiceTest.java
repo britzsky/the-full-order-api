@@ -10,13 +10,14 @@ import static org.mockito.Mockito.*;
 class CatalogPreparationServiceTest {
     static class Database extends JdbcTemplate {
         final AtomicBoolean claimed=new AtomicBoolean();final CountDownLatch done=new CountDownLatch(1);
+        final List<Object> claimScopes=new CopyOnWriteArrayList<>();
         String supplier="OURHOME";volatile String outcome="";
         @Override public List<Map<String,Object>> queryForList(String sql,Object... args) {
-            if(sql.contains("SELECT ss.*,s.supplier_code")) return List.of(Map.of("supplier_code",supplier,"supplier_id",1,"supplier_account_site_id",2,"account_id","A","external_site_code","SITE"));
+            if(sql.contains("SELECT ss.*,s.supplier_code")) return List.of(Map.of("supplier_code",supplier,"supplier_id",1,"supplier_account_site_id",2,"supplier_site_id",5,"account_id","A","external_site_code","SITE"));
             return List.of();
         }
         @Override public int update(String sql,Object... args) {
-            if(sql.contains("SET last_started_at")) return claimed.compareAndSet(false,true)?1:0;
+            if(sql.contains("SET last_started_at")) { claimScopes.add(args[1]); return claimed.compareAndSet(false,true)?1:0; }
             if(sql.contains("SET last_succeeded_at")) {outcome="READY";done.countDown();}
             if(sql.contains("SET last_failed_at")) {outcome=Objects.toString(args[0]);done.countDown();}
             return 1;
@@ -30,6 +31,8 @@ class CatalogPreparationServiceTest {
             service.prepare("A",date,"worker");service.prepare("A",date,"worker");
             assertThat(db.done.await(3,TimeUnit.SECONDS)).isTrue();assertThat(db.outcome).isEqualTo("READY");
             verify(ourhome,times(1)).sync(argThat(p->date.equals(p.get("deliveryDate"))&&"SITE".equals(p.get("siteCode"))));verifyNoInteractions(welstory);
+            // 준비 기록은 거래처 매핑(2)이 아니라 사업장 마스터(5) 단위 — 같은 사업장을 쓰는 다른 거래처도 이 기록으로 건너뛴다
+            assertThat(db.claimScopes).isNotEmpty().allMatch(scope->Integer.valueOf(5).equals(scope));
         } finally { service.close(); }
     }
     @Test void welstoryPreparationFindsCycleForDeliveryDate() throws Exception {
@@ -63,7 +66,7 @@ class CatalogPreparationServiceTest {
         var db=new JdbcTemplate() {
             @Override public List<Map<String,Object>> queryForList(String sql,Object... args) {
                 if(sql.contains("SELECT ss.account_id,ss.external_site_code")) return List.of(Map.of("account_id","A","external_site_code","SITE"));
-                if(sql.contains("SELECT ss.*,s.supplier_code")) return List.of(Map.of("supplier_code","OURHOME","supplier_id",1,"supplier_account_site_id",2,"account_id","A","external_site_code","SITE"));
+                if(sql.contains("SELECT ss.*,s.supplier_code")) return List.of(Map.of("supplier_code","OURHOME","supplier_id",1,"supplier_account_site_id",2,"supplier_site_id",5,"account_id","A","external_site_code","SITE"));
                 return List.of();
             }
             @Override public List<Map<String,Object>> queryForList(String sql) { return queryForList(sql,new Object[0]); }

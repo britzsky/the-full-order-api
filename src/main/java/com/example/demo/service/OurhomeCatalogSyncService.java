@@ -66,7 +66,8 @@ public class OurhomeCatalogSyncService {
             s.put("active_yn","Y"); // 아래 상품·판매조건 저장이 이 값을 그대로 쓴다.
             // 거래처에 다른 아워홈 사업장이 지정되어 있으면 저장하지 않는다(사업장 매핑 화면에서 변경).
             sites.saveProviderSite(supplierId,masterRow(site),text(input.get("user_id")));
-            s.put("supplier_account_site_id",sites.requireOrAssign(account,"OURHOME",code,text(input.get("user_id"))));
+            // 상품·판가는 사업장 마스터 단위로 저장한다(같은 사업장을 쓰는 다른 거래처와 공유)
+            s.put("supplier_site_id",sites.requireOrAssign(account,"OURHOME",code,text(input.get("user_id"))));
             s.put("delivery_date",date.toString()); mapper.invalidateOurhomeAvailability(s);
             // 빠른 경로: 납품일마다 바뀌는 값(가격·판매상태)을 뺀 내용이 같으면 상품·판매조건 갱신을 건너뛰고,
             // 가격·판매상태는 500건씩 묶어 저장한다(상품 1만여 건 × 8쿼리 → 수십 쿼리).

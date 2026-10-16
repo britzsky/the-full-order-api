@@ -42,8 +42,9 @@ class LocalDirectPurchaseDatabaseTest {
                     write(c,"INSERT INTO tb_account_ingredient_master(account_id,ingredient_id,base_unit) VALUES(?,?,'g')",id,id);
                     long product=write(c,"INSERT INTO tb_supplier_ingredient_product(supplier_id,supplier_item_code,product_name,order_unit,package_unit,base_qty,base_unit) VALUES(?,?,?,'PAC','g',1000,'g')",supplier,id,id);
                     long link=write(c,"INSERT INTO tb_account_ingredient_product(account_id,supplier_product_id,mapped_ingredient_id,preferred_yn) VALUES(?,?,?,'Y')",id,product,id);
-                    long site=write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,external_site_code) VALUES(?,?,?)",id,supplier,id);
-                    long offer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_account_site_id,supplier_product_id) VALUES(?,?)",site,product);
+                    long site=write(c,"INSERT INTO tb_supplier_site(supplier_id,external_site_code) VALUES(?,?)",supplier,id);
+                    write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,supplier_site_id,external_site_code) VALUES(?,?,?,?)",id,supplier,site,id);
+                    long offer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_site_id,supplier_product_id) VALUES(?,?)",site,product);
                     write(c,"INSERT INTO tb_supplier_site_product_price(supplier_offer_id,purchase_price,effective_from,effective_to) VALUES(?,5000,DATE_SUB(NOW(),INTERVAL 1 DAY),NULL)",offer);
                     long balance=write(c,"INSERT INTO tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit) VALUES(?,?,'L999',2000,'g')",id,link);
 

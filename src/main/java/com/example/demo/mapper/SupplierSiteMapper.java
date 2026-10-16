@@ -30,4 +30,7 @@ public interface SupplierSiteMapper {
 	int insertMapping(Map<String, Object> params);
 
 	Long mappingId(Map<String, Object> params);
+
+	/** 거래처 매핑이 가리키는 사업장 마스터 ID(상품·판가 저장 단위) */
+	Long mappingSiteId(Map<String, Object> params);
 }

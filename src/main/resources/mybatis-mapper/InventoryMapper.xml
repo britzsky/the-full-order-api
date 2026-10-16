@@ -53,7 +53,7 @@
       SELECT ph2.supplier_price_id
         FROM the_full_order.tb_supplier_site_product_price ph2
         JOIN the_full_order.tb_supplier_site_product_offer so2 ON so2.supplier_offer_id=ph2.supplier_offer_id
-        JOIN the_full_order.tb_supplier_account_site ss2 ON ss2.supplier_account_site_id=so2.supplier_account_site_id
+        JOIN the_full_order.tb_supplier_account_site ss2 ON ss2.supplier_site_id=so2.supplier_site_id
        WHERE ss2.account_id=b.account_id AND ss2.active_yn='Y'
          AND so2.supplier_product_id=p.supplier_product_id AND so2.active_yn='Y'
          AND ph2.effective_from&lt;=NOW() AND (ph2.effective_to IS NULL OR ph2.effective_to&gt;NOW())

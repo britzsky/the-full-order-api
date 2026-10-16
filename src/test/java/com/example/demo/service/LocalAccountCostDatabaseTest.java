@@ -48,12 +48,14 @@ class LocalAccountCostDatabaseTest {
                     check(session,id,"2026-10-06",null,null,"공급상품 연결 필요");
                     long link=write(c,"INSERT INTO tb_account_ingredient_product(account_id,supplier_product_id,mapped_ingredient_id,preferred_yn) VALUES(?,?,?,'Y')",id,product,id);
                     check(session,id,"2026-10-06",null,null,"가격 정보 없음");
-                    long site=write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,external_site_code) VALUES(?,?,?)",id,supplier,id);
-                    long offer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_account_site_id,supplier_product_id) VALUES(?,?)",site,product);
+                    long site=write(c,"INSERT INTO tb_supplier_site(supplier_id,external_site_code) VALUES(?,?)",supplier,id);
+                    write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,supplier_site_id,external_site_code) VALUES(?,?,?,?)",id,supplier,site,id);
+                    long offer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_site_id,supplier_product_id) VALUES(?,?)",site,product);
                     write(c,"INSERT INTO tb_supplier_site_product_price(supplier_offer_id,purchase_price,effective_from,effective_to) VALUES(?,6000,'2026-10-06','2026-10-07'),(?,12000,'2026-10-07','2026-10-08')",offer,offer);
                     write(c,"INSERT INTO tb_supplier_ingredient_price_history(supplier_product_id,purchase_price,effective_from,effective_to) VALUES(?,9000,'2026-10-05','2026-10-06')",product);
-                    long otherSite=write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,external_site_code) VALUES(?,?,?)",id+"OTHER",supplier,id+"OTHER");
-                    long otherOffer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_account_site_id,supplier_product_id) VALUES(?,?)",otherSite,product);
+                    long otherSite=write(c,"INSERT INTO tb_supplier_site(supplier_id,external_site_code) VALUES(?,?)",supplier,id+"OTHER");
+                    write(c,"INSERT INTO tb_supplier_account_site(account_id,supplier_id,supplier_site_id,external_site_code) VALUES(?,?,?,?)",id+"OTHER",supplier,otherSite,id+"OTHER");
+                    long otherOffer=write(c,"INSERT INTO tb_supplier_site_product_offer(supplier_site_id,supplier_product_id) VALUES(?,?)",otherSite,product);
                     write(c,"INSERT INTO tb_supplier_site_product_price(supplier_offer_id,purchase_price,effective_from,effective_to) VALUES(?,1,'2026-10-01','2026-11-01')",otherOffer);
                     check(session,id,"2026-10-06","1080","SITE_PRICE",null);        // 기준일 유효 거래처 판가, 타 거래처 가격 무시
                     check(session,id,"2026-10-07","2160","SITE_PRICE",null);

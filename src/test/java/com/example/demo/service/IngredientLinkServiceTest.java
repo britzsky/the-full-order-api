@@ -153,7 +153,8 @@ class IngredientLinkServiceTest {
             String xml=new String(stream.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
             String block=xml.substring(xml.indexOf("<update id=\"refreshAccountProductLead\""));
             block=block.substring(0,block.indexOf("</update>"));
-            assertThat(block).doesNotContain("active_yn").doesNotContain("INSERT");
+            assertThat(block.substring(block.indexOf("SET "))).doesNotContain("active_yn");
+            assertThat(block).doesNotContain("INSERT").doesNotContain("ap.active_yn");
         }
     }
 }

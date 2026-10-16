@@ -51,7 +51,11 @@ public class WelstoryCycleSyncService {
 	public List<Map<String, Object>> syncAll(String actor) {
 		List<Map<String, Object>> results = new ArrayList<>();
 		Map<String, Map<String, Cycle>> probes = new HashMap<>();
+		Set<Object> done = new HashSet<>();
 		for (Map<String, Object> site : sites(null)) {
+			// 상품·판가는 사업장 단위로 저장되므로 같은 사업장을 쓰는 다른 거래처는 다시 받지 않는다
+			if (!done.add(site.get("supplier_site_id")))
+				continue;
 			try {
 				results.add(syncSite(site, today(), actor, probes));
 			} catch (RuntimeException e) {
@@ -173,10 +177,10 @@ public class WelstoryCycleSyncService {
 		for (Map<String, Object> row : jdbc.queryForList("""
 				SELECT o.provider_revision,MIN(o.valid_from) valid_from,MAX(o.valid_to) valid_to
 				  FROM the_full_order.tb_supplier_site_product_offer o
-				 WHERE o.supplier_account_site_id=? AND o.provider_revision REGEXP '^[0-9]{4}-[0-9]{2}$'
+				 WHERE o.supplier_site_id=? AND o.provider_revision REGEXP '^[0-9]{4}-[0-9]{2}$'
 				   AND o.valid_from IS NOT NULL AND o.valid_to IS NOT NULL
 				 GROUP BY o.provider_revision
-				""", site.get("supplier_account_site_id"))) {
+				""", site.get("supplier_site_id"))) {
 			String[] rev = text(row.get("provider_revision")).split("-");
 			cycles.add(new Cycle(Integer.parseInt(rev[0]), Integer.parseInt(rev[1]), localDate(row.get("valid_from")), localDate(row.get("valid_to"))));
 		}
@@ -190,8 +194,8 @@ public class WelstoryCycleSyncService {
 	private boolean changedSynced(Map<String, Object> site, Cycle cycle, LocalDate today) {
 		List<String> watermark = jdbc.queryForList("""
 				SELECT watermark_value FROM the_full_order.tb_supplier_sync_checkpoint
-				 WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=? AND last_result_code='SUCCESS'
-				""", String.class, site.get("supplier_id"), site.get("supplier_account_site_id"), "CHANGED_" + cycle.revision());
+				 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=? AND last_result_code='SUCCESS'
+				""", String.class, site.get("supplier_id"), site.get("supplier_site_id"), "CHANGED_" + cycle.revision());
 		return !watermark.isEmpty() && today.format(BASIC_DATE).equals(watermark.get(0));
 	}
 
@@ -236,7 +240,7 @@ public class WelstoryCycleSyncService {
 
 	private List<Map<String, Object>> sites(String accountId) {
 		String sql = """
-				SELECT ss.supplier_account_site_id,ss.supplier_id,ss.account_id,ss.external_site_code
+				SELECT ss.supplier_account_site_id,ss.supplier_site_id,ss.supplier_id,ss.account_id,ss.external_site_code
 				  FROM the_full_order.tb_supplier_account_site ss
 				  JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
 				 WHERE s.supplier_code='WELSTORY' AND ss.active_yn='Y'
@@ -248,34 +252,34 @@ public class WelstoryCycleSyncService {
 	private String checkpointCode(Map<String, Object> site, String type) {
 		List<String> codes = jdbc.queryForList("""
 				SELECT last_result_code FROM the_full_order.tb_supplier_sync_checkpoint
-				 WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
-				""", String.class, site.get("supplier_id"), site.get("supplier_account_site_id"), type);
+				 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
+				""", String.class, site.get("supplier_id"), site.get("supplier_site_id"), type);
 		return codes.isEmpty() ? "" : Objects.toString(codes.get(0), "");
 	}
 
 	private void started(Map<String, Object> site, String type) {
 		jdbc.update("""
 				INSERT INTO the_full_order.tb_supplier_sync_checkpoint
-				  (supplier_id,supplier_account_site_id,sync_type,last_started_at,last_result_code,last_result_message,consecutive_failures)
+				  (supplier_id,supplier_site_id,sync_type,last_started_at,last_result_code,last_result_message,consecutive_failures)
 				VALUES(?,?,?,NOW(),'RUNNING','동기화 진행 중',0)
 				ON DUPLICATE KEY UPDATE last_started_at=NOW(),last_result_code='RUNNING',last_result_message='동기화 진행 중'
-				""", site.get("supplier_id"), site.get("supplier_account_site_id"), type);
+				""", site.get("supplier_id"), site.get("supplier_site_id"), type);
 	}
 
 	private void finished(Map<String, Object> site, String type, String message, String watermark) {
 		jdbc.update("""
 				UPDATE the_full_order.tb_supplier_sync_checkpoint
 				   SET last_succeeded_at=NOW(),last_result_code='SUCCESS',last_result_message=?,watermark_value=?,consecutive_failures=0
-				 WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
-				""", abbreviate(message), watermark, site.get("supplier_id"), site.get("supplier_account_site_id"), type);
+				 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
+				""", abbreviate(message), watermark, site.get("supplier_id"), site.get("supplier_site_id"), type);
 	}
 
 	private void failed(Map<String, Object> site, String type, String message) {
 		jdbc.update("""
 				UPDATE the_full_order.tb_supplier_sync_checkpoint
 				   SET last_failed_at=NOW(),last_result_code='FAILED',last_result_message=?,consecutive_failures=consecutive_failures+1
-				 WHERE supplier_id=? AND supplier_account_site_id=? AND sync_type=?
-				""", abbreviate(message), site.get("supplier_id"), site.get("supplier_account_site_id"), type);
+				 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
+				""", abbreviate(message), site.get("supplier_id"), site.get("supplier_site_id"), type);
 	}
 
 	private static LocalDate today() { return LocalDate.now(SEOUL); }

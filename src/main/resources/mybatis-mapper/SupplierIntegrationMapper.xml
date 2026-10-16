@@ -4,21 +4,19 @@
   <update id="invalidateOurhomeAvailability">
     UPDATE the_full_order.tb_supplier_product_availability av
     JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=av.supplier_offer_id
-    JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=o.supplier_account_site_id
-    JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
     SET av.orderable_yn='N',av.status_reason='이번 납품일 상품 목록에 없음',av.checked_at=NOW()
-    WHERE ss.account_id=#{account_id} AND ss.supplier_account_site_id=#{supplier_account_site_id}
-      AND s.supplier_code='OURHOME' AND av.delivery_date=#{delivery_date}
+    WHERE o.supplier_site_id=#{supplier_site_id} AND av.delivery_date=#{delivery_date}
   </update>
   <select id="scheduledCatalogTargets" resultType="map">
-    SELECT DISTINCT ss.account_id,ss.external_site_code sold_to,
+    SELECT MIN(ss.account_id) account_id,ss.external_site_code sold_to,
       SUBSTRING_INDEX(o.provider_revision,'-',1) period_group_year,SUBSTRING_INDEX(o.provider_revision,'-',-1) period_group
     FROM the_full_order.tb_supplier_account_site ss JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
-    JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_account_site_id=ss.supplier_account_site_id
+    JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_site_id=ss.supplier_site_id
     WHERE s.supplier_code='WELSTORY' AND ss.active_yn='Y' AND o.active_yn='Y'
       AND o.provider_revision REGEXP '^[0-9]{4}-[0-9]{2}$'
       AND (o.valid_to IS NULL OR o.valid_to&gt;=CURRENT_DATE)
-    ORDER BY ss.account_id,ss.external_site_code
+    GROUP BY ss.supplier_site_id,ss.external_site_code,o.provider_revision
+    ORDER BY ss.external_site_code
   </select>
   <select id="scheduledReceiptTargets" resultType="map">
     SELECT DISTINCT po.account_id,po.sold_to,DATE_FORMAT(po.requested_delivery_date,'%Y%m%d') receipt_date
@@ -51,7 +49,7 @@
            COALESCE(inv.current_base_qty,0) current_base_qty,COALESCE(ap.safe_stock_base_qty,0) safe_stock_base_qty,
            GREATEST(COALESCE(#{required_base_qty},0)+COALESCE(ap.safe_stock_base_qty,0)-COALESCE(inv.current_base_qty,0),0) shortage_base_qty
       FROM the_full_order.tb_supplier_site_product_offer o
-      JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=o.supplier_account_site_id
+      JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_site_id=o.supplier_site_id
       JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
       JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=o.supplier_product_id
       LEFT JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=ss.account_id AND ap.supplier_product_id=p.supplier_product_id
@@ -84,12 +82,16 @@
      <if test="orderable_only != null and orderable_only.equals(&quot;Y&quot;)">AND o.product_status='ACTIVE' AND (av.orderable_yn IS NULL OR av.orderable_yn='Y')</if>
      ORDER BY ap.mapped_ingredient_id,ap.preferred_yn DESC,pr.purchase_price/NULLIF(COALESCE(ap.link_base_qty,p.base_qty),0),s.supplier_name
   </select>
+  <!-- 거래처 매핑 ID → 상품·판가를 저장하는 사업장 마스터 ID -->
+  <select id="siteIdOfMapping" parameterType="map" resultType="long">
+    SELECT supplier_site_id FROM the_full_order.tb_supplier_account_site WHERE supplier_account_site_id=#{supplier_account_site_id}
+  </select>
   <insert id="upsertOffer" parameterType="map" useGeneratedKeys="true" keyProperty="supplier_offer_id">
     INSERT INTO the_full_order.tb_supplier_site_product_offer
-      (supplier_account_site_id,supplier_product_id,delivery_type,lead_time_days,cutoff_code,cutoff_time,
+      (supplier_site_id,supplier_product_id,delivery_type,lead_time_days,cutoff_code,cutoff_time,
        minimum_order_qty,order_increment_qty,decimal_order_allowed,product_status,status_reason,valid_from,valid_to,
        provider_revision,provider_attributes,active_yn,last_synced_at)
-    VALUES (#{supplier_account_site_id},#{supplier_product_id},#{delivery_type},COALESCE(#{lead_time_days},0),#{cutoff_code},#{cutoff_time},
+    VALUES (#{supplier_site_id},#{supplier_product_id},#{delivery_type},COALESCE(#{lead_time_days},0),#{cutoff_code},#{cutoff_time},
        #{minimum_order_qty},#{order_increment_qty},COALESCE(#{decimal_order_allowed},'N'),COALESCE(#{product_status},'ACTIVE'),
        #{status_reason},#{valid_from},#{valid_to},#{provider_revision},#{provider_attributes},COALESCE(#{active_yn},'Y'),NOW())
     ON DUPLICATE KEY UPDATE delivery_type=VALUES(delivery_type),lead_time_days=VALUES(lead_time_days),cutoff_code=VALUES(cutoff_code),
@@ -116,12 +118,12 @@
     SELECT p.supplier_item_code,p.supplier_product_id,p.alt_base_qty,p.alt_base_unit,o.supplier_offer_id,o.lead_time_days,o.cutoff_time,o.provider_attributes
       FROM the_full_order.tb_supplier_site_product_offer o
       JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=o.supplier_product_id
-     WHERE o.supplier_account_site_id=#{supplier_account_site_id}
+     WHERE o.supplier_site_id=#{supplier_site_id}
   </select>
   <!-- 변경 없는 상품: 판매조건은 그대로 두고 동기화 시각·리비전만 한꺼번에 갱신 -->
   <update id="touchOffers" parameterType="map">
     UPDATE the_full_order.tb_supplier_site_product_offer SET last_synced_at=NOW(),provider_revision=#{provider_revision},active_yn='Y'
-     WHERE supplier_account_site_id=#{supplier_account_site_id} AND supplier_offer_id IN
+     WHERE supplier_site_id=#{supplier_site_id} AND supplier_offer_id IN
      <foreach collection="offer_ids" item="id" open="(" separator="," close=")">#{id}</foreach>
   </update>
   <!-- 납품일 가격·판매상태 묶음 저장(행마다 상품 원문 JSON을 반복 저장하지 않고 그날 값만) -->
@@ -147,12 +149,14 @@
       checked_at=NOW(),expires_at=VALUES(expires_at),provider_attributes=VALUES(provider_attributes)
   </insert>
   <select id="syncStatus" parameterType="map" resultType="hashmap">
-    SELECT cp.*,s.supplier_code,s.supplier_name,ss.external_site_code,ss.external_site_name
+    SELECT cp.*,s.supplier_code,s.supplier_name,m.external_site_code,m.external_site_name
       FROM the_full_order.tb_supplier_sync_checkpoint cp
       JOIN the_full_order.tb_supplier s ON s.supplier_id=cp.supplier_id
-      LEFT JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=cp.supplier_account_site_id
-     WHERE (ss.account_id=#{account_id} OR (ss.supplier_account_site_id IS NULL AND EXISTS
-           (SELECT 1 FROM the_full_order.tb_supplier_account_site x WHERE x.account_id=#{account_id} AND x.supplier_id=cp.supplier_id)))
+      LEFT JOIN the_full_order.tb_supplier_site m ON m.supplier_site_id=cp.supplier_site_id
+     WHERE (cp.supplier_site_id IS NOT NULL AND EXISTS
+           (SELECT 1 FROM the_full_order.tb_supplier_account_site x WHERE x.account_id=#{account_id} AND x.supplier_site_id=cp.supplier_site_id))
+        OR (cp.supplier_site_id IS NULL AND EXISTS
+           (SELECT 1 FROM the_full_order.tb_supplier_account_site x WHERE x.account_id=#{account_id} AND x.supplier_id=cp.supplier_id))
      ORDER BY s.supplier_name,cp.sync_type
   </select>
   <select id="receipts" parameterType="map" resultType="hashmap">
@@ -215,28 +219,30 @@
     UPDATE the_full_order.tb_supplier_ingredient_product SET alt_base_qty=#{confirmed_mass},alt_base_unit='g'
     WHERE supplier_product_id=#{supplier_product_id} AND #{confirmed_mass}&gt;0 AND UPPER(base_unit) NOT IN ('G','KG')
   </update>
-  <!-- 동기화는 거래처 사용상품을 만들지 않는다(연결·발주·레시피 등록 때 생성). 이미 쓰는 상품의 마감 일수만 맞춘다. -->
+  <!-- 동기화는 거래처 사용상품을 만들지 않는다(연결·발주·레시피 등록 때 생성). 이미 쓰는 상품의 마감 일수만 맞춘다.
+       상품은 사업장 단위로 한 번만 받으므로 이 사업장을 쓰는 거래처 모두 맞춘다. -->
   <update id="refreshAccountProductLead" parameterType="map">
-    UPDATE the_full_order.tb_account_ingredient_product
-       SET lead_time_days=COALESCE(#{lead_time_days},0),user_id=#{user_id}
-     WHERE account_id=#{account_id} AND supplier_product_id=#{supplier_product_id}
-       AND NOT (lead_time_days &lt;=&gt; COALESCE(#{lead_time_days},0))
+    UPDATE the_full_order.tb_account_ingredient_product ap
+      JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=ap.account_id AND ss.supplier_site_id=#{supplier_site_id} AND ss.active_yn='Y'
+       SET ap.lead_time_days=COALESCE(#{lead_time_days},0),ap.user_id=#{user_id}
+     WHERE ap.supplier_product_id=#{supplier_product_id}
+       AND NOT (ap.lead_time_days &lt;=&gt; COALESCE(#{lead_time_days},0))
   </update>
   <insert id="markSyncStarted" parameterType="map">
     INSERT INTO the_full_order.tb_supplier_sync_checkpoint
-      (supplier_id,supplier_account_site_id,sync_type,last_started_at,last_result_code,last_result_message,consecutive_failures)
-    VALUES(#{supplier_id},#{supplier_account_site_id},#{sync_type},NOW(),'RUNNING','동기화 진행 중',0)
+      (supplier_id,supplier_site_id,sync_type,last_started_at,last_result_code,last_result_message,consecutive_failures)
+    VALUES(#{supplier_id},#{supplier_site_id},#{sync_type},NOW(),'RUNNING','동기화 진행 중',0)
     ON DUPLICATE KEY UPDATE last_started_at=NOW(),last_result_code='RUNNING',last_result_message='동기화 진행 중'
   </insert>
   <update id="markSyncSucceeded" parameterType="map">
     UPDATE the_full_order.tb_supplier_sync_checkpoint SET cursor_value=NULL,last_succeeded_at=NOW(),last_result_code='SUCCESS',
       last_result_message=#{result_message},consecutive_failures=0
-     WHERE supplier_id=#{supplier_id} AND supplier_account_site_id=#{supplier_account_site_id} AND sync_type=#{sync_type}
+     WHERE supplier_id=#{supplier_id} AND supplier_site_id=#{supplier_site_id} AND sync_type=#{sync_type}
   </update>
   <update id="markSyncFailed" parameterType="map">
     UPDATE the_full_order.tb_supplier_sync_checkpoint SET cursor_value=#{cursor_value},last_failed_at=NOW(),last_result_code='FAILED',
       last_result_message=#{result_message},consecutive_failures=consecutive_failures+1
-     WHERE supplier_id=#{supplier_id} AND supplier_account_site_id=#{supplier_account_site_id} AND sync_type=#{sync_type}
+     WHERE supplier_id=#{supplier_id} AND supplier_site_id=#{supplier_site_id} AND sync_type=#{sync_type}
   </update>
 
   <select id="orderLineForReceipt" parameterType="map" resultType="hashmap">

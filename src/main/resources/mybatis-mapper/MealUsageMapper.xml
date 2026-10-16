@@ -94,7 +94,7 @@
   LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
   LEFT JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=(
    SELECT so.supplier_offer_id FROM the_full_order.tb_supplier_site_product_offer so
-   JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_account_site_id=so.supplier_account_site_id
+   JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_site_id=so.supplier_site_id
    WHERE ss.account_id=ms.account_id AND ss.active_yn='Y' AND so.supplier_product_id=r.supplier_product_id AND so.active_yn='Y'
     AND (so.valid_from IS NULL OR so.valid_from&lt;=CURRENT_DATE) AND (so.valid_to IS NULL OR so.valid_to&gt;=CURRENT_DATE)
    ORDER BY so.last_synced_at DESC,so.supplier_offer_id DESC LIMIT 1)

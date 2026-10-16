@@ -143,7 +143,15 @@ public class SupplierIntegrationService {
 
 	@Transactional
 	public Map<String, Object> ingestOffer(Map<String, Object> body) {
-		require(body, "supplier_account_site_id", "supplier_product_id", "purchase_price", "effective_from");
+		require(body, "supplier_product_id", "purchase_price", "effective_from");
+		// 상품·판가는 사업장 마스터 단위. 예전 요청(거래처 매핑 ID)도 받는다.
+		if (body.get("supplier_site_id") == null || body.get("supplier_site_id").toString().isBlank()) {
+			require(body, "supplier_account_site_id");
+			Long siteId = mapper.siteIdOfMapping(body);
+			if (siteId == null)
+				throw new IllegalArgumentException("공급사 사업장 연결을 찾을 수 없습니다.");
+			body.put("supplier_site_id", siteId);
+		}
 		positive(body, "minimum_order_qty", BigDecimal.ONE);
 		positive(body, "order_increment_qty", BigDecimal.ONE);
 		mapper.upsertOffer(body);

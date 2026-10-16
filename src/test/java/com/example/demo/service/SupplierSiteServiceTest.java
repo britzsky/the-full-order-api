@@ -20,6 +20,7 @@ class SupplierSiteServiceTest {
         when(mapper.otherAccountsUsing(anyMap())).thenReturn(List.of());
         when(mapper.lockAccountMappings(anyMap())).thenReturn(List.of());
         when(mapper.mappingId(anyMap())).thenReturn(9L);
+        when(mapper.mappingSiteId(anyMap())).thenReturn(21L);
     }
     Map<String,Object> row(long id,String code,String active){return Map.of("supplier_account_site_id",id,"external_site_code",code,"external_site_name","이전","active_yn",active);}
 
@@ -30,6 +31,7 @@ class SupplierSiteServiceTest {
         verify(mapper,never()).deactivateMapping(argThat(p->Long.valueOf(4).equals(p.get("supplier_account_site_id"))));
         verify(mapper).insertMapping(anyMap());
         assertThat(result.get("supplier_account_site_id")).isEqualTo(9L);
+        assertThat(result.get("supplier_site_id")).isEqualTo(21L);
     }
     @Test void existingInactiveRowIsReactivatedNotDuplicated(){
         when(mapper.activateMapping(anyMap())).thenReturn(1);
@@ -66,7 +68,8 @@ class SupplierSiteServiceTest {
         when(mapper.lockAccountMappings(anyMap())).thenReturn(List.of(row(3,"A1","Y")));
         when(mapper.otherAccountsUsing(anyMap())).thenReturn(List.of("OTHER"));
         when(mapper.activateMapping(anyMap())).thenReturn(1);
-        assertThat(service.requireOrAssign("ACC","OURHOME","A1","u")).isEqualTo(9L);
+        // 상품 동기화는 사업장 마스터 ID로 저장한다(거래처 매핑 ID 9가 아니라 사업장 21)
+        assertThat(service.requireOrAssign("ACC","OURHOME","A1","u")).isEqualTo(21L);
     }
     @Test void emptyProviderListKeepsExistingMaster(){
         assertThatThrownBy(()->service.saveProviderSites("WELSTORY",List.of(),"u")).isInstanceOf(IllegalStateException.class);

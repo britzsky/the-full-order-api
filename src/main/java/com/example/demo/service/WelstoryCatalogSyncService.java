@@ -83,7 +83,8 @@ public class WelstoryCatalogSyncService {
 		Map<String, Object> site = mapper.sites(siteQuery).stream()
 				.filter(row -> soldTo.equals(text(row.get("external_site_code")))).findFirst()
 				.orElseThrow(() -> new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다. 사업장 매핑에서 먼저 지정해 주세요: " + soldTo));
-		Long siteId = Long.valueOf(site.get("supplier_account_site_id").toString());
+		// 상품·판가·동기화 기록은 사업장 마스터 단위(같은 사업장을 쓰는 거래처가 함께 쓴다)
+		Long siteId = Long.valueOf(site.get("supplier_site_id").toString());
 		Map<String, Object> checkpoint = checkpoint(supplierId, siteId, "FULL_CATALOG");
 		mapper.markSyncStarted(checkpoint);
 		try {
@@ -156,7 +157,8 @@ public class WelstoryCatalogSyncService {
 		Map<String, Object> site = mapper.sites(siteQuery).stream()
 				.filter(row -> soldTo.equals(text(row.get("external_site_code")))).findFirst()
 				.orElseThrow(() -> new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다: " + soldTo));
-		Long siteId = Long.valueOf(site.get("supplier_account_site_id").toString());
+		// 상품·판가·동기화 기록은 사업장 마스터 단위(같은 사업장을 쓰는 거래처가 함께 쓴다)
+		Long siteId = Long.valueOf(site.get("supplier_site_id").toString());
 		ObjectNode body = objectMapper.createObjectNode();
 		body.put("soldTo", soldTo).put("periodGroupYear", year).put("periodGroup", period).put("reqDate", reqDate);
 		List<JsonNode> rows;
@@ -291,7 +293,7 @@ public class WelstoryCatalogSyncService {
 		Map<String, Object> p = new LinkedHashMap<>();
 		p.put("account_id", required(command, "account_id"));
 		p.put("supplier_id", supplierId);
-		p.put("supplier_account_site_id", siteId);
+		p.put("supplier_site_id", siteId);
 		// 동기화 상품은 본사 식자재로 분류하지 않는다. 거래처 연결은 거래처 식자재 관리에서 직접 한다.
 		p.put("ingredient_id", null);
 		p.put("alt_base_qty", alt == null ? null : alt.quantity());
@@ -400,7 +402,7 @@ public class WelstoryCatalogSyncService {
 	private Map<String, Object> checkpoint(Long supplierId, Long siteId, String type) {
 		Map<String, Object> p = new LinkedHashMap<>();
 		p.put("supplier_id", supplierId);
-		p.put("supplier_account_site_id", siteId);
+		p.put("supplier_site_id", siteId);
 		p.put("sync_type", type);
 		return p;
 	}

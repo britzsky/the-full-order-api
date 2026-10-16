@@ -149,6 +149,7 @@ public class SupplierSiteService {
 		if (mapper.activateMapping(key) == 0)
 			mapper.insertMapping(key);
 		result.put("supplier_account_site_id", mapper.mappingId(key));
+		result.put("supplier_site_id", mapper.mappingSiteId(key));
 		if(events!=null && current.stream().noneMatch(row->"Y".equals(row.get("active_yn")) && code.equals(row.get("external_site_code"))))
 			events.publishEvent(new WorkspaceMappingAssigned(accountId,userId));
 		return result;
@@ -156,7 +157,7 @@ public class SupplierSiteService {
 
 	/**
 	 * 상품 동기화용: 거래처에 이미 이 공급사의 다른 사업장이 지정되어 있으면 막고, 아무것도 없으면 새로 지정한다.
-	 * 호출 전에 사업장이 마스터에 저장되어 있어야 한다.
+	 * 호출 전에 사업장이 마스터에 저장되어 있어야 한다. 상품·판가를 저장할 사업장 마스터 ID(supplier_site_id)를 돌려준다.
 	 */
 	@Transactional
 	public Long requireOrAssign(String accountId, String supplierCode, String siteCode, String userId) {
@@ -175,7 +176,7 @@ public class SupplierSiteService {
 			alreadyMapped = true;
 		}
 		// 이미 지정된 매핑이면 공유 여부는 지정 당시 확인된 것이므로 다시 묻지 않는다.
-		Object id = assign(accountId, supplierCode, siteCode, alreadyMapped, userId).get("supplier_account_site_id");
+		Object id = assign(accountId, supplierCode, siteCode, alreadyMapped, userId).get("supplier_site_id");
 		return Long.valueOf(id.toString());
 	}
 }

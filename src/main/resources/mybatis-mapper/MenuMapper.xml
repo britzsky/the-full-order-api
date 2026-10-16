@@ -371,7 +371,7 @@
             LEFT JOIN the_full_order.tb_supplier_site_product_price sp ON sp.supplier_price_id=(
               SELECT h.supplier_price_id FROM the_full_order.tb_supplier_site_product_price h
                 JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_account_site_id=o.supplier_account_site_id
+                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                WHERE a.account_id=ap.account_id AND a.active_yn='Y' AND o.active_yn='Y'
                  AND o.supplier_product_id=p.supplier_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
