@@ -39,7 +39,11 @@ public class DiscoveryController {
 		if (text(params.get("account_id")).isBlank())
 			return ResponseEntity.badRequest().body(Map.of("message", "거래처를 확인하세요."));
 		params.putIfAbsent("meal_date", LocalDate.now().toString());
-		LocalDate.parse(text(params.get("meal_date")));
+		try {
+			LocalDate.parse(text(params.get("meal_date")));
+		} catch (java.time.format.DateTimeParseException e) {
+			return ResponseEntity.badRequest().body(Map.of("message", "식단일은 YYYY-MM-DD 형식이어야 합니다."));
+		}
 		params.put("limit", 30);
 		List<Map<String, Object>> result = mapper.recommendedMenus(params);
 		for (var row : result) {
