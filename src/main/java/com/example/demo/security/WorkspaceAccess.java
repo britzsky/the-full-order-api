@@ -39,6 +39,7 @@ public class WorkspaceAccess {
             || path.equals("/Analytics/Dashboard")
             || path.startsWith("/v2/supplier-integration/ourhome/")
             || path.equals("/Menu/MenuSave") || path.equals("/Menu/RecipeSave")
+            || path.startsWith("/v2/ai-usage")
             || (!read && path.equals("/v2/ingredients"))
             || (!read && path.startsWith("/v2/catalog/") && !path.startsWith("/v2/catalog/ingredient-links/") && !path.equals("/v2/catalog/account-products"))
             || (!read && path.equals("/v2/supplier-integration/sites"));

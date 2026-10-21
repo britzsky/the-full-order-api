@@ -3,49 +3,37 @@ package com.example.demo.controller;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import com.example.demo.security.WorkspaceAccess;
+import com.example.demo.service.OpenAiClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 public class AIController {
 
-	private static final String OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-
-	private final String openAiApiKey;
-	private final String openAiModel;
-	private final WebClient webClient;
+	private final OpenAiClient openAi;
 	private final ObjectMapper objectMapper;
 
-	public AIController(
-			@Value("${openai.api.key}") String openAiApiKey,
-			@Value("${openai.model:gpt-5.4-mini}") String openAiModel,
-			WebClient.Builder webClientBuilder,
-			ObjectMapper objectMapper) {
-		this.openAiApiKey = openAiApiKey;
-		this.openAiModel = openAiModel;
-		this.webClient = webClientBuilder.build();
+	public AIController(OpenAiClient openAi, ObjectMapper objectMapper) {
+		this.openAi = openAi;
 		this.objectMapper = objectMapper;
 	}
 
 	/*
-	 * part : AI 레시피 method : RecipeGenerate comment : 메뉴명과 식재료를 OpenAI에 전달해 단체급식용 레시피(JSON)를 생성
+	 * part : AI 레시피 method : RecipeGenerate comment : 메뉴명과 식재료를 OpenAI에 전달해 단체급식용 레시피(JSON)를 생성. 토큰 사용량은 tb_ai_usage_log(RECIPE_GENERATE)
 	 */
 	@PostMapping("/AI/RecipeGenerate")
-	public ResponseEntity<Map<String, Object>> RecipeGenerate(@RequestBody Map<String, Object> payload) {
-		if (openAiApiKey == null || openAiApiKey.isBlank()) {
+	public ResponseEntity<Map<String, Object>> RecipeGenerate(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
+		if (!openAi.configured()) {
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
 					.body(Map.of("code", 500, "message", "OpenAI API key is not configured."));
 		}
@@ -59,38 +47,27 @@ public class AIController {
 		}
 
 		try {
-			Map<String, Object> openAiRequest = createRecipeRequest(menuName, ingredients);
-			JsonNode openAiResponse = webClient.post()
-					.uri(OPENAI_RESPONSES_URL)
-					.header(HttpHeaders.AUTHORIZATION, "Bearer " + openAiApiKey)
-					.contentType(MediaType.APPLICATION_JSON)
-					.bodyValue(openAiRequest)
-					.retrieve()
-					.bodyToMono(JsonNode.class)
-					.block();
-
-			String outputText = extractOutputText(openAiResponse);
+			Object accountId = payload.get("account_id");
+			OpenAiClient.Caller caller = new OpenAiClient.Caller("RECIPE_GENERATE", accountId == null ? null : accountId.toString(),
+					WorkspaceAccess.user(request).userId(), 1);
+			String outputText = openAi.respond(caller,
+					"너는 단체급식 메뉴 레시피를 작성하는 조리 전문가다. 반드시 JSON으로만 답한다.",
+					toJson(createRecipeContent(menuName, ingredients)), null, null);
 			Map<String, Object> recipe = objectMapper.readValue(outputText, new TypeReference<Map<String, Object>>() {
 			});
 
 			return ResponseEntity.ok(Map.of("recipe", recipe));
-		} catch (WebClientResponseException e) {
-			return ResponseEntity.status(e.getStatusCode())
-					.body(Map.of(
-							"code", e.getStatusCode().value(),
-							"message", "OpenAI API request failed.",
-							"detail", e.getResponseBodyAsString()));
+		} catch (IllegalStateException e) {
+			return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+					.body(Map.of("code", 502, "message", e.getMessage()));
 		} catch (JsonProcessingException e) {
 			return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
 					.body(Map.of("code", 502, "message", "OpenAI response was not valid JSON."));
-		} catch (Exception e) {
-			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-					.body(Map.of("code", 500, "message", e.getMessage()));
 		}
 	}
 
-	private Map<String, Object> createRecipeRequest(Object menuName, Object ingredients) {
-		Map<String, Object> userContent = Map.of(
+	private Map<String, Object> createRecipeContent(Object menuName, Object ingredients) {
+		return Map.of(
 				"menu_name", menuName,
 				"ingredients", ingredients == null ? List.of() : ingredients,
 				"output_format", Map.of(
@@ -102,16 +79,6 @@ public class AIController {
 						"tips", List.of("string"),
 						"storage", List.of("string"),
 						"allergens", List.of("string")));
-
-		return Map.of(
-				"model", openAiModel,
-				"input", List.of(
-						Map.of(
-								"role", "system",
-								"content", "\uB108\uB294 \uB2E8\uCCB4\uAE09\uC2DD \uBA54\uB274 \uB808\uC2DC\uD53C\uB97C \uC791\uC131\uD558\uB294 \uC870\uB9AC \uC804\uBB38\uAC00\uB2E4. \uBC18\uB4DC\uC2DC JSON\uC73C\uB85C\uB9CC \uB2F5\uD55C\uB2E4."),
-						Map.of(
-								"role", "user",
-								"content", toJson(userContent))));
 	}
 
 	private String toJson(Map<String, Object> value) {
@@ -120,24 +87,5 @@ public class AIController {
 		} catch (JsonProcessingException e) {
 			throw new IllegalArgumentException("Request body could not be converted to JSON.", e);
 		}
-	}
-
-	private String extractOutputText(JsonNode response) {
-		if (response == null || response.path("output").isMissingNode()) {
-			throw new IllegalStateException("OpenAI response output is empty.");
-		}
-
-		for (JsonNode output : response.path("output")) {
-			for (JsonNode content : output.path("content")) {
-				if ("output_text".equals(content.path("type").asText())) {
-					String text = content.path("text").asText();
-					if (!text.isBlank()) {
-						return text;
-					}
-				}
-			}
-		}
-
-		throw new IllegalStateException("OpenAI response output_text is empty.");
 	}
 }

@@ -4,15 +4,20 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.example.demo.security.WorkspaceAccess;
 import com.example.demo.service.AccountMenuRegistrationService;
+import com.example.demo.service.MenuRecipeDraftService;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/v2/menu-management")
 public class AccountMenuRegistrationController {
 	private final AccountMenuRegistrationService service;
+	private final MenuRecipeDraftService draftService;
 
-	public AccountMenuRegistrationController(AccountMenuRegistrationService service) {
+	public AccountMenuRegistrationController(AccountMenuRegistrationService service, MenuRecipeDraftService draftService) {
 		this.service = service;
+		this.draftService = draftService;
 	}
 
 	/*
@@ -61,6 +66,14 @@ public class AccountMenuRegistrationController {
 	@PostMapping("/ingredients/register-new")
 	public ResponseEntity<?> registerIngredient(@RequestBody Map<String, Object> b) {
 		return run(() -> service.registerIngredient(b));
+	}
+
+	/*
+	 * part : 거래처 메뉴관리 method : aiRecipeDraft comment : 식단표 미등록 메뉴(최대 10개)의 레시피 초안을 AI로 만든다(저장 안 함). 식재료는 거래처 식재료와 이름이 같을 때만 연결, 토큰은 tb_ai_usage_log에 기록
+	 */
+	@PostMapping("/menus/ai-recipe-draft")
+	public ResponseEntity<?> aiRecipeDraft(@RequestBody Map<String, Object> b, HttpServletRequest request) {
+		return run(() -> draftService.draft(b, WorkspaceAccess.user(request).userId()));
 	}
 
 	private ResponseEntity<?> run(Supplier<?> a) {
