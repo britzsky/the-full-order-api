@@ -307,7 +307,7 @@
             → RECEIPT(이 거래처에 실제로 들어온 재고의 이동평균, 재고가 없으면 마지막 입고 LOT 단가)
             → STANDARD(본사 식자재 마스터 표준 단가. 같은 ID, 없으면 같은 이름) → 없으면 단가 미등록.
    판가를 볼 상품(price_product_id): 이 식재료로 마지막에 입고된 상품 → 이 식재료로 마지막에 발주한 상품
-            → 공급사 상품 마스터에 이 식재료로 지정된 상품(이 거래처 사업장에서 파는 것 먼저).
+            → 공급사 상품 마스터에 이 식재료로 지정된 상품 중 이 거래처 사업장에서 파는 것(다른 거래처·테스트 공급사 가격은 쓰지 않음).
    auto_* 는 직접 입력을 뺀 자동 단가. account_id 파라미터가 있으면 그 거래처만 계산한다.
  -->
  <sql id="accountIngredientPlanningPrices">
@@ -354,10 +354,10 @@
                  ORDER BY po.ordered_at DESC,po.purchase_order_id DESC LIMIT 1),
                (SELECT sp.supplier_product_id FROM the_full_order.tb_supplier_ingredient_product sp
                  WHERE sp.ingredient_id=ai.ingredient_id AND sp.active_yn='Y'
-                 ORDER BY EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
-                                   JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
-                                  WHERE a.account_id=ai.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id) DESC,
-                          sp.supplier_product_id LIMIT 1)) price_product_id,
+                   AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
+                                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                               WHERE a.account_id=ai.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
+                 ORDER BY sp.supplier_product_id LIMIT 1)) price_product_id,
              CASE WHEN pc.source_type='MANUAL' AND pc.unit_cost&gt;0
                   THEN pc.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pc.base_unit"/><property name="toUnit" value="ai.base_unit"/></include> END manual_cost,
              DATE(pc.confirmed_at) manual_date,
@@ -415,7 +415,7 @@
       SELECT hr.menu_id,hr.ingredient_id,COALESCE(hi.ingredient_name_std,hr.ingredient_name_raw,hr.ingredient_id) ingredient_name,
              CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(
                pp.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>,
-               <!-- 거래처 식재료가 아직 없으면: 공급사 상품 마스터에 이 식재료로 지정된 상품의 이 거래처 사업장 판가 → 공통 판가 -->
+               <!-- 거래처 식재료가 아직 없으면: 공급사 상품 마스터에 이 식재료로 지정되고 이 거래처 사업장에서 파는 상품의 사업장 판가 → 공통 판가 -->
                (SELECT COALESCE(
                   (SELECT h.purchase_price FROM the_full_order.tb_supplier_site_product_price h
                      JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
@@ -428,10 +428,10 @@
                   /NULLIF(sp.base_qty,0)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="sp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>
                   FROM the_full_order.tb_supplier_ingredient_product sp
                  WHERE sp.ingredient_id=hr.ingredient_id AND sp.active_yn='Y'
-                 ORDER BY EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
-                                   JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
-                                  WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id) DESC,
-                          sp.supplier_product_id LIMIT 1),
+                   AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
+                                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                               WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
+                 ORDER BY sp.supplier_product_id LIMIT 1),
                CASE WHEN hi.standard_unit_cost&gt;0 THEN hi.standard_unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="hi.base_unit"/><property name="toUnit" value="hr.base_unit"/></include> END) END cost
         FROM the_full_order.tb_recipe_detail hr
         LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
