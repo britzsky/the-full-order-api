@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 2026-10-22 개편 흐름을 로컬 DB(정본 DDL + 시드, 테스트 거래처 20250819193455)의 실제 SQL로 확인한다. 테스트마다 롤백.
+ * 식재료·메뉴 ID는 엑셀 백데이터에서 생성되므로 이름(쌀·양파 등)과 시드의 나만의 메뉴로 찾는다.
  * 실행: RUN_LOCAL_DB_TESTS=true + 로컬 DB 접속 환경변수(SPRING_DATASOURCE_URL=localhost 등).
  */
 @EnabledIfEnvironmentVariable(named = "RUN_LOCAL_DB_TESTS", matches = "true")
@@ -33,6 +34,16 @@ class LocalIngredientStockFlowDatabaseTest {
 	@Autowired ShortageProcurementService shortages;
 	@Autowired InventoryService inventory;
 	@Autowired MenuService menus;
+
+	/** 본사 식재료 ID(이름으로) */
+	String ing(String name) {
+		return jdbc.queryForObject("SELECT ingredient_id FROM the_full_order.tb_ingredient_master WHERE ingredient_name_std=?", String.class, name);
+	}
+
+	/** 시드의 거래처 나만의 메뉴(본사 메뉴이면서 거래처 메뉴로도 등록됨) */
+	List<String> favoriteMenus() {
+		return jdbc.queryForList("SELECT menu_id FROM the_full_order.tb_favorite_menu WHERE owner_type='ACCOUNT' AND owner_id=? ORDER BY menu_id", String.class, ACCOUNT);
+	}
 
 	long product(String code) {
 		return jdbc.queryForObject("SELECT supplier_product_id FROM the_full_order.tb_supplier_ingredient_product WHERE supplier_item_code=?", Long.class, code);
@@ -64,35 +75,39 @@ class LocalIngredientStockFlowDatabaseTest {
 	}
 
 	@Test void receiptsOfDifferentSuppliersGoIntoOneIngredientStock() {
-		BigDecimal before = stock("TIG001");
-		receive(order("TEST_WELSTORY", "TEST-W-001", "TIG001", 1), 1, null);
-		receive(order("TEST_OURHOME", "TEST-A-001", "TIG001", 1), 1, null);
-		assertThat(stock("TIG001")).isEqualByComparingTo(before.add(new BigDecimal("40000")));
-		assertThat(jdbc.queryForList("SELECT product_name_snapshot FROM the_full_order.tb_account_inventory_lot WHERE account_id=? AND ingredient_id='TIG001' ORDER BY inventory_lot_id",
-				String.class, ACCOUNT)).containsExactly("테스트 웰스토리 쌀", "테스트 아워홈 쌀");
-		assertThat(jdbc.queryForList("SELECT reference_id FROM the_full_order.tb_account_inventory_movement m JOIN the_full_order.tb_goods_receipt_item g ON g.inventory_movement_id=m.movement_id WHERE m.account_id=? AND m.ingredient_id='TIG001' AND CAST(g.goods_receipt_item_id AS CHAR)=m.reference_id",
-				String.class, ACCOUNT)).hasSize(2);
+		String rice = ing("쌀");
+		BigDecimal before = stock(rice);
+		receive(order("TEST_WELSTORY", "TEST-W-001", rice, 1), 1, null);
+		receive(order("TEST_OURHOME", "TEST-A-001", rice, 1), 1, null);
+		assertThat(stock(rice)).isEqualByComparingTo(before.add(new BigDecimal("40000")));
+		assertThat(jdbc.queryForList("SELECT product_name_snapshot FROM the_full_order.tb_account_inventory_lot WHERE account_id=? AND ingredient_id=? ORDER BY inventory_lot_id",
+				String.class, ACCOUNT, rice)).containsExactly("테스트 웰스토리 쌀", "테스트 아워홈 쌀");
+		assertThat(jdbc.queryForList("SELECT reference_id FROM the_full_order.tb_account_inventory_movement m JOIN the_full_order.tb_goods_receipt_item g ON g.inventory_movement_id=m.movement_id WHERE m.account_id=? AND m.ingredient_id=? AND CAST(g.goods_receipt_item_id AS CHAR)=m.reference_id",
+				String.class, ACCOUNT, rice)).hasSize(2);
 		// 같은 식재료 한 줄, 평균 단가 하나
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_inventory_balance WHERE account_id=? AND ingredient_id='TIG001'", Integer.class, ACCOUNT)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_inventory_balance WHERE account_id=? AND ingredient_id=?", Integer.class, ACCOUNT, rice)).isEqualTo(1);
 	}
 
 	@Test void productOnlyLineChoosesIngredientAtReceipt() {
 		String id = order("TEST_WELSTORY", "TEST-W-010", null, 2);
 		assertThatThrownBy(() -> receive(id, 1, null)).hasMessageContaining("재고에 넣을 식재료 선택 요망");
-		BigDecimal before = stock("TIG010");
-		receive(id, 1, "TIG010");
-		assertThat(stock("TIG010")).isEqualByComparingTo(before.add(new BigDecimal("10000")));
-		assertThat(jdbc.queryForObject("SELECT source_ingredient_id FROM the_full_order.tb_account_purchase_order_item WHERE purchase_order_id=?", String.class, id)).isEqualTo("TIG010");
+		String onion = ing("양파");
+		BigDecimal before = stock(onion);
+		receive(id, 1, onion);
+		assertThat(stock(onion)).isEqualByComparingTo(before.add(new BigDecimal("10000")));
+		assertThat(jdbc.queryForObject("SELECT source_ingredient_id FROM the_full_order.tb_account_purchase_order_item WHERE purchase_order_id=?", String.class, id)).isEqualTo(onion);
 		// 나머지 1개는 이미 정한 식재료로 그대로 입고된다
 		receive(id, 1, null);
-		assertThat(stock("TIG010")).isEqualByComparingTo(before.add(new BigDecimal("20000")));
+		assertThat(stock(onion)).isEqualByComparingTo(before.add(new BigDecimal("20000")));
 	}
 
-	/** 본사 메뉴 하나(거래처 메뉴 아님): 감자(직접 입력 3원/g)·양배추(입고 평균)·돼지고기(재고 없음 → 본사 표준 단가) */
+	/** 본사 메뉴 하나(거래처 메뉴 아님): 감자(직접 입력 3원/g)·양배추(입고 평균)·돼지고기(재고 없음 → 본사 표준 단가).
+	 *  백데이터의 표준 단가는 비어 있으므로 돼지고기 표준 단가는 여기서 넣는다(롤백됨). */
 	String hqMenu(String id, int porkGrams) {
+		jdbc.update("UPDATE the_full_order.tb_ingredient_master SET standard_unit_cost=12.4 WHERE ingredient_id=?", ing("돼지고기 앞다리살"));
 		jdbc.update("INSERT INTO the_full_order.tb_menu_master(menu_id,menu_name,food_type,menu_type,menu_gubun,meal_plan_type,calories_per_serving,del_yn) VALUES(?,?,1,0,3,0,500,'N')", id, "테스트 본사 메뉴 " + id);
 		int seq = 1;
-		for (var row : List.of(List.of("TIG009", 100), List.of("TIG014", 50), List.of("TIG004", porkGrams))) {
+		for (var row : List.of(List.<Object>of(ing("감자"), 100), List.<Object>of(ing("양배추"), 50), List.<Object>of(ing("돼지고기 앞다리살"), porkGrams))) {
 			jdbc.update("INSERT INTO the_full_order.tb_recipe_detail(recipe_id,menu_id,ingredient_id,ingredient_seq,ingredient_name_raw,qty_num,qty_unit,recipe_yield_servings,qty_base,base_unit,qty_per_person,review_flag) VALUES(?,?,?,?,?,?,'g',1,?,'g',?,0)",
 					990001, id, row.get(0), seq++, row.get(0), row.get(1), row.get(1), row.get(1));
 		}
@@ -134,7 +149,7 @@ class LocalIngredientStockFlowDatabaseTest {
 		var sources = new HashMap<String, String>();
 		for (var row : jdbc.queryForList("SELECT r.ingredient_id,r.cost_source FROM the_full_order.tb_account_meal_ingredient_requirement r JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=r.meal_service_id WHERE s.table_id='TBL-X01'"))
 			sources.put(row.get("ingredient_id").toString(), String.valueOf(row.get("cost_source")));
-		assertThat(sources).containsEntry("TIG009", "MANUAL").containsEntry("TIG014", "RECEIPT").containsEntry("TIG004", "STANDARD");
+		assertThat(sources).containsEntry(ing("감자"), "MANUAL").containsEntry(ing("양배추"), "RECEIPT").containsEntry(ing("돼지고기 앞다리살"), "STANDARD");
 	}
 
 	@Test void weeklyBudgetWarnsOnlyAndKeepsSpecialOverageSeparate() {
@@ -152,15 +167,16 @@ class LocalIngredientStockFlowDatabaseTest {
 	}
 
 	@Test void usageConsumesIngredientStockAcrossSupplierLots() {
-		receive(order("TEST_WELSTORY", "TEST-W-001", "TIG001", 1), 1, null);
-		receive(order("TEST_OURHOME", "TEST-A-001", "TIG001", 1), 1, null);
+		String rice = ing("쌀");
+		receive(order("TEST_WELSTORY", "TEST-W-001", rice, 1), 1, null);
+		receive(order("TEST_OURHOME", "TEST-A-001", rice, 1), 1, null);
 		jdbc.update("INSERT INTO the_full_order.tb_menu_master(menu_id,menu_name,food_type,menu_type,menu_gubun,meal_plan_type,del_yn) VALUES('TMENUX04','테스트 밥',1,0,0,0,'N')");
-		jdbc.update("INSERT INTO the_full_order.tb_recipe_detail(recipe_id,menu_id,ingredient_id,ingredient_seq,qty_num,qty_unit,recipe_yield_servings,qty_base,base_unit,qty_per_person,review_flag) VALUES(990004,'TMENUX04','TIG001',1,2500,'g',1,2500,'g',2500,0)");
+		jdbc.update("INSERT INTO the_full_order.tb_recipe_detail(recipe_id,menu_id,ingredient_id,ingredient_seq,qty_num,qty_unit,recipe_yield_servings,qty_base,base_unit,qty_per_person,review_flag) VALUES(990004,'TMENUX04',?,1,2500,'g',1,2500,'g',2500,0)", rice);
 		plan("TBL-X04", List.of(meal(LocalDate.now(), "TMENUX04", false)));
 		Long service = jdbc.queryForObject("SELECT meal_service_id FROM the_full_order.tb_account_meal_service WHERE table_id='TBL-X04'", Long.class);
-		BigDecimal before = stock("TIG001");
+		BigDecimal before = stock(rice);
 		usage.complete(new HashMap<>(Map.of("meal_service_id", service, "account_id", ACCOUNT, "actual_servings", 10, "user_id", "TEST")));
-		assertThat(stock("TIG001")).isEqualByComparingTo(before.subtract(new BigDecimal("25000")));
+		assertThat(stock(rice)).isEqualByComparingTo(before.subtract(new BigDecimal("25000")));
 		// 입고일순: 웰스토리 LOT 20kg 전부 + 아워홈 LOT 5kg. 사용 기록에 상품명이 남는다
 		assertThat(jdbc.queryForList("SELECT product_name_snapshot FROM the_full_order.tb_account_meal_stock_usage WHERE meal_service_id=? ORDER BY inventory_lot_id", String.class, service))
 				.containsExactly("테스트 웰스토리 쌀", "테스트 아워홈 쌀");
@@ -175,7 +191,7 @@ class LocalIngredientStockFlowDatabaseTest {
 		assertThat(offers).isNotEmpty();
 		assertThat(offers.get(0).get("supplier_product_id").toString()).isEqualTo(String.valueOf(onion));
 		assertThat(offers.get(0).get("favorite_yn")).isEqualTo("Y");
-		// 나만의 메뉴(시드: 거래처 단위 TMENU001~005)의 식재료로 발주: 수량 직접 입력 줄 + 이름으로 찾은 상품 후보
+		// 나만의 메뉴(시드: 거래처 단위 5개)의 식재료로 발주: 수량 직접 입력 줄 + 이름으로 찾은 상품 후보
 		Map<String, Object> criteria = new HashMap<>(Map.of("account_id", ACCOUNT, "source", "FAVORITE_MENU",
 				"favorite_owner_type", "ACCOUNT", "favorite_owner_id", ACCOUNT));
 		@SuppressWarnings("unchecked")
@@ -185,8 +201,9 @@ class LocalIngredientStockFlowDatabaseTest {
 	}
 
 	@Test void templatesMatchTheAccountPriceTier() {
+		var menu = favoriteMenus();
 		Map<String, Object> saved = new HashMap<>(Map.of("price_tier", 13000, "meal_plan_type", 0, "template_seq", 2, "template_name", "테스트 13,000원 B", "user_id", "TEST",
-				"items", List.of(Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", "TMENU001"), Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", "TMENU002"))));
+				"items", List.of(Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", menu.get(0)), Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", menu.get(1)))));
 		templates.save(saved);
 		var forAccount = templates.forAccount(new HashMap<>(Map.of("account_id", ACCOUNT, "meal_plan_type", "0")));
 		assertThat(forAccount.get("price_tier")).isEqualTo(13000); // 4,300 × 3 = 12,900원 → 13,000원 금액대
@@ -194,15 +211,17 @@ class LocalIngredientStockFlowDatabaseTest {
 		var detail = templates.detail(new HashMap<>(Map.of("meal_plan_template_id", saved.get("meal_plan_template_id"))));
 		assertThat((List<?>) detail.get("items")).hasSize(2);
 		assertThatThrownBy(() -> templates.save(new HashMap<>(Map.of("price_tier", 13000, "meal_plan_type", 0, "template_seq", 4, "template_name", "x",
-				"items", List.of(Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", "TMENU001")))))).hasMessageContaining("3개");
+				"items", List.of(Map.of("day_index", 1, "meal_slot_code", 2, "menu_id", menu.get(0))))))).hasMessageContaining("3개");
 	}
 
 	@Test void inventoryListsIngredientRowsWithRecentProduct() {
 		var rows = inventory.AccountInventoryList(new HashMap<>(Map.of("account_id", ACCOUNT)));
-		var cabbage = rows.stream().filter(r -> "TIG014".equals(r.get("ingredient_id"))).findFirst().orElseThrow();
+		String cabbageId = ing("양배추");
+		var cabbage = rows.stream().filter(r -> cabbageId.equals(r.get("ingredient_id"))).findFirst().orElseThrow();
 		assertThat(new BigDecimal(cabbage.get("current_base_qty").toString())).isEqualByComparingTo("21000");
 		assertThat(cabbage.get("recent_product_name")).isNotNull();
-		var detail = menus.AccountDetailList(new HashMap<>(Map.of("account_id", ACCOUNT, "menu_id", "TMENU001", "servingQty", 1)));
-		assertThat(detail).isNotEmpty().allMatch(r -> r.get("cost_source") != null);
+		// 본사 표준 단가가 비어 있으므로 재고 단가가 있는 식재료만 원가가 나온다(RECEIPT)
+		var detail = menus.AccountDetailList(new HashMap<>(Map.of("account_id", ACCOUNT, "menu_id", favoriteMenus().get(0), "servingQty", 1)));
+		assertThat(detail).isNotEmpty().anyMatch(r -> "RECEIPT".equals(r.get("cost_source")));
 	}
 }
