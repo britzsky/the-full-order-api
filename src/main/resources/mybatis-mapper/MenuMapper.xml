@@ -416,27 +416,37 @@
              CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(
                pp.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>,
                <!-- 거래처 식재료가 아직 없으면: 공급사 상품 마스터에 이 식재료로 지정되고 이 거래처 사업장에서 파는 상품의 사업장 판가 → 공통 판가 -->
-               (SELECT COALESCE(
-                  (SELECT h.purchase_price FROM the_full_order.tb_supplier_site_product_price h
-                     JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                     JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
-                    WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id AND h.purchase_price&gt;0
-                    ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1),
-                  (SELECT h.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history h
-                    WHERE h.supplier_product_id=sp.supplier_product_id AND h.purchase_price&gt;0
-                    ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.price_history_id DESC LIMIT 1))
-                  /NULLIF(sp.base_qty,0)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="sp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>
-                  FROM the_full_order.tb_supplier_ingredient_product sp
-                 WHERE sp.ingredient_id=hr.ingredient_id AND sp.active_yn='Y'
-                   AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
-                                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
-                               WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
-                 ORDER BY sp.supplier_product_id LIMIT 1),
+               COALESCE(ip.site_cost,ip.common_cost)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="ip.price_unit"/><property name="toUnit" value="hr.base_unit"/></include>,
                CASE WHEN hi.standard_unit_cost&gt;0 THEN hi.standard_unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="hi.base_unit"/><property name="toUnit" value="hr.base_unit"/></include> END) END cost
         FROM the_full_order.tb_recipe_detail hr
         LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
         LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
           ON pp.account_id=#{account_id} AND pp.ingredient_id=hr.ingredient_id
+        <!-- 판가는 레시피 줄(3만여 줄)마다가 아니라 본사 식재료마다 한 번만 찾는다 -->
+        LEFT JOIN (
+          SELECT q.ingredient_id,pr.base_unit price_unit,
+                 (SELECT h.purchase_price FROM the_full_order.tb_supplier_site_product_price h
+                    JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
+                    JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                   WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
+                   ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
+                   /NULLIF(pr.base_qty,0) site_cost,
+                 (SELECT h.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history h
+                   WHERE h.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
+                   ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.price_history_id DESC LIMIT 1)
+                   /NULLIF(pr.base_qty,0) common_cost
+            FROM (
+              SELECT im.ingredient_id,
+                     (SELECT sp.supplier_product_id FROM the_full_order.tb_supplier_ingredient_product sp
+                       WHERE sp.ingredient_id=im.ingredient_id AND sp.active_yn='Y'
+                         AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
+                                      JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                                     WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
+                       ORDER BY sp.supplier_product_id LIMIT 1) price_product_id
+                FROM the_full_order.tb_ingredient_master im
+            ) q
+            LEFT JOIN the_full_order.tb_supplier_ingredient_product pr ON pr.supplier_product_id=q.price_product_id
+        ) ip ON ip.ingredient_id=hr.ingredient_id
     ) r ON r.menu_id=m.menu_id
    WHERE m.del_yn='N'
      AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=m.menu_id AND am.del_yn='N')
