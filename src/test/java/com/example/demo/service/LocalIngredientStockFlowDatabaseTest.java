@@ -101,13 +101,31 @@ class LocalIngredientStockFlowDatabaseTest {
 		assertThat(stock(onion)).isEqualByComparingTo(before.add(new BigDecimal("20000")));
 	}
 
-	/** 본사 메뉴 하나(거래처 메뉴 아님): 감자(직접 입력 3원/g)·양배추(입고 평균)·돼지고기(재고 없음 → 본사 표준 단가).
-	 *  백데이터의 표준 단가는 비어 있으므로 돼지고기 표준 단가는 여기서 넣는다(롤백됨). */
-	String hqMenu(String id, int porkGrams) {
-		jdbc.update("UPDATE the_full_order.tb_ingredient_master SET standard_unit_cost=12.4 WHERE ingredient_id=?", ing("돼지고기 앞다리살"));
+	/** 테스트 공급사 상품도 이 거래처 식재료도 없는 g 단위 본사 식재료(판가가 없어 입고·표준 단가 경로 확인용) */
+	List<String> unpricedIngredients() {
+		return jdbc.queryForList("SELECT im.ingredient_id FROM the_full_order.tb_ingredient_master im WHERE im.base_unit='g'"
+				+ " AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_supplier_ingredient_product p WHERE p.ingredient_id=im.ingredient_id)"
+				+ " AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_ingredient_master a WHERE a.account_id=? AND a.ingredient_id=im.ingredient_id)"
+				+ " ORDER BY im.ingredient_id LIMIT 2", String.class, ACCOUNT);
+	}
+
+	/** 본사 메뉴 하나(거래처 메뉴 아님): 감자(직접 입력 3원/g)·양배추(입고·발주한 상품의 판가)·판가 없는 식재료 A(재고 평균 단가)
+	 *  ·판가 없는 식재료 B(본사 표준 단가, 사용량 bGrams). 백데이터 표준 단가는 비어 있으므로 B의 표준 단가와 A의 재고는 여기서 넣는다(롤백됨). */
+	List<String> unpriced;
+
+	String hqMenu(String id, int bGrams) {
+		if (unpriced == null) unpriced = unpricedIngredients();
+		String a = unpriced.get(0), b = unpriced.get(1);
+		jdbc.update("UPDATE the_full_order.tb_ingredient_master SET standard_unit_cost=12.4 WHERE ingredient_id=?", b);
+		if (jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_ingredient_master WHERE account_id=? AND ingredient_id=?", Integer.class, ACCOUNT, a) == 0) {
+			jdbc.update("INSERT INTO the_full_order.tb_account_ingredient_master(account_id,ingredient_id,ingredient_name_raw,ingredient_name_std,base_unit,active_yn)"
+					+ " SELECT ?,ingredient_id,ingredient_name_std,ingredient_name_std,base_unit,'Y' FROM the_full_order.tb_ingredient_master WHERE ingredient_id=?", ACCOUNT, a);
+			jdbc.update("INSERT INTO the_full_order.tb_account_inventory_balance(account_id,ingredient_id,location_id,current_unit,current_base_qty,base_unit,average_unit_cost,inventory_amount,last_movement_at)"
+					+ " VALUES(?,?,'L999','kg',1000,'g',5,5000,NOW())", ACCOUNT, a);
+		}
 		jdbc.update("INSERT INTO the_full_order.tb_menu_master(menu_id,menu_name,food_type,menu_type,menu_gubun,meal_plan_type,calories_per_serving,del_yn) VALUES(?,?,1,0,3,0,500,'N')", id, "테스트 본사 메뉴 " + id);
 		int seq = 1;
-		for (var row : List.of(List.<Object>of(ing("감자"), 100), List.<Object>of(ing("양배추"), 50), List.<Object>of(ing("돼지고기 앞다리살"), porkGrams))) {
+		for (var row : List.of(List.<Object>of(ing("감자"), 100), List.<Object>of(ing("양배추"), 50), List.<Object>of(a, 20), List.<Object>of(b, bGrams))) {
 			jdbc.update("INSERT INTO the_full_order.tb_recipe_detail(recipe_id,menu_id,ingredient_id,ingredient_seq,ingredient_name_raw,qty_num,qty_unit,recipe_yield_servings,qty_base,base_unit,qty_per_person,review_flag) VALUES(?,?,?,?,?,?,'g',1,?,'g',?,0)",
 					990001, id, row.get(0), seq++, row.get(0), row.get(1), row.get(1), row.get(1));
 		}
@@ -145,17 +163,18 @@ class LocalIngredientStockFlowDatabaseTest {
 		String menu = hqMenu("TMENUX01", 30);
 		LocalDate monday = LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
 		plan("TBL-X01", List.of(meal(monday, menu, false)));
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_recipe_detail WHERE account_id=? AND menu_id=?", Integer.class, ACCOUNT, menu)).isEqualTo(3);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_recipe_detail WHERE account_id=? AND menu_id=?", Integer.class, ACCOUNT, menu)).isEqualTo(4);
 		var sources = new HashMap<String, String>();
 		for (var row : jdbc.queryForList("SELECT r.ingredient_id,r.cost_source FROM the_full_order.tb_account_meal_ingredient_requirement r JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=r.meal_service_id WHERE s.table_id='TBL-X01'"))
 			sources.put(row.get("ingredient_id").toString(), String.valueOf(row.get("cost_source")));
-		assertThat(sources).containsEntry(ing("감자"), "MANUAL").containsEntry(ing("양배추"), "RECEIPT").containsEntry(ing("돼지고기 앞다리살"), "STANDARD");
+		assertThat(sources).containsEntry(ing("감자"), "MANUAL").containsEntry(ing("양배추"), "SITE_PRICE");
+		assertThat(sources.values()).contains("RECEIPT", "STANDARD");
 	}
 
 	@Test void weeklyBudgetWarnsOnlyAndKeepsSpecialOverageSeparate() {
 		LocalDate monday = LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
 		String normal = hqMenu("TMENUX02", 10);
-		String expensive = hqMenu("TMENUX03", 2000); // 돼지고기 2kg/인 → 식단가 초과(저장은 막지 않음)
+		String expensive = hqMenu("TMENUX03", 2000); // 표준 단가 식재료 2kg/인 → 식단가 초과(저장은 막지 않음)
 		plan("TBL-X02", List.of(meal(monday, normal, false), meal(monday.plusDays(1), expensive, true)));
 		var summary = plans.budgetSummary(new HashMap<>(Map.of("table_id", "TBL-X02", "account_id", ACCOUNT)));
 		assertThat((List<?>) summary.get("meals")).hasSize(2);
@@ -220,8 +239,10 @@ class LocalIngredientStockFlowDatabaseTest {
 		var cabbage = rows.stream().filter(r -> cabbageId.equals(r.get("ingredient_id"))).findFirst().orElseThrow();
 		assertThat(new BigDecimal(cabbage.get("current_base_qty").toString())).isEqualByComparingTo("21000");
 		assertThat(cabbage.get("recent_product_name")).isNotNull();
-		// 본사 표준 단가가 비어 있으므로 재고 단가가 있는 식재료만 원가가 나온다(RECEIPT)
+		// 시드 거래처 메뉴의 식재료는 모두 테스트 공급사 상품이 있어 판가로 1인 원가가 나온다(예전처럼)
 		var detail = menus.AccountDetailList(new HashMap<>(Map.of("account_id", ACCOUNT, "menu_id", favoriteMenus().get(0), "servingQty", 1)));
-		assertThat(detail).isNotEmpty().anyMatch(r -> "RECEIPT".equals(r.get("cost_source")));
+		assertThat(detail).isNotEmpty().allMatch(r -> r.get("cost_per_person") != null);
+		var hq = menus.HqMenuCosts(new HashMap<>(Map.of("account_id", ACCOUNT)));
+		assertThat(hq).anyMatch(r -> r.get("menu_cost_per_person") != null);
 	}
 }

@@ -118,14 +118,17 @@
  </select>
  <!--
    기초재고 추정 단가: 메뉴 예상 원가와 같은 자동 단가 체계(MenuMapper.accountIngredientPlanningPrices)에서
-   직접 입력 단가 → 최근 입고 LOT 단가 → 본사 표준 단가. 보유 재고 평균은 지금 등록하려는 값 자체라 쓰지 않는다.
+   직접 입력 단가 → 최근 입고 LOT 단가 → 공급사 판가(사업장 → 공통) → 본사 표준 단가. 보유 재고 평균은 지금 등록하려는 값 자체라 쓰지 않는다.
    단가는 거래처 식재료 기준단위(price_unit)당 금액.
  -->
  <select id="openingCostEstimates" parameterType="map" resultType="hashmap">
   SELECT b.inventory_balance_id,pp.ingredient_id,pp.base_unit price_unit,
-         CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_cost WHEN lot.receipt_unit_cost&gt;0 THEN lot.receipt_unit_cost ELSE pp.standard_cost END unit_cost,
-         CASE WHEN pp.manual_cost&gt;0 THEN 'MANUAL' WHEN lot.receipt_unit_cost&gt;0 THEN 'RECENT_RECEIPT' WHEN pp.standard_cost&gt;0 THEN 'STANDARD' END cost_source,
-         CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_date WHEN lot.receipt_unit_cost&gt;0 THEN lot.received_date ELSE pp.standard_date END cost_date
+         CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_cost WHEN lot.receipt_unit_cost&gt;0 THEN lot.receipt_unit_cost
+              WHEN pp.site_cost&gt;0 THEN pp.site_cost WHEN pp.common_cost&gt;0 THEN pp.common_cost ELSE pp.standard_cost END unit_cost,
+         CASE WHEN pp.manual_cost&gt;0 THEN 'MANUAL' WHEN lot.receipt_unit_cost&gt;0 THEN 'RECENT_RECEIPT'
+              WHEN pp.site_cost&gt;0 THEN 'SITE_PRICE' WHEN pp.common_cost&gt;0 THEN 'COMMON_PRICE' WHEN pp.standard_cost&gt;0 THEN 'STANDARD' END cost_source,
+         CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_date WHEN lot.receipt_unit_cost&gt;0 THEN lot.received_date
+              WHEN pp.site_cost&gt;0 THEN pp.site_date WHEN pp.common_cost&gt;0 THEN pp.common_date ELSE pp.standard_date END cost_date
     FROM (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
     <!-- 재고 행이 아직 없는 식재료도 추정한다(기초재고 등록 때 재고 행을 만든다) -->
     LEFT JOIN the_full_order.tb_account_inventory_balance b ON b.account_id=pp.account_id AND b.ingredient_id=pp.ingredient_id
