@@ -34,6 +34,7 @@ class LocalIngredientStockFlowDatabaseTest {
 	@Autowired ShortageProcurementService shortages;
 	@Autowired InventoryService inventory;
 	@Autowired MenuService menus;
+	@Autowired org.mybatis.spring.SqlSessionTemplate sql;
 
 	/** 본사 식재료 ID(이름으로) */
 	String ing(String name) {
@@ -244,5 +245,26 @@ class LocalIngredientStockFlowDatabaseTest {
 		assertThat(detail).isNotEmpty().allMatch(r -> r.get("cost_per_person") != null);
 		var hq = menus.HqMenuCosts(new HashMap<>(Map.of("account_id", ACCOUNT)));
 		assertThat(hq).anyMatch(r -> r.get("menu_cost_per_person") != null);
+	}
+
+	/** 상품 검색 발주: 담기 전에 재고 식재료를 맞혀 둔다. 상품 지정 식재료 → 이 거래처가 다르게 발주하면 그 식재료(지난 발주)로 바뀐다 */
+	@Test void productSearchGuessesStockIngredientAndLearnsFromOrders() {
+		String onion = ing("양파"), rice = ing("쌀");
+		long riceProduct = product("TEST-W-001");
+		// guess_ingredient가 없으면 추정하지 않는다(부족량 계산 등 내부 호출)
+		assertThat(suppliers.offers(new HashMap<>(Map.of("account_id", ACCOUNT, "keyword", "양파", "limit", "300")))).noneMatch(o -> o.containsKey("suggested_ingredient_id"));
+		sql.clearCache(); // 같은 트랜잭션에서는 MyBatis가 같은 결과 행 객체를 돌려준다
+		Map<String, Object> search = new HashMap<>(Map.of("account_id", ACCOUNT, "keyword", "양파", "limit", "300", "guess_ingredient", "Y"));
+		var offers = suppliers.offers(search);
+		var onionOffer = offers.stream().filter(o -> String.valueOf(product("TEST-W-010")).equals(o.get("supplier_product_id").toString())).findFirst().orElseThrow();
+		assertThat(onionOffer.get("suggested_ingredient_id")).isEqualTo(onion);
+		assertThat(onionOffer.get("suggested_ingredient_name")).isEqualTo("양파");
+
+		Map<String, Object> byProduct = new HashMap<>(Map.of("account_id", ACCOUNT, "supplier_product_id", riceProduct, "guess_ingredient", "Y"));
+		assertThat(suppliers.offers(byProduct)).isNotEmpty().allMatch(o -> rice.equals(o.get("suggested_ingredient_id")));
+		order("TEST_WELSTORY", "TEST-W-001", onion, 1);
+		sql.clearCache(); // JdbcTemplate INSERT는 같은 트랜잭션의 MyBatis 캐시를 비우지 않는다
+		assertThat(suppliers.offers(new HashMap<>(byProduct))).isNotEmpty()
+				.allMatch(o -> onion.equals(o.get("suggested_ingredient_id")) && "HISTORY".equals(o.get("suggested_reason")));
 	}
 }

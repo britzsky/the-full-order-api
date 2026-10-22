@@ -132,6 +132,14 @@ public class SupplierIntegrationService {
 			}
 			if ("REVIEW_REQUIRED".equals(decision.status())) row.put("availability_reason", decision.reason());
 		}
+		// 상품 검색 발주 화면만(guess_ingredient=Y): 담을 때 재고로 들어갈 식재료를 미리 맞혀 둔다. 부족량 계산 등 내부 호출은 하지 않음.
+		if ("Y".equals(params.get("guess_ingredient")) && !rows.isEmpty() && rows.size() <= 1000) {
+			Map<String, Object> query = new java.util.HashMap<>();
+			query.put("account_id", params.get("account_id"));
+			query.put("product_ids", rows.stream().map(row -> row.get("supplier_product_id")).filter(java.util.Objects::nonNull).distinct().toList());
+			ProductIngredientGuess.apply(rows, ProductIngredientGuess.ingredients(mapper.ingredientGuessIngredients(query)),
+					mapper.ingredientGuessFacts(query));
+		}
 		return rows;
 	}
 

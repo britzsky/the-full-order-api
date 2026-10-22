@@ -12,6 +12,10 @@ public interface SupplierIntegrationMapper {
 
 	List<Map<String, Object>> offers(Map<String, Object> params);
 
+	List<Map<String, Object>> ingredientGuessIngredients(Map<String, Object> params);
+
+	List<Map<String, Object>> ingredientGuessFacts(Map<String, Object> params);
+
 	List<Map<String, Object>> syncStatus(Map<String, Object> params);
 
 	List<Map<String, Object>> receipts(Map<String, Object> params);

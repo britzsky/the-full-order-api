@@ -89,6 +89,32 @@
      <if test="orderable_only != null and orderable_only.equals(&quot;Y&quot;)">AND o.product_status='ACTIVE' AND (av.orderable_yn IS NULL OR av.orderable_yn='Y')</if>
      ORDER BY CASE WHEN fp.favorite_product_id IS NULL THEN 1 ELSE 0 END,pr.purchase_price/NULLIF(p.base_qty,0),s.supplier_name
   </select>
+  <!-- 상품 검색 발주의 재고 식재료 추정(ProductIngredientGuess)용 거래처 활성 식재료 -->
+  <select id="ingredientGuessIngredients" parameterType="map" resultType="hashmap">
+    SELECT ingredient_id,COALESCE(NULLIF(ingredient_name_std,''),ingredient_name_raw,ingredient_id) ingredient_name,base_unit
+      FROM the_full_order.tb_account_ingredient_master
+     WHERE account_id=#{account_id} AND active_yn='Y'
+  </select>
+  <!--
+    재고 식재료 추정 근거. 이 거래처 식재료로만(ID가 본사 ID라 다른 거래처 이력도 같은 식재료로 본다).
+    OWN: 이 거래처 발주 이력(마지막 발주일), OTHERS: 다른 거래처(곳 수·건수), MASTER: 상품 마스터 ingredient_id.
+  -->
+  <select id="ingredientGuessFacts" parameterType="map" resultType="hashmap">
+    SELECT oi.supplier_product_id,oi.source_ingredient_id ingredient_id,
+           CASE WHEN po.account_id=#{account_id} THEN 'OWN' ELSE 'OTHERS' END scope,
+           COUNT(DISTINCT po.account_id) accounts,COUNT(*) hits,MAX(po.created_at) last_at
+      FROM the_full_order.tb_account_purchase_order_item oi
+      JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=oi.purchase_order_id
+      JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=oi.source_ingredient_id AND ai.active_yn='Y'
+     WHERE oi.supplier_product_id IN <foreach collection="product_ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+       AND oi.source_ingredient_id IS NOT NULL AND oi.source_ingredient_id&lt;&gt;'' AND oi.item_status NOT IN ('FAILED','CANCELED')
+     GROUP BY oi.supplier_product_id,oi.source_ingredient_id,CASE WHEN po.account_id=#{account_id} THEN 'OWN' ELSE 'OTHERS' END
+    UNION ALL
+    SELECT p.supplier_product_id,p.ingredient_id,'MASTER',0,0,NULL
+      FROM the_full_order.tb_supplier_ingredient_product p
+      JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=p.ingredient_id AND ai.active_yn='Y'
+     WHERE p.supplier_product_id IN <foreach collection="product_ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
   <!-- 거래처 매핑 ID → 상품·판가를 저장하는 사업장 마스터 ID -->
   <select id="siteIdOfMapping" parameterType="map" resultType="long">
     SELECT supplier_site_id FROM the_full_order.tb_supplier_account_site WHERE supplier_account_site_id=#{supplier_account_site_id}
