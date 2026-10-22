@@ -34,16 +34,15 @@
      AND po.requested_delivery_date&lt;=#{date_to}
    ORDER BY po.requested_delivery_date,po.purchase_order_id LIMIT 50
  </select>
+ <!-- 식재료 재고 행(보관 위치별). 어느 공급사 상품으로 들어왔든 같은 식재료 재고에서 차감한다 -->
  <select id="balances" resultType="map">
-  SELECT b.*,p.product_name product_name_snapshot FROM the_full_order.tb_account_inventory_balance b
-  JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=b.account_id AND ap.account_ingredient_product_id=b.account_ingredient_product_id
-  JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-  WHERE b.account_id=#{account_id} AND ap.mapped_ingredient_id=#{ingredient_id}
+  SELECT b.* FROM the_full_order.tb_account_inventory_balance b
+  WHERE b.account_id=#{account_id} AND b.ingredient_id=#{ingredient_id}
   ORDER BY b.created_at,b.inventory_balance_id FOR UPDATE
  </select>
  <select id="lots" resultType="map">
   SELECT * FROM the_full_order.tb_account_inventory_lot WHERE account_id=#{account_id}
-   AND account_ingredient_product_id=#{account_ingredient_product_id} AND location_id=#{location_id}
+   AND ingredient_id=#{ingredient_id} AND location_id=#{location_id}
    AND remaining_base_qty&gt;0 ORDER BY received_date,inventory_lot_id FOR UPDATE
  </select>
  <select id="lockBalance" resultType="map">
@@ -63,9 +62,9 @@
  </update>
  <insert id="insertUsage">
   INSERT INTO the_full_order.tb_account_meal_stock_usage
-   (usage_id,meal_service_id,account_id,menu_id,ingredient_id,inventory_balance_id,account_ingredient_product_id,location_id,inventory_lot_id,
+   (usage_id,meal_service_id,account_id,menu_id,ingredient_id,inventory_balance_id,location_id,inventory_lot_id,
     quantity,base_unit,unit_cost_snapshot,product_name_snapshot,origin_name_snapshot,user_id)
-  VALUES(#{usage_id},#{meal_service_id},#{account_id},#{menu_id},#{ingredient_id},#{inventory_balance_id},#{account_ingredient_product_id},#{location_id},#{inventory_lot_id},
+  VALUES(#{usage_id},#{meal_service_id},#{account_id},#{menu_id},#{ingredient_id},#{inventory_balance_id},#{location_id},#{inventory_lot_id},
     #{quantity},#{base_unit},#{unit_cost_snapshot},#{product_name_snapshot},#{origin_name_snapshot},#{user_id})
  </insert>
  <select id="activeUsage" resultType="map">
@@ -74,31 +73,25 @@
  <update id="reverseUsage">UPDATE the_full_order.tb_account_meal_stock_usage SET reversed_at=NOW() WHERE usage_id=#{usage_id} AND reversed_at IS NULL</update>
  <insert id="movement">
   INSERT INTO the_full_order.tb_account_inventory_movement
-   (movement_id,account_id,account_ingredient_product_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,
+   (movement_id,account_id,ingredient_id,product_name_snapshot,location_id,movement_type,quantity_delta,quantity_before,quantity_after,
     base_unit,reference_type,reference_id,movement_at,user_id,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after)
-  VALUES(#{movement_id},#{account_id},#{account_ingredient_product_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},
+  VALUES(#{movement_id},#{account_id},#{ingredient_id},#{product_name_snapshot},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},
    #{base_unit},'MEAL_SERVICE',#{usage_id},NOW(),#{user_id},#{unit_cost_snapshot},#{amount_delta},#{average_unit_cost_before},#{average_unit_cost_after})
  </insert>
  <update id="status">
   UPDATE the_full_order.tb_account_meal_service SET status=#{status},actual_servings=#{actual_servings},user_id=#{user_id},mod_at=NOW() WHERE meal_service_id=#{meal_service_id}
  </update>
- <sql id="originText">
-  COALESCE(NULLIF(CONCAT_WS(' / ',NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.rawMaterialOrigin1')),''),
-   NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.rawMaterialOrigin2')),''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.originPlaceNm')),'')),''),
-   NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.origin')),''),'원산지 미확인')
- </sql>
+ <!-- 저장 당시 원산지: 그 식재료로 가장 최근에 들어온 LOT(상품·원산지). 입고 기록이 없으면 식재료 이름·'원산지 미확인' -->
  <update id="snapshotOrigins">
   UPDATE the_full_order.tb_account_meal_ingredient_requirement r
   JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
-  LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=r.supplier_product_id
-  LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
-  LEFT JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=(
-   SELECT so.supplier_offer_id FROM the_full_order.tb_supplier_site_product_offer so
-   JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_site_id=so.supplier_site_id
-   WHERE ss.account_id=ms.account_id AND ss.active_yn='Y' AND so.supplier_product_id=r.supplier_product_id AND so.active_yn='Y'
-    AND (so.valid_from IS NULL OR so.valid_from&lt;=CURRENT_DATE) AND (so.valid_to IS NULL OR so.valid_to&gt;=CURRENT_DATE)
-   ORDER BY so.last_synced_at DESC,so.supplier_offer_id DESC LIMIT 1)
-  SET r.product_name_snapshot=COALESCE(p.product_name,i.ingredient_name_std,i.ingredient_name_raw),r.origin_name_snapshot=<include refid="originText"/>
+  LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=ms.account_id AND ai.ingredient_id=r.ingredient_id
+  LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+   SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+    WHERE l.account_id=ms.account_id AND l.ingredient_id=r.ingredient_id
+    ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
+  SET r.product_name_snapshot=COALESCE(lot.product_name_snapshot,ai.ingredient_name_std,ai.ingredient_name_raw),
+      r.origin_name_snapshot=COALESCE(NULLIF(lot.origin_name_snapshot,''),'원산지 미확인')
   WHERE r.meal_service_id=#{meal_service_id} AND r.origin_name_snapshot IS NULL
  </update>
  <select id="origins" resultType="map">

@@ -180,7 +180,6 @@ public class OurhomeCatalogSyncService {
         packs.stream().filter(option -> option.baseUnit().equals("g")).findFirst().ifPresent(mass -> {
             p.put("confirmed_mass",mass.quantity()); mapper.preserveOurhomeMassOption(p);
         });
-        mapper.refreshAccountProductLead(p);
         p.put("delivery_type",row.get("deliveyType")); p.put("cutoff_code",row.get("ordTime"));
         p.put("cutoff_time",deadline==null?null:deadline.time().toString());
         p.put("decimal_order_allowed",row.get("decOdrupYn")); p.put("product_status","ACTIVE");

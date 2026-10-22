@@ -23,13 +23,10 @@ public class AccountMenuRecipeService {
 		return mapper.ingredients(p);
 	}
 
+	/** 식재료별 원산지: 가장 최근에 들어온 LOT의 원산지(입고 기록이 없으면 '원산지 미확인') */
 	public List<Map<String, Object>> origins(Map<String, Object> p) {
 		require(p, "account_id");
-		List<Map<String, Object>> rows = mapper.origins(p);
-		for (Map<String, Object> row : rows) {
-			row.put("origin_name", ProductOrigins.describe(row.remove("provider_attributes")));
-		}
-		return rows;
+		return mapper.origins(p);
 	}
 
 	public List<Map<String, Object>> menus(Map<String, Object> p) {
@@ -97,23 +94,6 @@ public class AccountMenuRecipeService {
 		if (mapper.ingredientBaseUnit(row) == null)
 			throw new IllegalArgumentException("식자재를 찾을 수 없습니다.");
 		return mapper.ensureMenuIngredient(row);
-	}
-
-	public int ensureIngredientInventory(Map<String, Object> row) {
-		require(row, "account_id", "ingredient_id", "base_unit", "supplier_id", "supplier_item_code", "product_name",
-				"order_unit", "base_qty");
-		mapper.upsertIngredient(row);
-		mapper.ensureSupplierProduct(row);
-		Long supplierProductId = mapper.supplierProductId(row);
-		if (supplierProductId == null)
-			throw new IllegalArgumentException("Supplier product could not be resolved.");
-		row.put("supplier_product_id", supplierProductId);
-		mapper.ensureAccountProduct(row);
-		Long accountProductId = mapper.accountIngredientProductId(row);
-		if (accountProductId == null)
-			throw new IllegalArgumentException("Account supplier product could not be resolved.");
-		row.put("account_ingredient_product_id", accountProductId);
-		return mapper.ensureInventory(row);
 	}
 
 	public Object ensureRecipeId(Map<String, Object> row) {

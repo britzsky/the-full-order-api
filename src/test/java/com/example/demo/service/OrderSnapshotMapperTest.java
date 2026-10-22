@@ -18,13 +18,14 @@ class OrderSnapshotMapperTest {
         }
         String insert=configuration.getMappedStatement("com.example.demo.mapper.OrderWorkflowMapper.insertItem")
             .getBoundSql(Map.of()).getSql();
-        assertThat(insert).contains("source_ingredient_id", "product_snapshot", "link_context_snapshot");
+        assertThat(insert).contains("source_ingredient_id", "product_snapshot", "supplier_product_id").doesNotContain("account_ingredient_product_id");
         String incoming=configuration.getMappedStatement("com.example.demo.mapper.ShortageProcurementMapper.incoming")
             .getBoundSql(Map.of()).getSql();
-        // 미입고 수량은 발주 원본 식자재 → 거래처 연결 순으로만 귀속한다. 본사 식자재 분류(p.ingredient_id)는 쓰지 않는다.
-        assertThat(incoming).contains("COALESCE(NULLIF(oi.source_ingredient_id,''),ap.mapped_ingredient_id)",
-            "tb_account_ingredient_master", "i.account_id=po.account_id").doesNotContain("p.ingredient_id");
+        // 미입고 수량은 발주 품목에 정한 '재고에 넣을 식재료'로만 귀속한다(상품 연결·본사 식자재 분류는 쓰지 않는다).
+        assertThat(incoming).contains("i.ingredient_id=oi.source_ingredient_id",
+            "tb_account_ingredient_master", "i.account_id=po.account_id").doesNotContain("p.ingredient_id", "mapped_ingredient_id");
+        // 원산지는 그 식재료로 가장 최근에 들어온 LOT
         assertThat(configuration.getMappedStatement("com.example.demo.mapper.AccountMenuRecipeMapper.origins")
-            .getBoundSql(Map.of("account_id","A")).getSql()).contains("ss.account_id=r.account_id", "provider_attributes");
+            .getBoundSql(Map.of("account_id","A")).getSql()).contains("tb_account_inventory_lot", "origin_name_snapshot");
     }
 }

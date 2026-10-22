@@ -107,44 +107,4 @@
     </update>
     <delete id="deletePrice" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_price_history WHERE price_history_id=#{price_history_id}</delete>
 
-    <select id="accountProducts" parameterType="map" resultType="hashmap">
-        SELECT ap.*,ap.mapped_ingredient_id ingredient_id,p.supplier_item_code,p.product_name,p.order_unit,COALESCE(ap.link_base_qty,p.base_qty) base_qty,COALESCE(ap.link_base_unit,p.base_unit) base_unit,
-               p.base_qty product_base_qty,p.base_unit product_base_unit,p.alt_base_qty,p.alt_base_unit,
-               s.supplier_id,s.supplier_name,ph.purchase_price current_price
-        FROM the_full_order.tb_account_ingredient_product ap
-        JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-        JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
-        LEFT JOIN the_full_order.tb_supplier_ingredient_price_history ph ON ph.supplier_product_id=p.supplier_product_id AND ph.effective_to IS NULL
-        WHERE 1=1
-        <if test="active_yn != null and active_yn != ''">AND ap.active_yn=#{active_yn}</if>
-        <if test="account_id != null and account_id != ''">AND ap.account_id=#{account_id}</if>
-        <if test="account_ingredient_product_id != null and account_ingredient_product_id != ''">AND ap.account_ingredient_product_id=#{account_ingredient_product_id}</if>
-        <if test="ingredient_id != null and ingredient_id != ''">AND ap.mapped_ingredient_id=#{ingredient_id}</if>
-        ORDER BY ap.mapped_ingredient_id,ap.preferred_yn DESC,s.supplier_name
-    </select>
-    <update id="clearPreferredProduct" parameterType="map">
-        <!-- 같은 거래처에서 같은 식재료에 연결된 상품끼리만 기준상품을 해제한다 (본사 식자재 분류는 사용하지 않음).
-             DISTINCT: 같은 테이블을 갱신하면서 조회하므로 파생 테이블을 강제로 물리화한다 (MySQL 1093 회피). -->
-        UPDATE the_full_order.tb_account_ingredient_product ap
-        JOIN (SELECT DISTINCT mapped_ingredient_id FROM the_full_order.tb_account_ingredient_product
-               WHERE account_id=#{account_id} AND supplier_product_id=#{supplier_product_id}) target
-          ON target.mapped_ingredient_id=ap.mapped_ingredient_id
-        SET ap.preferred_yn='N',ap.mod_at=NOW()
-        WHERE ap.account_id=#{account_id}
-    </update>
-    <insert id="insertAccountProduct" parameterType="map" useGeneratedKeys="true" keyProperty="account_ingredient_product_id">
-        INSERT INTO the_full_order.tb_account_ingredient_product
-        (account_id,supplier_product_id,preferred_yn,safe_stock_base_qty,max_stock_base_qty,lead_time_days,default_location_id,active_yn,user_id)
-        VALUES (#{account_id},#{supplier_product_id},COALESCE(#{preferred_yn},'N'),COALESCE(#{safe_stock_base_qty},0),#{max_stock_base_qty},
-        COALESCE(#{lead_time_days},0),#{default_location_id},COALESCE(#{active_yn},'Y'),#{user_id})
-    </insert>
-    <update id="updateAccountProduct" parameterType="map">
-        UPDATE the_full_order.tb_account_ingredient_product
-        <set><if test="supplier_product_id != null">supplier_product_id=#{supplier_product_id},</if><if test="preferred_yn != null">preferred_yn=#{preferred_yn},</if>
-        <if test="safe_stock_base_qty != null">safe_stock_base_qty=#{safe_stock_base_qty},</if><if test="max_stock_base_qty != null">max_stock_base_qty=#{max_stock_base_qty},</if>
-        <if test="lead_time_days != null">lead_time_days=#{lead_time_days},</if><if test="default_location_id != null">default_location_id=#{default_location_id},</if>
-        <if test="active_yn != null">active_yn=#{active_yn},</if>user_id=#{user_id},mod_at=NOW()</set>
-        WHERE account_ingredient_product_id=#{account_ingredient_product_id} AND account_id=#{account_id}
-    </update>
-    <delete id="deleteAccountProduct" parameterType="map">DELETE FROM the_full_order.tb_account_ingredient_product WHERE account_ingredient_product_id=#{account_ingredient_product_id}</delete>
 </mapper>

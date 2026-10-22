@@ -2,6 +2,7 @@ package com.example.demo.service;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.argThat;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
@@ -28,6 +29,8 @@ class ShortageProcurementServiceTest {
         offer=new HashMap<>(Map.of("ingredient_id","RICE","supplier_offer_id",1,"base_qty",100,"base_unit","g","purchase_price",1000,
                 "minimum_order_qty",1,"order_increment_qty",1,"decimal_order_allowed","N","product_status","ACTIVE","orderable_yn","Y"));
         offer.put("orderability_status","AVAILABLE");
+        // 상품은 식재료에 연결하지 않는다: 이 식재료로 발주했던 상품(usual_ingredient_ids)과 이름이 맞는 상품이 후보
+        offer.put("usual_ingredient_ids","RICE");offer.put("product_name","백미 20kg");
         offer.put("supplier_code","WELSTORY");offer.put("tax_type","No tax");when(suppliers.offers(anyMap())).thenReturn(List.of(offer));
     }
     private JsonNode result(){return json.valueToTree(service.shortages(criteria));}
@@ -190,12 +193,28 @@ class ShortageProcurementServiceTest {
         var body=request(3);((com.fasterxml.jackson.databind.node.ObjectNode)body.path("items").get(0)).put("delivery_terms_confirmed",true);
         assertThat(json.valueToTree(service.preview(body)).path("items").get(0).path("delivery_terms_confirmed").asBoolean()).isTrue();
     }
-    @Test void preferredProductIsKeptInsteadOfCheaperReplacement() {
-        offer.put("preferred_yn","Y");
-        var cheaper=new HashMap<>(offer);cheaper.put("supplier_offer_id",2);cheaper.put("purchase_price",1);cheaper.put("preferred_yn","N");
+    @Test void usualProductIsKeptInsteadOfCheaperNameMatch() {
+        // 늘 쓰던 상품(이 식재료로 발주했던 상품)이 이름만 맞는 더 싼 상품보다 추천된다
+        var cheaper=new HashMap<>(offer);cheaper.put("supplier_offer_id",2);cheaper.put("purchase_price",1);cheaper.put("usual_ingredient_ids","");
         when(suppliers.offers(anyMap())).thenReturn(List.of(cheaper,offer));
         assertThat(result().path("ingredients").get(0).path("recommended_offer_id").asInt()).isEqualTo(1);
         offer.put("orderable_yn","N");
         assertThat(result().path("ingredients").get(0).path("recommended_offer_id").isNull()).isTrue();
+    }
+    @Test void productsAreMatchedByPastOrdersOrNameNotByLinks() {
+        var unrelated=new HashMap<>(offer);unrelated.put("supplier_offer_id",3);unrelated.put("usual_ingredient_ids","");unrelated.put("product_name","양파 10kg");
+        var synonym=new HashMap<>(offer);synonym.put("supplier_offer_id",4);synonym.put("usual_ingredient_ids","");synonym.put("product_name","쌀 10kg");
+        when(suppliers.offers(anyMap())).thenReturn(List.of(unrelated,synonym,offer));
+        var offers=result().path("ingredients").get(0).path("offers");
+        assertThat(offers.size()).isEqualTo(2);
+        assertThat(offers.get(0).path("supplier_offer_id").asInt()).as("발주 이력 상품 먼저").isEqualTo(1);
+        assertThat(offers.get(0).path("preferred_yn").asText()).isEqualTo("Y");
+        assertThat(offers.get(1).path("supplier_offer_id").asInt()).as("이름 일치(한 글자 식재료는 단어가 같을 때만)").isEqualTo(4);
+        verify(suppliers).offers(argThat(p -> ((List<?>)p.get("ingredient_ids")).contains("RICE") && p.get("ingredient_name_patterns") instanceof List<?>));
+    }
+    @Test void stockOnlyCallersSkipProductLookup() {
+        criteria.put("skip_offers",true);
+        assertThat(result().path("ingredients").get(0).path("offers").size()).isZero();
+        verify(suppliers,never()).offers(anyMap());
     }
 }

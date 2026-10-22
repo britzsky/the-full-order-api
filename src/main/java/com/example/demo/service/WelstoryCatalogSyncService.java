@@ -220,6 +220,11 @@ public class WelstoryCatalogSyncService {
 				unmatched++;
 				continue;
 			}
+			// 식재료 없이 상품만 발주한 줄은 재고에 넣을 식재료를 사람이 골라야 하므로 자동 입고하지 않는다(발주서 화면에서 입고).
+			if (orderLine.get("ingredient_id") == null || text(orderLine.get("ingredient_id")).isBlank()) {
+				unmatched++;
+				continue;
+			}
 			row.putAll(orderLine);
 
 			BigDecimal receivedQty = decimal(first(item, "billQty"));
@@ -321,7 +326,6 @@ public class WelstoryCatalogSyncService {
 		mapper.upsertSupplierProduct(p);
 		Long productId = mapper.supplierProductId(p);
 		p.put("supplier_product_id", productId);
-		mapper.refreshAccountProductLead(p);
 		p.put("delivery_type", first(row, "deliveryType"));
 		p.put("cutoff_code", first(row, "closeCode"));
 		// 가이드 closeCode 표(M01 11시, N01·F01 17시). 해당없음·미정의 코드는 시각 없음(확인 필요).

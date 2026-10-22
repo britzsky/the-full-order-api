@@ -19,7 +19,6 @@ class LocalLoadProfileTest {
     @Autowired InventoryService inventory;
     @Autowired MenuService menus;
     @Autowired AccountMenuRecipeService recipes;
-    @Autowired IngredientLinkSuggestionService suggestions;
 
     static String size(Object value) {
         if (value instanceof Collection<?> c) return c.size() + "건";
@@ -59,6 +58,5 @@ class LocalLoadProfileTest {
             var rows = suppliers.offers(new HashMap<>(Map.of("account_id", account, "delivery_date", tomorrow, "keyword", "돼지고기", "limit", "200")));
             System.out.println("PROFILE offers 검색 JSON " + new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules().writeValueAsBytes(rows).length / 1024 + "KB (" + rows.size() + "건)");
         } catch (Exception e) { System.out.println("PROFILE offers 검색 JSON ERROR " + e); }
-        if (!"N".equals(System.getenv("PROFILE_SUGGEST"))) time("link suggestions unlinked", () -> suggestions.unlinked(new HashMap<>(Map.of("account_id", account))));
     }
 }

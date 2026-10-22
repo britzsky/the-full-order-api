@@ -37,13 +37,6 @@ public interface SupplierCatalogMapper {
 
 	int deletePrice(Map<String, Object> params);
 
-	List<Map<String, Object>> accountProducts(Map<String, Object> params);
 
-	int clearPreferredProduct(Map<String, Object> params);
 
-	int insertAccountProduct(Map<String, Object> params);
-
-	int updateAccountProduct(Map<String, Object> params);
-
-	int deleteAccountProduct(Map<String, Object> params);
 }

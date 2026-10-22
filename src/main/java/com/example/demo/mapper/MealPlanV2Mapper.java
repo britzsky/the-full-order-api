@@ -27,6 +27,8 @@ public interface MealPlanV2Mapper {
 
 	List<Map<String, Object>> details(Map<String, Object> p);
 
+	int accountMenuExists(Map<String, Object> p);
+
 	int countCompatibleMenu(Map<String, Object> p);
 
 	Map<String, Object> selectServiceCostValidation(Map<String, Object> p);
@@ -50,4 +52,7 @@ public interface MealPlanV2Mapper {
 	int insertCosts(Map<String, Object> p);
 
 	int insertRequirements(Map<String, Object> p);
+
+	// 주간 식단가 정산: 식사별 식단가·원가·단가 미등록 수·특식
+	List<Map<String, Object>> budgetRows(Map<String, Object> p);
 }

@@ -81,7 +81,7 @@ class OurhomeCatalogSyncServiceTest {
         when(api.catalogPage(any(),anyString(),anyString())).thenReturn(new OurhomeSiteService.ProductResult("","FU0UP","2099-10-01",1,false,"",List.of(row)));
         var result=service.sync(input);
         assertThat(result).containsEntry("changed",0);
-        verify(mapper,never()).upsertSupplierProduct(anyMap());verify(mapper,never()).upsertOffer(anyMap());verify(mapper,never()).refreshAccountProductLead(anyMap());
+        verify(mapper,never()).upsertSupplierProduct(anyMap());verify(mapper,never()).upsertOffer(anyMap());
         verify(mapper).touchOffers(argThat(p->((List<Object>)p.get("offer_ids")).equals(List.of(77L))));
         verify(mapper).insertOfferPrices(argThat(p->{ var r=((List<Map<String,Object>>)p.get("rows")).get(0); return Long.valueOf(77L).equals(r.get("supplier_offer_id")) && !r.get("price_provider_attributes").toString().contains("goodnm"); }));
     }

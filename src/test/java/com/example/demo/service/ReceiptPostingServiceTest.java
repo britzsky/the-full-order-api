@@ -39,49 +39,31 @@ class ReceiptPostingServiceTest {
         assertThatThrownBy(()->service.post(row)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("잔량");
         verifyNoInteractions(mapper);
     }
-    private Map<String,Object> successfulReceipt() {
+    private Map<String,Object> successfulReceipt(String ingredient) {
         var row=row();
         var item=new HashMap<String,Object>(Map.of("purchase_order_item_id",1L,"received_order_qty",0,
-            "order_qty",10,"base_qty_per_order_unit",1000,"account_ingredient_product_id",7L,
-            "supplier_product_id",10L,"base_unit","g","order_unit","PAC",
-            "source_ingredient_id","ONION","ingredient_link_status","PENDING"));
+            "order_qty",10,"base_qty_per_order_unit",1000,"supplier_product_id",10L,"base_unit","g","order_unit","PAC",
+            "product_name","웰스토리 양파 1kg","product_base_qty",1000,"product_base_unit","g"));
+        if (ingredient!=null) item.put("ingredient_id",ingredient);
         when(orders.items(anyMap())).thenReturn(List.of(item));
-        item.put("link_context_snapshot",OrderWorkflowService.linkContextFingerprint(List.of()));
-        when(orders.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
-        when(orders.lockAccountProduct(anyMap())).thenReturn(Map.of("account_ingredient_product_id",7L));
         when(mapper.insertGoodsReceiptItem(anyMap())).thenReturn(1);
         when(mapper.inventoryBalanceForUpdate(anyMap())).thenReturn(
             Map.of("current_base_qty",3000,"average_unit_cost",1),
             Map.of("current_base_qty",7000,"average_unit_cost",1));
         return row;
     }
-    @Test void receiptUsesSavedProductAndLinksOriginalIngredient() {
-        var row=successfulReceipt();row.put("account_ingredient_product_id",999L);
-        when(orders.linkReceivedProduct(anyMap())).thenReturn(1);
+    @Test void receiptAddsToTheIngredientStockAndRecordsTheProduct() {
+        var row=successfulReceipt("ONION");
         assertThat(service.post(row)).isTrue();
-        verify(mapper).upsertInventoryAtAverageCost(argThat(p -> Long.valueOf(7).equals(p.get("account_ingredient_product_id"))
+        verify(mapper).upsertInventoryAtAverageCost(argThat(p -> "ONION".equals(p.get("ingredient_id"))
             && new java.math.BigDecimal("4000").compareTo((java.math.BigDecimal)p.get("base_received_qty"))==0));
-        verify(orders).updateLinkStatus(argThat(p -> "LINKED".equals(p.get("ingredient_link_status"))));
+        verify(mapper).insertInventoryLot(argThat(p -> "ONION".equals(p.get("ingredient_id")) && Long.valueOf(10L).equals(p.get("supplier_product_id"))
+            && "웰스토리 양파 1kg".equals(p.get("product_name"))));
+        verify(mapper).insertCostedInventoryMovement(argThat(p -> "ONION".equals(p.get("ingredient_id"))));
     }
-    @Test void otherSupplierLinkDoesNotBlockAdditionalProductReceipt() {
-        var row=successfulReceipt();
-        when(orders.sourceLinks(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",20L)));
-        when(orders.linkReceivedProduct(anyMap())).thenReturn(1);
-        assertThat(service.post(row)).isTrue();
-        verify(orders).linkReceivedProduct(anyMap());
-        verify(orders).updateLinkStatus(argThat(p -> "LINKED".equals(p.get("ingredient_link_status"))));
-        verify(mapper).upsertInventoryAtAverageCost(anyMap());
-    }
-    @Test void changedTargetMappingIsNotOverwritten() {
-        var row=successfulReceipt();when(orders.linkReceivedProduct(anyMap())).thenReturn(0);
-        service.post(row);
-        verify(orders).updateLinkStatus(argThat(p -> "CONFLICT".equals(p.get("ingredient_link_status"))));
-    }
-    @Test void userUnlinkAfterOrderIsNotUndoneByReceipt() {
-        var row=successfulReceipt();
-        when(orders.linkContext(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",10L,"active_yn","N","mod_at","changed")));
-        service.post(row);
-        verify(orders,never()).linkReceivedProduct(anyMap());
-        verify(orders).updateLinkStatus(argThat(p -> "CONFLICT".equals(p.get("ingredient_link_status"))));
+    @Test void productOnlyLineCannotBeReceivedWithoutChoosingAnIngredient() {
+        var row=successfulReceipt(null);
+        assertThatThrownBy(()->service.post(row)).hasMessageContaining("재고에 넣을 식재료 선택 요망");
+        verify(mapper,never()).upsertInventoryAtAverageCost(anyMap());
     }
 }

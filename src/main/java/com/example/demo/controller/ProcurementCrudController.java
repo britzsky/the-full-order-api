@@ -64,14 +64,6 @@ public class ProcurementCrudController {
 	}
 
 	/*
-	 * part : 발주관리 method : fromPlan comment : 식단의 부족 식자재로 발주 장바구니 자동 생성
-	 */
-	@PostMapping("/carts/from-meal-plan")
-	public ResponseEntity<?> fromPlan(@RequestBody Map<String, Object> b) {
-		return run(() -> s.createFromMealPlan(b));
-	}
-
-	/*
 	 * part : 발주관리 method : cartItems comment : 장바구니 품목 조회
 	 */
 	@GetMapping("/cart-items")

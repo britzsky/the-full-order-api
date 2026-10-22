@@ -136,37 +136,6 @@ public class SupplierCatalogController {
 		return ok(() -> service.deletePrice(b));
 	}
 
-	/*
-	 * part : 공급사 카탈로그 method : accountProducts comment : 거래처별 사용 공급상품 조회
-	 */
-	@GetMapping("/account-products")
-	public ResponseEntity<?> accountProducts(@RequestParam Map<String, Object> p) {
-		return ok(() -> service.accountProducts(p));
-	}
-
-	/*
-	 * part : 공급사 카탈로그 method : createAccountProduct comment : 거래처 사용 공급상품 등록
-	 */
-	@PostMapping("/account-products")
-	public ResponseEntity<?> createAccountProduct(@RequestBody Map<String, Object> b) {
-		return ok(() -> service.createAccountProduct(b));
-	}
-
-	/*
-	 * part : 공급사 카탈로그 method : updateAccountProduct comment : 거래처 사용 공급상품 수정
-	 */
-	@PatchMapping("/account-products")
-	public ResponseEntity<?> updateAccountProduct(@RequestBody Map<String, Object> b) {
-		return ok(() -> service.updateAccountProduct(b));
-	}
-
-	/*
-	 * part : 공급사 카탈로그 method : deleteAccountProduct comment : 거래처 사용 공급상품 삭제
-	 */
-	@DeleteMapping("/account-products")
-	public ResponseEntity<?> deleteAccountProduct(@RequestBody Map<String, Object> b) {
-		return ok(() -> service.deleteAccountProduct(b));
-	}
 
 	private ResponseEntity<?> ok(Supplier<?> action) {
 		try {

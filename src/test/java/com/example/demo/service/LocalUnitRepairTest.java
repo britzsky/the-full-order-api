@@ -74,7 +74,7 @@ class LocalUnitRepairTest {
                         update(c,"UPDATE the_full_order."+table+" SET qty_base=?,base_unit=?,qty_per_person=?,review_flag=? WHERE "+key+"=?",r.get("qty_base"),r.get("base_unit"),r.get("qty_per_person"),r.get("review_flag"),r.get(key));recipeRows++;
                     }
                 }
-                Map<String,Object> params=new HashMap<>();params.put("servingQty",1);params.put("menu_id","M0001");params.put("account_id",rows(c,"SELECT account_id FROM the_full_order.tb_account_ingredient_product LIMIT 1").get(0).get("account_id"));params.put("user_id","");
+                Map<String,Object> params=new HashMap<>();params.put("servingQty",1);params.put("menu_id","M0001");params.put("account_id",rows(c,"SELECT account_id FROM the_full_order.tb_account_ingredient_master LIMIT 1").get(0).get("account_id"));params.put("user_id","");
                 var menus=session.getMapper(com.example.demo.mapper.MenuMapper.class);
                 menus.MenuList(params);menus.DetailList(params);menus.AccountDetailList(params);menus.AccountMenuList(params);
                 var inventory=session.getMapper(com.example.demo.mapper.InventoryMapper.class);inventory.ingredientMasterList(params);inventory.AccountInventoryList(params);

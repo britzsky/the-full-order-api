@@ -2,11 +2,13 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.ShortageProcurementMapper">
  <sql id="ingredientColumns">i.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,i.base_unit master_unit</sql>
+ <!-- 구성 중인 식단의 필요량. 거래처 메뉴면 거래처 레시피, 아직 거래처 메뉴가 아닌 본사 메뉴면 본사 레시피(저장 때 거래처 메뉴로 복사된다) -->
  <select id="draftDemand" resultType="map">
-  SELECT rd.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw,rd.ingredient_name_raw) ingredient_name,
-         i.base_unit master_unit,rd.base_unit,
-         CASE WHEN rd.review_flag=0 THEN rd.qty_per_person*d.planned_servings END quantity,
-         m.menu_name,d.menu_id,d.meal_date
+  SELECT COALESCE(ar.ingredient_id,hr.ingredient_id) ingredient_id,
+         COALESCE(i.ingredient_name_std,i.ingredient_name_raw,hi.ingredient_name_std,hi.ingredient_name_raw,ar.ingredient_name_raw,hr.ingredient_name_raw) ingredient_name,
+         COALESCE(i.base_unit,hi.base_unit) master_unit,COALESCE(ar.base_unit,hr.base_unit) base_unit,
+         CASE WHEN COALESCE(ar.review_flag,hr.review_flag)=0 THEN COALESCE(ar.qty_per_person,hr.qty_per_person)*d.planned_servings END quantity,
+         COALESCE(m.menu_name,hm.menu_name) menu_name,d.menu_id,d.meal_date
     FROM (
       <foreach collection="draft_meals" item="meal" separator=" UNION ALL ">
        SELECT #{meal.menu_id} menu_id,#{meal.planned_servings} planned_servings,
@@ -14,8 +16,11 @@
       </foreach>
     ) d
     LEFT JOIN the_full_order.tb_account_menu_master m ON m.account_id=#{account_id} AND m.menu_id=d.menu_id AND m.del_yn='N'
-    LEFT JOIN the_full_order.tb_account_recipe_detail rd ON rd.account_id=m.account_id AND rd.menu_id=m.menu_id
-    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=rd.account_id AND i.ingredient_id=rd.ingredient_id
+    LEFT JOIN the_full_order.tb_account_recipe_detail ar ON ar.account_id=m.account_id AND ar.menu_id=m.menu_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ar.account_id AND i.ingredient_id=ar.ingredient_id
+    LEFT JOIN the_full_order.tb_menu_master hm ON m.menu_id IS NULL AND hm.menu_id=d.menu_id AND hm.del_yn='N'
+    LEFT JOIN the_full_order.tb_recipe_detail hr ON hr.menu_id=hm.menu_id
+    LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
  </select>
  <!-- 이미 지난 날짜인데 아직 사용 확정하지 않은 식사(주 단위 확정 전). 실제로는 소비됐으므로 재고에서 뺀다.
       조회 기간(date_from 이후)은 demand에서 세므로 제외하고, 2주 넘게 방치된 식단은 계산하지 않는다. 식단표 필터와 무관하게 거래처 전체. -->
@@ -39,23 +44,21 @@
      AND ms.meal_date BETWEEN #{date_from} AND #{date_to}
    <if test="table_id!=null and table_id!=''">AND ms.table_id=#{table_id}</if>
  </select>
+ <!-- 식재료별 사용 가능 재고(격리·반품·유통기한 지난 LOT 제외) -->
  <select id="stock" resultType="map">
   SELECT <include refid="ingredientColumns"/>,
     GREATEST(b.current_base_qty-COALESCE((SELECT SUM(l.remaining_base_qty) FROM the_full_order.tb_account_inventory_lot l
-      WHERE l.account_id=b.account_id AND l.account_ingredient_product_id=b.account_ingredient_product_id AND l.location_id=b.location_id
+      WHERE l.account_id=b.account_id AND l.ingredient_id=b.ingredient_id AND l.location_id=b.location_id
         AND (l.status NOT IN ('AVAILABLE','CONSUMED') OR l.expiration_date&lt;#{date_from})),0),0) quantity,b.base_unit
     FROM the_full_order.tb_account_inventory_balance b
-    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=b.account_ingredient_product_id AND ap.account_id=b.account_id
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ap.account_id AND i.ingredient_id=ap.mapped_ingredient_id
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=b.account_id AND i.ingredient_id=b.ingredient_id
    WHERE b.account_id=#{account_id}
  </select>
+ <!-- 거래처 식재료에 둔 안전재고(설정값) -->
  <select id="targets" resultType="map">
-  SELECT <include refid="ingredientColumns"/>,ap.safe_stock_base_qty quantity,COALESCE(ap.link_base_unit,p.base_unit) base_unit
-    FROM the_full_order.tb_account_ingredient_product ap
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ap.account_id AND i.ingredient_id=ap.mapped_ingredient_id
-   WHERE ap.account_id=#{account_id} AND ap.active_yn='Y'
+  SELECT <include refid="ingredientColumns"/>,i.safe_stock_base_qty quantity,i.base_unit
+    FROM the_full_order.tb_account_ingredient_master i
+   WHERE i.account_id=#{account_id} AND i.active_yn='Y' AND i.safe_stock_base_qty&gt;0
  </select>
  <select id="history" resultType="map">
   SELECT <include refid="ingredientColumns"/>,r.quantity,r.base_unit,ms.meal_date
@@ -65,6 +68,7 @@
    WHERE ms.account_id=#{account_id} AND ms.status='COMPLETED' AND r.reversed_at IS NULL
      AND ms.meal_date&gt;=DATE_SUB(CURRENT_DATE,INTERVAL #{average_days} DAY) AND ms.meal_date&lt;=CURRENT_DATE
  </select>
+ <!-- 입고 예정: 재고에 넣을 식재료가 정해진 발주 품목만(상품만 발주한 줄은 입고 때 식재료를 정하므로 여기서 세지 않는다) -->
  <select id="incoming" resultType="map">
   SELECT <include refid="ingredientColumns"/>,
          GREATEST(oi.order_qty-COALESCE(oi.received_order_qty,0),0)*oi.base_qty_per_order_unit quantity,oi.base_unit,
@@ -72,10 +76,22 @@
          po.purchase_order_id
     FROM the_full_order.tb_account_purchase_order po
     JOIN the_full_order.tb_account_purchase_order_item oi ON oi.purchase_order_id=po.purchase_order_id
-    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=oi.account_ingredient_product_id
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=po.account_id AND i.ingredient_id=COALESCE(NULLIF(oi.source_ingredient_id,''),ap.mapped_ingredient_id)
+    JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=po.account_id AND i.ingredient_id=oi.source_ingredient_id
    WHERE po.account_id=#{account_id} AND po.requested_delivery_date&lt;=#{date_to}
      AND po.status NOT IN ('CANCELED','FAILED','RECEIVED') AND oi.item_status NOT IN ('CANCELED','FAILED','RECEIVED')
+ </select>
+ <!-- 나만의 메뉴(거래처=ACCOUNT, 본사=USER)에 쓰인 식재료. 거래처 메뉴 레시피가 있으면 그것, 없으면 본사 레시피 -->
+ <select id="favoriteMenuIngredients" resultType="map">
+  SELECT DISTINCT COALESCE(ar.ingredient_id,hr.ingredient_id) ingredient_id,
+         COALESCE(i.ingredient_name_std,i.ingredient_name_raw,hi.ingredient_name_std,hi.ingredient_name_raw) ingredient_name,
+         COALESCE(i.base_unit,hi.base_unit) master_unit,hm.menu_name
+    FROM the_full_order.tb_favorite_menu f
+    JOIN the_full_order.tb_menu_master hm ON hm.menu_id=f.menu_id AND hm.del_yn='N'
+    LEFT JOIN the_full_order.tb_account_menu_master m ON m.account_id=#{account_id} AND m.menu_id=f.menu_id AND m.del_yn='N'
+    LEFT JOIN the_full_order.tb_account_recipe_detail ar ON ar.account_id=m.account_id AND ar.menu_id=m.menu_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ar.account_id AND i.ingredient_id=ar.ingredient_id
+    LEFT JOIN the_full_order.tb_recipe_detail hr ON m.menu_id IS NULL AND hr.menu_id=hm.menu_id
+    LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+   WHERE f.owner_type=#{favorite_owner_type} AND f.owner_id=#{favorite_owner_id}
  </select>
 </mapper>

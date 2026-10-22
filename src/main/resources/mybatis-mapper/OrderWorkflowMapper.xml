@@ -6,71 +6,6 @@
     WHERE im.account_id=#{account_id} AND im.ingredient_id=#{source_ingredient_id}
     FOR UPDATE
   </select>
-  <select id="sourceLinks" resultType="map">
-    SELECT ap.account_ingredient_product_id,ap.supplier_product_id,ap.preferred_yn FROM the_full_order.tb_account_ingredient_product ap
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-    WHERE ap.account_id=#{account_id} AND ap.active_yn='Y'
-      AND ap.mapped_ingredient_id=#{source_ingredient_id} FOR UPDATE
-  </select>
-  <select id="lockAccountProduct" resultType="map">
-    SELECT ap.* FROM the_full_order.tb_account_ingredient_product ap
-    WHERE ap.account_id=#{account_id} AND ap.supplier_product_id=#{supplier_product_id} FOR UPDATE
-  </select>
-  <select id="linkContext" resultType="map">
-    SELECT ap.account_ingredient_product_id,ap.supplier_product_id,ap.mapped_ingredient_id,
-           ap.active_yn,ap.preferred_yn,ap.mod_at
-    FROM the_full_order.tb_account_ingredient_product ap
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
-    WHERE ap.account_id=#{account_id} AND
-      (ap.mapped_ingredient_id=#{source_ingredient_id} OR ap.supplier_product_id=#{supplier_product_id})
-    ORDER BY ap.account_ingredient_product_id FOR UPDATE
-  </select>
-  <insert id="ensureAccountProduct">
-    INSERT INTO the_full_order.tb_account_ingredient_product
-      (account_id,supplier_product_id,preferred_yn,default_location_id,active_yn,user_id)
-    VALUES(#{account_id},#{supplier_product_id},'N','L999','Y',#{user_id})
-    ON DUPLICATE KEY UPDATE account_ingredient_product_id=account_ingredient_product_id
-  </insert>
-  <update id="linkReceivedProduct">
-    UPDATE the_full_order.tb_account_ingredient_product SET mapped_ingredient_id=#{source_ingredient_id},
-      link_base_qty=#{base_qty_per_order_unit},link_base_unit=#{base_unit},active_yn='Y',mod_at=NOW()
-    WHERE account_id=#{account_id} AND account_ingredient_product_id=#{account_ingredient_product_id}
-      AND supplier_product_id=#{supplier_product_id}
-      AND COALESCE(mapped_ingredient_id,'')=COALESCE(#{target_mapping_snapshot},'')
-  </update>
-  <update id="updateLinkStatus">
-    UPDATE the_full_order.tb_account_purchase_order_item SET ingredient_link_status=#{ingredient_link_status}
-    WHERE client_ord_item=#{client_ord_item} AND purchase_order_id=#{purchase_order_id}
-      AND ingredient_link_status='PENDING'
-  </update>
-  <update id="clearSourcePreferred">
-    UPDATE the_full_order.tb_account_ingredient_product SET preferred_yn='N',mod_at=NOW()
-    WHERE account_id=#{account_id} AND mapped_ingredient_id=#{source_ingredient_id} AND preferred_yn='Y'
-  </update>
-  <update id="setSourcePreferred">
-    UPDATE the_full_order.tb_account_ingredient_product SET preferred_yn='Y',mod_at=NOW()
-    WHERE account_id=#{account_id} AND mapped_ingredient_id=#{source_ingredient_id}
-      AND supplier_product_id=#{supplier_product_id} AND active_yn='Y'
-  </update>
-  <update id="updateProductSnapshot">
-    UPDATE the_full_order.tb_account_purchase_order_item SET product_snapshot=#{product_snapshot}
-    WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item}
-  </update>
-  <select id="newerAcceptedSourceOrders" resultType="int">
-    SELECT COUNT(*) FROM the_full_order.tb_account_purchase_order_item i
-    JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
-    WHERE po.account_id=#{account_id} AND i.source_ingredient_id=#{source_ingredient_id}
-      AND i.item_status IN ('ORDERED','CONFIRMED','RECEIVED','PARTIAL_RECEIVED')
-      AND i.purchase_order_item_id &gt; (SELECT purchase_order_item_id FROM the_full_order.tb_account_purchase_order_item
-        WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item})
-  </select>
-  <select id="productStockUnits" resultType="string">
-    SELECT DISTINCT b.base_unit FROM the_full_order.tb_account_inventory_balance b
-    WHERE b.account_id=#{account_id} AND b.account_ingredient_product_id=#{account_ingredient_product_id}
-      AND (b.current_base_qty&lt;&gt;0 OR EXISTS (SELECT 1 FROM the_full_order.tb_account_inventory_lot l
-        WHERE l.account_id=b.account_id AND l.account_ingredient_product_id=b.account_ingredient_product_id
-          AND l.location_id=b.location_id AND l.remaining_base_qty&gt;0))
-  </select>
   <select id="lockSupplier" resultType="long">SELECT supplier_id FROM the_full_order.tb_supplier WHERE supplier_id=#{supplier_id} FOR UPDATE</select>
   <select id="clientOrderKeys" resultType="string">
     SELECT client_ord FROM the_full_order.tb_account_purchase_order WHERE supplier_id=#{supplier_id} AND sold_to=#{sold_to}
@@ -101,15 +36,17 @@
     <if test="supplier_id != null and supplier_id != ''">AND po.supplier_id=#{supplier_id}</if>
     ORDER BY po.created_at DESC,po.purchase_order_id DESC LIMIT #{limit} OFFSET #{offset}
   </select>
+  <!-- 발주 품목. ingredient_id = 재고에 넣을 거래처 식재료(source_ingredient_id). 비어 있으면 입고할 때 사람이 고른다 -->
   <select id="items" resultType="map">
-    SELECT i.*,po.account_id,po.supplier_id,po.sold_to,po.client_ord,p.supplier_product_id,
-           COALESCE(i.source_ingredient_id,ap.mapped_ingredient_id) ingredient_id,
-           COALESCE(i.product_name_snapshot,p.product_name) product_name,
-           ap.default_location_id,ss.supplier_account_site_id
+    SELECT i.*,po.account_id,po.supplier_id,po.sold_to,po.client_ord,
+           NULLIF(i.source_ingredient_id,'') ingredient_id,
+           COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,ai.base_unit ingredient_base_unit,
+           COALESCE(i.product_name_snapshot,p.product_name) product_name,p.base_qty product_base_qty,p.base_unit product_base_unit,
+           p.alt_base_qty,p.alt_base_unit,ai.default_location_id,ss.supplier_account_site_id
     FROM the_full_order.tb_account_purchase_order_item i
     JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
-    JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=i.account_ingredient_product_id
-    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+    JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=po.account_id AND ai.ingredient_id=i.source_ingredient_id
     LEFT JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
     WHERE po.account_id=#{account_id} AND po.purchase_order_id=#{purchase_order_id} ORDER BY i.purchase_order_item_id
     <if test="lock_rows != null and lock_rows">FOR UPDATE</if>
@@ -121,12 +58,12 @@
   </insert>
   <insert id="insertItem">
     INSERT INTO the_full_order.tb_account_purchase_order_item
-    (purchase_order_id,client_ord_item,account_ingredient_product_id,menu_id,supplier_item_code,order_qty,order_unit,
+    (purchase_order_id,client_ord_item,supplier_product_id,menu_id,supplier_item_code,order_qty,order_unit,
      base_qty_per_order_unit,base_unit,unit_price_snapshot,line_amount,item_status,
-     source_ingredient_id,product_name_snapshot,product_snapshot,target_mapping_snapshot,ingredient_link_status,link_context_snapshot)
-    VALUES(#{purchase_order_id},#{client_ord_item},#{account_ingredient_product_id},NULLIF(#{menu_id},''),#{supplier_item_code},#{order_qty},#{order_unit},
+     source_ingredient_id,product_name_snapshot,product_snapshot)
+    VALUES(#{purchase_order_id},#{client_ord_item},#{supplier_product_id},NULLIF(#{menu_id},''),#{supplier_item_code},#{order_qty},#{order_unit},
       #{base_qty},#{base_unit},#{purchase_price},#{line_amount},'SENDING',
-      NULLIF(#{source_ingredient_id},''),#{product_name_snapshot},#{product_snapshot},#{target_mapping_snapshot},#{ingredient_link_status},#{link_context_snapshot})
+      NULLIF(#{source_ingredient_id},''),#{product_name_snapshot},#{product_snapshot})
   </insert>
   <update id="updateOrder">
     UPDATE the_full_order.tb_account_purchase_order SET status=#{status},supplier_result_code=#{supplier_result_code},
@@ -158,11 +95,18 @@
       JSON_OBJECT('purchase_order_id',#{purchase_order_id},'account_id',#{account_id},'sold_to',#{sold_to}),#{response_payload},#{status},
       #{supplier_result_code},#{supplier_result_message},NOW(),NOW())
   </insert>
+  <!-- 입고 대상 식재료 재고 행(없으면 0으로 만든다) -->
   <insert id="ensureBalance">
-    INSERT INTO the_full_order.tb_account_inventory_balance(account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,user_id)
-    VALUES(#{account_id},#{account_ingredient_product_id},#{location_id},0,#{base_unit},#{user_id})
+    INSERT INTO the_full_order.tb_account_inventory_balance(account_id,ingredient_id,location_id,current_base_qty,base_unit,current_unit,user_id)
+    VALUES(#{account_id},#{ingredient_id},#{location_id},0,#{base_unit},#{base_unit},#{user_id})
     ON DUPLICATE KEY UPDATE inventory_balance_id=inventory_balance_id
   </insert>
+  <!-- 식재료 없이 상품만 발주한 품목: 입고할 때 고른 식재료와 1포장당 식재료 기준단위 수량을 품목에 기록(이후 분할 입고도 같은 식재료로) -->
+  <update id="assignItemIngredient">
+    UPDATE the_full_order.tb_account_purchase_order_item
+       SET source_ingredient_id=#{ingredient_id},base_qty_per_order_unit=#{base_qty_per_order_unit},base_unit=#{base_unit},mod_at=NOW()
+     WHERE purchase_order_item_id=#{purchase_order_item_id} AND (source_ingredient_id IS NULL OR source_ingredient_id='' OR received_order_qty=0)
+  </update>
   <select id="receiptItem" resultType="map">
     SELECT i.* FROM the_full_order.tb_goods_receipt_item i JOIN the_full_order.tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
     WHERE r.account_id=#{account_id} AND r.supplier_id=#{supplier_id} AND i.provider_line_key=#{provider_line_key} LIMIT 1

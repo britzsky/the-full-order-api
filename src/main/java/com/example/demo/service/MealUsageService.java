@@ -173,9 +173,10 @@ public class MealUsageService {
                 BigDecimal openingBalance=n(balance.get("current_base_qty")).subtract(lotTotal);
                 List<Map<String,Object>> usableLots=lots.stream().filter(l->"AVAILABLE".equals(l.get("status")))
                     .filter(l->l.get("expiration_date")==null || !java.time.LocalDate.parse(l.get("expiration_date").toString()).isBefore(java.time.LocalDate.parse(s.get("meal_date").toString()))).toList();
-                if(openingBalance.signum()>0) portions.add(new StockPortion(allocation, null, openingBalance, "", "원산지 미확인 (기존 재고)"));
+                if(openingBalance.signum()>0) portions.add(new StockPortion(allocation, null, openingBalance, "", "원산지 미확인 (기존 재고)", null));
                 for(var lot:usableLots) portions.add(new StockPortion(allocation, lot.get("inventory_lot_id"), n(lot.get("remaining_base_qty")),
-                    Objects.toString(lot.get("received_date"), ""), Objects.toString(lot.get("origin_name_snapshot"), "원산지 미확인")));
+                    Objects.toString(lot.get("received_date"), ""), Objects.toString(lot.get("origin_name_snapshot"), "원산지 미확인"),
+                    lot.get("product_name_snapshot")));
             }
             portions.sort(Comparator.comparing((StockPortion portion) -> portion.lot() != null)
                 .thenComparing(StockPortion::receivedDate).thenComparing(portion -> n(portion.lot())));
@@ -209,7 +210,7 @@ public class MealUsageService {
                 try { stockQty=QuantityUnits.convert(take,requirement.get("base_unit"),allocation.get("base_unit")).setScale(3,RoundingMode.UNNECESSARY); }
                 catch(ArithmeticException e) { throw new IllegalArgumentException("재고 수량 단위의 정밀도를 확인해주세요."); }
                 if(stockQty.signum()<=0) throw new IllegalArgumentException("재고 최소 단위보다 작은 사용량입니다.");
-                post(allocation,portion.lot(),stockQty,portion.origin());
+                post(allocation,portion.lot(),stockQty,portion.origin(),portion.productName());
                 remaining=remaining.subtract(take);
             }
             if(remaining.signum()>0) {
@@ -228,11 +229,13 @@ public class MealUsageService {
         try { return QuantityUnits.convert(quantity,from,to); } catch(IllegalArgumentException e) { return quantity; }
     }
 
-    private record StockPortion(Map<String,Object> allocation, Object lot, BigDecimal quantity, String receivedDate, String origin) { }
+    /** 차감할 재고 조각: LOT 없는 기존 잔액 또는 입고 LOT(어느 공급사 상품이었는지 productName으로 남긴다). */
+    private record StockPortion(Map<String,Object> allocation, Object lot, BigDecimal quantity, String receivedDate, String origin, Object productName) { }
 
-    private void post(Map<String,Object> source,Object lot,BigDecimal quantity,String origin) {
+    private void post(Map<String,Object> source,Object lot,BigDecimal quantity,String origin,Object productName) {
         Map<String,Object> p=new HashMap<>(source);
         p.put("inventory_lot_id",lot); p.put("quantity",quantity); p.put("origin_name_snapshot",origin);
+        p.put("product_name_snapshot",productName);
         p.put("usage_id",UUID.randomUUID().toString());
         p.put("quantity_delta",quantity.negate());
         Map<String,Object> before=mapper.lockBalance(p);

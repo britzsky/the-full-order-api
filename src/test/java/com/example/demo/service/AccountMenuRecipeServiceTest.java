@@ -16,9 +16,6 @@ class AccountMenuRecipeServiceTest {
         assertThat(new AccountMenuRecipeService(mapper).registerMenu(body).get("code")).isEqualTo(200);
         verify(mapper).ensureMenuIngredient(argThat(p -> p.get("account_id").equals("A") && p.get("ingredient_id").equals("I")));
         verify(mapper).insertRecipeDetail(anyMap());
-        verify(mapper,never()).ensureSupplierProduct(anyMap());
-        verify(mapper,never()).ensureAccountProduct(anyMap());
-        verify(mapper,never()).ensureInventory(anyMap());
     }
     @Test void ingredientListRequiresAccount() {
         var mapper=mock(AccountMenuRecipeMapper.class);

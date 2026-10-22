@@ -12,7 +12,7 @@ public class StockAvailabilityService {
     @SuppressWarnings("unchecked")
     public void enrich(List<Map<String,Object>> rows,Map<String,Object> input,boolean menu) {
         Map<String,Object> p=new HashMap<>(input);
-        p.remove("sold_to"); p.put("include_sufficient",true);
+        p.remove("sold_to"); p.put("include_sufficient",true); p.put("skip_offers",true);
         if(menu) {
             p.put("source","DRAFT");
             p.put("draft_meals",List.of(Map.of("menu_id",input.get("menu_id"),"planned_servings",input.getOrDefault("servingQty",1))));

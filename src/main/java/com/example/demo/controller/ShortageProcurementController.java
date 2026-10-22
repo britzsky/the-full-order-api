@@ -3,9 +3,12 @@ package com.example.demo.controller;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.example.demo.security.FavoriteOwner;
 import com.example.demo.service.DeadlineAlertService;
 import com.example.demo.service.ShortageProcurementService;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/Procurement")
@@ -34,8 +37,10 @@ public class ShortageProcurementController {
 	 * part : 부족 발주 method : shortages comment : 부족 식자재 조회 (필요량 + 안전재고 - 사용가능 현재고 - 미입고량)
 	 */
 	@GetMapping("/Shortages")
-	public ResponseEntity<?> shortages(@RequestParam Map<String, Object> p) {
+	public ResponseEntity<?> shortages(@RequestParam Map<String, Object> p, HttpServletRequest request) {
 		try {
+			// 나만의 메뉴 기준(FAVORITE_MENU)과 하트 상품 표시는 로그인 주인(현장=거래처, 본사=사용자) 기준
+			FavoriteOwner.of(request, p).applyTo(p);
 			return ResponseEntity.ok(service.shortages(p));
 		} catch (IllegalArgumentException e) {
 			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
@@ -46,16 +51,20 @@ public class ShortageProcurementController {
 	 * part : 부족 발주 method : draftShortages comment : 부족 식자재 조회 (조건을 POST 본문으로 전달, GET과 동일 동작)
 	 */
 	@PostMapping("/Shortages")
-	public ResponseEntity<?> draftShortages(@RequestBody Map<String, Object> p) {
-		return shortages(p);
+	public ResponseEntity<?> draftShortages(@RequestBody Map<String, Object> p, HttpServletRequest request) {
+		return shortages(p, request);
 	}
 
 	/*
 	 * part : 부족 발주 method : preview comment : 선택한 부족 식자재·공급상품으로 발주 미리보기 (중복 선택·부족량 변경 검증)
 	 */
 	@PostMapping("/Preview")
-	public ResponseEntity<?> preview(@RequestBody JsonNode p) {
+	public ResponseEntity<?> preview(@RequestBody JsonNode p, HttpServletRequest request) {
 		try {
+			if (p.path("criteria") instanceof ObjectNode criteria) {
+				Map<String, Object> owner = FavoriteOwner.of(request, Map.of("account_id", criteria.path("account_id").asText(""))).applyTo(new java.util.HashMap<>());
+				owner.forEach((key, value) -> criteria.put(key, value.toString()));
+			}
 			return ResponseEntity.ok(service.preview(p));
 		} catch (IllegalArgumentException e) {
 			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));

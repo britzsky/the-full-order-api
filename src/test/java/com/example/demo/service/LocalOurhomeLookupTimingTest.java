@@ -27,12 +27,13 @@ class LocalOurhomeLookupTimingTest {
             var r=api.products(siteCode,date,keyword,"N","");
             System.out.printf("OH_KEYWORD %s ms=%d rows=%d total=%d next=%s%n",keyword,ms(t),r.products().size(),r.totalRow(),r.hasNext());
         }
-        // 2) 상품코드 조회(연결 상품 갱신을 코드별로 할 경우)
+        // 2) 상품코드 조회(이 거래처가 발주했던 아워홈 상품을 코드별로 갱신할 경우)
         List<String> codes=jdbc.queryForList("""
-                SELECT p.supplier_item_code FROM the_full_order.tb_account_ingredient_product ap
-                JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+                SELECT DISTINCT p.supplier_item_code FROM the_full_order.tb_account_purchase_order_item i
+                JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
+                JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
                 JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id AND s.supplier_code='OURHOME'
-                WHERE ap.account_id=? AND ap.mapped_ingredient_id IS NOT NULL LIMIT 20""",String.class,account);
+                WHERE po.account_id=? LIMIT 20""",String.class,account);
         long all=System.nanoTime(); int found=0;
         for(String code:codes) {
             long t=System.nanoTime();

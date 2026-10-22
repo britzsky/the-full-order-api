@@ -134,23 +134,61 @@ public class InventoryService {
 		if (value.signum() <= 0)
 			throw new IllegalArgumentException("convert_value must be greater than zero.");
 		body.put("convert_value", value);
+		// 본사 표준 단가(기준단위당 원). 거래처에 입고 이력이 없을 때 식단 원가 계산에 쓴다. 비우면 미등록.
+		Object standard = body.get("standard_unit_cost");
+		if (standard == null || standard.toString().isBlank()) {
+			body.put("standard_unit_cost", null);
+		} else {
+			BigDecimal cost;
+			try { cost = new BigDecimal(standard.toString().trim()); }
+			catch (NumberFormatException e) { throw new IllegalArgumentException("표준 단가는 숫자로 입력해주세요."); }
+			if (cost.signum() < 0 || cost.stripTrailingZeros().scale() > 6)
+				throw new IllegalArgumentException("표준 단가는 0 이상, 소수점 6자리 이하로 입력해주세요.");
+			body.put("standard_unit_cost", cost);
+		}
 	}
 
+	/** 식재료 재고 행을 만든다(이미 있으면 그 행). 수량은 기초재고 등록·조정으로 넣는다(금액 없는 재고를 만들지 않음). */
+	@Transactional
 	public Map<String, Object> create(Map<String, Object> body) {
-		require(body, "account_id", "account_ingredient_product_id", "base_unit");
-		normalizeCurrentQuantity(body, inventoryMapper.productPack(body));
-		inventoryMapper.insertInventory(body);
-		return ok(body.get("inventory_balance_id"));
+		require(body, "account_id", "ingredient_id");
+		Object id = ensureBalance(body);
+		body.put("inventory_balance_id", id);
+		return ok(id);
+	}
+
+	/** 거래처 식재료의 재고 행 ID. 없으면 수량 0으로 만든다(재고 기준단위 = 거래처 식재료 기준단위). */
+	Object ensureBalance(Map<String, Object> body) {
+		Map<String, Object> ingredient = inventoryMapper.accountIngredient(body);
+		if (ingredient == null)
+			throw new IllegalArgumentException("거래처 식재료를 찾을 수 없습니다.");
+		Map<String, Object> key = new java.util.HashMap<>(body);
+		key.put("base_unit", ingredient.get("base_unit"));
+		if (key.get("location_id") == null || key.get("location_id").toString().isBlank())
+			key.put("location_id", ingredient.get("default_location_id") == null ? "L999" : ingredient.get("default_location_id"));
+		inventoryMapper.ensureBalance(key);
+		Long id = inventoryMapper.balanceId(key);
+		if (id == null)
+			throw new IllegalStateException("재고 행을 만들지 못했습니다.");
+		return id;
+	}
+
+	/** 화면은 재고가 아직 없는 식재료도 보여주므로, 재고 행 ID가 없으면 거래처·식재료로 찾거나 만든다. */
+	private void resolveBalance(Map<String, Object> body) {
+		if (body.get("inventory_balance_id") != null && !body.get("inventory_balance_id").toString().isBlank())
+			return;
+		require(body, "account_id", "ingredient_id");
+		body.put("inventory_balance_id", ensureBalance(body));
 	}
 
 	@Transactional
 	public Map<String, Object> update(Map<String, Object> body) {
-		require(body, "inventory_balance_id");
+		resolveBalance(body);
 		Map<String, Object> stored = inventoryMapper.inventoryForUpdate(body);
 		if (stored == null)
 			throw new IllegalArgumentException("Inventory was not found.");
 		body.put("base_unit", stored.get("base_unit"));
-		normalizeCurrentQuantity(body, inventoryMapper.productPack(productKey(stored)));
+		normalizeCurrentQuantity(body);
 		BigDecimal before = decimal(stored.get("current_base_qty"));
 		BigDecimal after = body.get("current_base_qty") == null ? before : (BigDecimal) body.get("current_base_qty");
 		BigDecimal delta = after.subtract(before);
@@ -168,8 +206,11 @@ public class InventoryService {
 					: amountBefore.add(delta.multiply(average)).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
 			saveValued(body, stored, "ADJUST", before, after, average, amountBefore, amountAfter, "MANUAL", null);
 		}
-		if (body.get("account_ingredient_product_id") != null && body.get("safe_stock_base_qty") != null) {
-			inventoryMapper.updateAccountProduct(body);
+		if (body.get("safe_stock_base_qty") != null || body.get("max_stock_base_qty") != null || body.get("lead_time_days") != null) {
+			Map<String, Object> settings = new java.util.HashMap<>(body);
+			settings.put("account_id", stored.get("account_id"));
+			settings.put("ingredient_id", stored.get("ingredient_id"));
+			inventoryMapper.updateIngredientStockSettings(settings);
 		}
 		return ok(body.get("inventory_balance_id"));
 	}
@@ -182,14 +223,15 @@ public class InventoryService {
 	 */
 	@Transactional
 	public Map<String, Object> opening(Map<String, Object> body) {
-		require(body, "inventory_balance_id", "current_qty");
+		require(body, "current_qty");
+		resolveBalance(body);
 		Map<String, Object> stored = inventoryMapper.inventoryForUpdate(body);
 		if (stored == null)
 			throw new IllegalArgumentException("Inventory was not found.");
 		if (inventoryMapper.hasNonAdjustMovement(stored) > 0)
 			throw new IllegalArgumentException("이미 입고·사용·기초재고 이력이 있어 기초재고를 등록할 수 없습니다. 재고 조정을 사용해주세요.");
 		body.put("base_unit", stored.get("base_unit"));
-		normalizeCurrentQuantity(body, inventoryMapper.productPack(productKey(stored)));
+		normalizeCurrentQuantity(body);
 		boolean estimated = body.get("unit_cost") == null || body.get("unit_cost").toString().isBlank();
 		BigDecimal unitCost;
 		if (estimated) {
@@ -199,7 +241,7 @@ public class InventoryService {
 			List<Map<String, Object>> estimates = inventoryMapper.openingCostEstimates(key);
 			unitCost = estimatedCost(estimates.isEmpty() ? null : estimates.get(0), stored.get("base_unit"));
 			if (unitCost == null)
-				throw new IllegalArgumentException("공급가·입고 단가가 없어 단가를 추정할 수 없습니다. 기준단위당 단가를 직접 입력해주세요.");
+				throw new IllegalArgumentException("입고 단가·본사 표준 단가가 없어 단가를 추정할 수 없습니다. 기준단위당 단가를 직접 입력해주세요.");
 		} else {
 			unitCost = decimal(body.get("unit_cost"));
 		}
@@ -233,8 +275,8 @@ public class InventoryService {
 		Map<String, Object> movement = new java.util.HashMap<>();
 		movement.put("movement_id", movementId);
 		movement.put("account_id", stored.get("account_id"));
-		movement.put("account_ingredient_product_id", stored.get("account_ingredient_product_id"));
-		movement.put("location_id", body.get("location_id") != null ? body.get("location_id") : stored.get("location_id"));
+		movement.put("ingredient_id", stored.get("ingredient_id"));
+		movement.put("location_id", stored.get("location_id"));
 		movement.put("movement_type", type);
 		movement.put("quantity_delta", after.subtract(before));
 		movement.put("quantity_before", before);
@@ -250,51 +292,32 @@ public class InventoryService {
 		inventoryMapper.insertValuedMovement(movement);
 	}
 
-	private Map<String, Object> productKey(Map<String, Object> stored) {
-		Map<String, Object> key = new java.util.HashMap<>();
-		key.put("account_ingredient_product_id", stored.get("account_ingredient_product_id"));
-		return key;
-	}
-
 	private static BigDecimal decimal(Object value) {
 		return value == null || value.toString().isBlank() ? BigDecimal.ZERO : new BigDecimal(value.toString());
 	}
 
-	/**
-	 * 입력 수량을 재고 기준단위로 환산한다. kg↔g, L↔ml 외에 상품 발주단위도 받는다
-	 * (예: 계란 2 PAC → 이 거래처 연결 규격 1 PAC = 30 EA 로 60 EA). 발주단위로 입력하면 표시 단위는 기준단위로 저장한다.
-	 */
-	void normalizeCurrentQuantity(Map<String, Object> body, Map<String, Object> pack) {
+	/** 입력 수량을 재고 기준단위로 환산한다(kg↔g, L↔ml). 재고는 식재료 단위라 상품 포장 단위로는 받지 않는다. */
+	void normalizeCurrentQuantity(Map<String, Object> body) {
 		if (body.get("current_qty") == null)
 			return;
 		String base = body.get("base_unit") == null ? "" : body.get("base_unit").toString();
 		String current = body.get("current_unit") == null || body.get("current_unit").toString().isBlank() ? base
 				: body.get("current_unit").toString();
-		BigDecimal qty = new BigDecimal(body.get("current_qty").toString());
-		String orderUnit = pack == null || pack.get("order_unit") == null ? "" : pack.get("order_unit").toString();
-		BigDecimal packQty = pack == null || pack.get("pack_qty") == null ? BigDecimal.ZERO
-				: new BigDecimal(pack.get("pack_qty").toString());
-		String displayUnit = current;
-		if (!orderUnit.isBlank() && QuantityUnits.unit(current).equals(QuantityUnits.unit(orderUnit))
-				&& !QuantityUnits.unit(current).equals(QuantityUnits.unit(base)) && packQty.signum() > 0) {
-			qty = QuantityUnits.convert(qty.multiply(packQty), pack.get("pack_unit"), base);
-			displayUnit = base;
-		} else {
-			try {
-				qty = QuantityUnits.convert(qty, current, base);
-			} catch (IllegalArgumentException e) {
-				throw new IllegalArgumentException("'" + current + "' 단위는 이 재고의 기준단위(" + base
-						+ ")로 환산할 수 없습니다. 입력 가능한 단위: " + String.join(", ", allowedUnits(base, orderUnit, packQty)));
-			}
+		BigDecimal qty;
+		try {
+			qty = QuantityUnits.convert(new BigDecimal(body.get("current_qty").toString()), current, base);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("'" + current + "' 단위는 이 재고의 기준단위(" + base
+					+ ")로 환산할 수 없습니다. 입력 가능한 단위: " + String.join(", ", allowedUnits(base)));
 		}
 		if (qty.signum() < 0)
 			throw new IllegalArgumentException("재고는 음수일 수 없습니다.");
 		body.put("current_base_qty", qty);
-		body.put("current_unit", displayUnit);
+		body.put("current_unit", current);
 	}
 
-	/** 재고 입력 화면에서 고를 수 있는 단위: 기준단위, 같은 차원의 큰 단위, 상품 발주단위(규격이 있을 때) */
-	static java.util.List<String> allowedUnits(String base, String orderUnit, BigDecimal packQty) {
+	/** 재고 입력 화면에서 고를 수 있는 단위: 기준단위와 같은 차원의 큰 단위 */
+	static java.util.List<String> allowedUnits(String base) {
 		java.util.List<String> units = new java.util.ArrayList<>();
 		String b = QuantityUnits.unit(base);
 		units.add(b);
@@ -302,15 +325,13 @@ public class InventoryService {
 			units.add("kg");
 		if (b.equals("ml"))
 			units.add("L");
-		if (!orderUnit.isBlank() && packQty != null && packQty.signum() > 0 && !units.contains(QuantityUnits.unit(orderUnit)))
-			units.add(QuantityUnits.unit(orderUnit));
 		return units;
 	}
 
 	public Map<String, Object> delete(Map<String, Object> body) {
 		require(body, "inventory_balance_id");
 		if (inventoryMapper.deleteInventory(body) == 0)
-			throw new IllegalArgumentException("Inventory was not found.");
+			throw new IllegalArgumentException("재고가 남아 있거나 사용 이력이 있는 재고 행은 지울 수 없습니다.");
 		return ok(body.get("inventory_balance_id"));
 	}
 
@@ -326,7 +347,7 @@ public class InventoryService {
 		if (after.signum() < 0)
 			throw new IllegalArgumentException("Inventory cannot be negative.");
 		body.put("account_id", current.get("account_id"));
-		body.put("account_ingredient_product_id", current.get("account_ingredient_product_id"));
+		body.put("ingredient_id", current.get("ingredient_id"));
 		body.put("location_id", current.get("location_id"));
 		body.put("base_unit", current.get("base_unit"));
 		body.put("quantity_before", before);

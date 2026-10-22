@@ -135,29 +135,22 @@ public class MenuService {
 		}
 	}
 
-	// 나만의 메뉴 조회
+	// 나만의 메뉴 조회 (본사 메뉴. 주인은 FavoriteOwner가 채운 favorite_owner_*)
 	public List<Map<String, Object>> LikeMenuList(Map<String, Object> paramMap) {
-		List<Map<String, Object>> resultList = new ArrayList<>();
-		resultList = menuMapper.LikeMenuList(paramMap);
-		return resultList;
+		return menuMapper.LikeMenuList(paramMap);
 	}
 
-	// 나만의 메뉴 저장
+	// 나만의 메뉴 지정(like=Y)·해제(like=N). 이미 같은 상태여도 성공으로 본다.
 	public int LikeMenuSave(Map<String, Object> paramMap) {
-		return menuMapper.LikeMenuSave(paramMap);
-	};
-
-	// 나만의 식자재 조회
-	public List<Map<String, Object>> LikeIngredientsList(Map<String, Object> paramMap) {
-		List<Map<String, Object>> resultList = new ArrayList<>();
-		resultList = menuMapper.LikeIngredientsList(paramMap);
-		return resultList;
+		Object menuId = paramMap.get("menu_id");
+		if (menuId == null || menuId.toString().isBlank())
+			throw new IllegalArgumentException("메뉴 선택 요망");
+		if ("N".equals(String.valueOf(paramMap.get("like"))))
+			menuMapper.LikeMenuDelete(paramMap);
+		else
+			menuMapper.LikeMenuSave(paramMap);
+		return 1;
 	}
-
-	// 나만의 식자재 저장
-	public int LikeIngredientsSave(Map<String, Object> paramMap) {
-		return menuMapper.LikeIngredientsSave(paramMap);
-	};
 
 	@Transactional
 	public int RecipeSave(Map<String, Object> recipeInfo, List<Map<String, Object>> imageList,

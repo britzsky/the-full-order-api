@@ -28,6 +28,9 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletRequest;
+
+import com.example.demo.security.FavoriteOwner;
 import com.example.demo.service.MenuService;
 import com.example.demo.service.AccountMenuRecipeService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -313,7 +316,8 @@ public class MenuController {
 	 * part : 거래처 메뉴관리 method : AccountMenuList comment : 거래처 메뉴 조회
 	 */
 	@GetMapping("/Menu/AccountMenuList")
-	public List<Map<String, Object>> AccountMenuList(@RequestParam Map<String, Object> paramMap) {
+	public List<Map<String, Object>> AccountMenuList(@RequestParam Map<String, Object> paramMap, HttpServletRequest request) {
+		FavoriteOwner.of(request, paramMap).applyTo(paramMap);
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = menuService.AccountMenuList(paramMap);
 
@@ -343,62 +347,27 @@ public class MenuController {
 	}
 
 	/*
-	 * part : 나만의 메뉴 method : LikeMenuList comment : 나만의 메뉴 조회
+	 * part : 나만의 메뉴 method : LikeMenuList comment : 나만의 메뉴(본사 메뉴) 조회. 현장은 거래처 단위, 본사는 사용자 단위
 	 */
 	@GetMapping("/Menu/LikeMenuList")
-	public List<Map<String, Object>> LikeMenuList(@RequestParam Map<String, Object> paramMap) {
-		List<Map<String, Object>> resultList = new ArrayList<>();
-		resultList = menuService.LikeMenuList(paramMap);
-
-		return resultList;
+	public List<Map<String, Object>> LikeMenuList(@RequestParam Map<String, Object> paramMap, HttpServletRequest request) {
+		return menuService.LikeMenuList(FavoriteOwner.of(request, paramMap).applyTo(paramMap));
 	}
 
 	/*
-	 * part : 나만의 메뉴 method : LikeMenuSave comment : 나만의 메뉴 저장
+	 * part : 나만의 메뉴 method : LikeMenuSave comment : 나만의 메뉴 지정(like=Y)·해제(like=N)
 	 */
 	@PostMapping("/Menu/LikeMenuSave")
-	public String LikeMenuSave(@RequestBody Map<String, Object> paramMap) {
-		int iResult = menuService.LikeMenuSave(paramMap);
+	public String LikeMenuSave(@RequestBody Map<String, Object> paramMap, HttpServletRequest request) {
 		JsonObject obj = new JsonObject();
-
-		if (iResult > 0) {
+		try {
+			menuService.LikeMenuSave(FavoriteOwner.of(request, paramMap).applyTo(paramMap));
 			obj.addProperty("code", 200);
 			obj.addProperty("message", "success");
-		} else {
+		} catch (IllegalArgumentException e) {
 			obj.addProperty("code", 400);
-			obj.addProperty("message", "fail");
+			obj.addProperty("message", e.getMessage());
 		}
-
-		return obj.toString();
-	}
-
-	/*
-	 * part : 나만의 메뉴 method : LikeIngredientsList comment : 나만의 식자재 조회
-	 */
-	@GetMapping("/Menu/LikeIngredientsList")
-	public List<Map<String, Object>> LikeIngredientsList(@RequestParam Map<String, Object> paramMap) {
-		List<Map<String, Object>> resultList = new ArrayList<>();
-		resultList = menuService.LikeIngredientsList(paramMap);
-
-		return resultList;
-	}
-
-	/*
-	 * part : 나만의 메뉴 method : LikeIngredientsSave comment : 나만의 식자재 저장
-	 */
-	@PostMapping("/Menu/LikeIngredientsSave")
-	public String LikeIngredientsSave(@RequestBody Map<String, Object> paramMap) {
-		int iResult = menuService.LikeIngredientsSave(paramMap);
-		JsonObject obj = new JsonObject();
-
-		if (iResult > 0) {
-			obj.addProperty("code", 200);
-			obj.addProperty("message", "success");
-		} else {
-			obj.addProperty("code", 400);
-			obj.addProperty("message", "fail");
-		}
-
 		return obj.toString();
 	}
 

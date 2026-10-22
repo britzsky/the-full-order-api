@@ -54,7 +54,6 @@ public class OrderWorkflowService {
 		List<Map<String, Object>> orders = mapper.orders(p);
 		for (Map<String, Object> order : orders)
 			order.put("items", mapper.items(order));
-		for (Map<String, Object> order : orders) order.put("preference_changes", preferenceChanges(order));
 		return Map.of("orders", orders, "limit", p.get("limit"), "offset", p.get("offset"));
 	}
 
@@ -117,7 +116,9 @@ public class OrderWorkflowService {
 			Map<String, Object> row = new LinkedHashMap<>(offers.get(0));
 			OrderAvailability.requireAvailable(row, date, item.path("delivery_terms_confirmed").asBoolean(false));
 			row.put("delivery_terms_confirmed", item.path("delivery_terms_confirmed").asBoolean(false));
-			String ingredientId = text(row.get("ingredient_id"));
+			// 재고에 넣을 식재료는 화면이 고른 값(식단·부족 재고 발주). 상품만 검색해 담은 줄은 비어 있고 입고 때 고른다.
+			String ingredientId = item.path("source_ingredient_id").asText(item.path("ingredient_id").asText("")).trim();
+			row.put("ingredient_id", ingredientId);
 			if (!ingredientId.isBlank() && !ingredientIds.add(ingredientId))
 				throw new IllegalArgumentException("동일 식재료는 합산하여 한 번만 발주해주세요: " + ingredientId);
 			if (!"ACTIVE".equals(row.get("product_status"))
@@ -161,7 +162,9 @@ public class OrderWorkflowService {
 			row.put("purchase_order_id", id);
 			row.put("account_id", account);
 			row.put("user_id", header.path("user_id").asText(""));
-			row.put("source_ingredient_id", item.path("source_ingredient_id").asText(item.path("ingredient_id").asText("")));
+			row.put("source_ingredient_id", ingredientId);
+			if (item.hasNonNull("stock_base_qty_per_unit"))
+				row.put("stock_base_qty_per_unit", item.path("stock_base_qty_per_unit").asText());
 			row.put("product_name_snapshot", row.get("product_name"));
 			ObjectNode snapshot = json.valueToTree(row);
 			snapshot.set("provider_realtime_product", data.deepCopy());
@@ -359,12 +362,6 @@ public class OrderWorkflowService {
 		tx.executeWithoutResult(s -> {
 			mapper.lockOrder(p);
 			rows.forEach(mapper::updateItem);
-			for (var row : mapper.items(p)) {
-				if (Set.of("ORDERED", "CONFIRMED").contains(text(row.get("item_status")))) {
-					row.put("account_id", p.get("account_id"));
-					new OrderProductLinking(mapper, json).apply(row, true);
-				}
-			}
 			mapper.updateOrder(p);
 			if (!reconcile)
 				mapper.finishExchange(p);
@@ -435,84 +432,38 @@ public class OrderWorkflowService {
 					"RECEIVED", "PARTIAL_RECEIVED", "NOT_RECEIVED", "CANCELED").contains(text(i.get("item_status"))));
 		}
 		return Map.of("purchase_order_id", p.get("purchase_order_id"), "status", status, "replayed", replay, "message",
-				text(p.get("supplier_result_message")), "requires_reconciliation", unresolved,
-				"preference_changes", preferenceChanges(p));
+				text(p.get("supplier_result_message")), "requires_reconciliation", unresolved);
 	}
 
-	private List<Map<String,Object>> preferenceChanges(Map<String,Object> p) {
-		List<Map<String,Object>> changes = new ArrayList<>();
-		var linking = new OrderProductLinking(mapper, json);
-		for (var row : mapper.items(p)) {
-			var change = linking.snapshot(row).path("automatic_preference");
-			if (change.isObject()) changes.add(Map.of("client_ord_item", text(row.get("client_ord_item")),
-				"ingredient_id", text(row.get("source_ingredient_id")), "product_name", text(row.get("product_name")),
-				"undone", change.path("undone").asBoolean()));
-		}
-		return changes;
-	}
-
-	public Map<String,Object> undoPreference(Map<String,Object> input) {
-		required(input, "account_id"); required(input, "purchase_order_id"); required(input, "client_ord_item");
-		return tx.execute(status -> {
-			if (mapper.lockOrder(input) == null) throw new IllegalArgumentException("발주서를 찾을 수 없습니다.");
-			var row = mapper.items(input).stream().filter(item -> text(item.get("client_ord_item")).equals(text(input.get("client_ord_item"))))
-				.findFirst().orElseThrow(() -> new IllegalArgumentException("발주 품목을 찾을 수 없습니다."));
-			new OrderProductLinking(mapper, json).undo(row);
-			return Map.of("code", 200, "message", "이전 우선 상품으로 되돌렸습니다.");
-		});
-	}
-
+	/**
+	 * 발주 품목의 재고 환산. 식재료를 정한 줄은 상품 규격(대표·두 번째) 중 식재료 기준단위로 바꿀 수 있는 것을 쓰고,
+	 * 바꿀 수 없으면(EA 상품 ↔ g 식재료 등) 화면이 입력한 '1포장당 식재료 수량'(stock_base_qty_per_unit)을 쓴다.
+	 * 식재료를 정하지 않은 줄은 상품 대표 규격으로 저장하고 입고 때 식재료와 환산값을 다시 정한다.
+	 */
 	private void prepareProduct(Map<String, Object> row) {
-		row.put("ingredient_link_status", "NONE");
-		if (!text(row.get("source_ingredient_id")).isBlank()) {
-			Map<String, Object> source = mapper.lockSourceIngredient(row);
-			if (source == null || source.isEmpty()) throw new IllegalArgumentException("거래처의 원본 식자재를 찾을 수 없습니다.");
-			var packs = new ArrayList<QuantityUnits.Pack>();
-			packs.add(new QuantityUnits.Pack(number(row.get("base_qty")), text(row.get("base_unit"))));
-			packs.add(new QuantityUnits.Pack(number(row.get("alt_base_qty")), text(row.get("alt_base_unit"))));
-			var pack = QuantityUnits.packFor(packs, source.get("base_unit"));
-			if (pack == null) throw new IllegalArgumentException("상품을 식재료 기준단위로 환산할 수 없습니다.");
-			row.put("base_qty", pack.quantity()); row.put("base_unit", pack.baseUnit());
-			row.put("ingredient_link_status", "PENDING");
+		if (text(row.get("supplier_product_id")).isBlank())
+			throw new IllegalArgumentException("공급사 상품을 확인할 수 없습니다: " + text(row.get("supplier_item_code")));
+		if (text(row.get("source_ingredient_id")).isBlank())
+			return;
+		Map<String, Object> source = mapper.lockSourceIngredient(row);
+		if (source == null || source.isEmpty())
+			throw new IllegalArgumentException("재고에 넣을 거래처 식재료를 찾을 수 없습니다: " + text(row.get("source_ingredient_id")));
+		BigDecimal manual = number(row.get("stock_base_qty_per_unit"));
+		if (manual.signum() > 0) {
+			row.put("base_qty", manual);
+			row.put("base_unit", QuantityUnits.unit(source.get("base_unit")));
+			return;
 		}
-		mapper.ensureAccountProduct(row);
-		Map<String, Object> product = mapper.lockAccountProduct(row);
-		if (product == null) throw new IllegalArgumentException("거래처 상품을 등록하지 못했습니다.");
-		row.put("account_ingredient_product_id", product.get("account_ingredient_product_id"));
-		row.put("target_mapping_snapshot", product.get("mapped_ingredient_id"));
-		var context = "PENDING".equals(row.get("ingredient_link_status")) ? mapper.linkContext(row) : List.<Map<String,Object>>of();
-		row.put("link_context_snapshot", "PENDING".equals(row.get("ingredient_link_status")) ? linkContextFingerprint(context) : null);
-		if ("PENDING".equals(row.get("ingredient_link_status"))) {
-			var stockUnits = mapper.productStockUnits(row);
-			if (!stockUnits.isEmpty()) {
-				String stockUnit = QuantityUnits.unit(stockUnits.get(0));
-				if (stockUnits.stream().anyMatch(unit -> !QuantityUnits.unit(unit).equals(stockUnit)))
-					throw new IllegalArgumentException("기존 재고의 단위를 확인해주세요.");
-				row.put("base_qty", QuantityUnits.convert(number(row.get("base_qty")), row.get("base_unit"), stockUnit));
-				row.put("base_unit", stockUnit);
-			}
-			ObjectNode snapshot = new OrderProductLinking(mapper, json).snapshot(row);
-			snapshot.set("link_context", json.valueToTree(context.stream().map(link -> {
-				Map<String,String> values = new LinkedHashMap<>();
-				link.forEach((key,value) -> values.put(key, text(value)));
-				return values;
-			}).toList()));
-			snapshot.put("base_qty", number(row.get("base_qty"))); snapshot.put("base_unit", text(row.get("base_unit")));
-			row.put("product_snapshot", snapshot.toString());
-		}
-		if ("PENDING".equals(row.get("ingredient_link_status")) && !text(product.get("mapped_ingredient_id")).isBlank()
-				&& !text(product.get("mapped_ingredient_id")).equals(text(row.get("source_ingredient_id"))))
-			throw new IllegalArgumentException("선택 상품은 다른 식자재에 연결되어 있습니다. 상품 연결을 먼저 확인해주세요.");
-	}
-
-	static String linkContextFingerprint(List<Map<String, Object>> rows) {
-		StringBuilder context = new StringBuilder();
-		for (Map<String, Object> row : rows)
-			for (String key : List.of("account_ingredient_product_id", "supplier_product_id", "mapped_ingredient_id", "active_yn", "preferred_yn", "mod_at")) {
-				String value = text(row.get(key));
-				context.append(value.length()).append(':').append(value).append(';');
-			}
-		return digest(context.toString());
+		var packs = new ArrayList<QuantityUnits.Pack>();
+		packs.add(new QuantityUnits.Pack(number(row.get("product_base_qty") == null ? row.get("base_qty") : row.get("product_base_qty")),
+				text(row.get("product_base_unit") == null ? row.get("base_unit") : row.get("product_base_unit"))));
+		packs.add(new QuantityUnits.Pack(number(row.get("alt_base_qty")), text(row.get("alt_base_unit"))));
+		var pack = QuantityUnits.packFor(packs, source.get("base_unit"));
+		if (pack == null)
+			throw new IllegalArgumentException("상품 규격을 식재료 기준단위(" + text(source.get("base_unit")) + ")로 바꿀 수 없습니다: "
+					+ text(row.get("product_name")) + " · 1포장당 수량 입력 요망");
+		row.put("base_qty", pack.quantity());
+		row.put("base_unit", pack.baseUnit());
 	}
 
 	static void validateQuantity(BigDecimal qty, BigDecimal minimum, BigDecimal increment, String decimalAllowed) {

@@ -49,8 +49,17 @@ public class SupplierIntegrationController {
 	 * part : 공급사 연동 method : offers comment : 공급상품 판매조건(offer)·단가 조회
 	 */
 	@GetMapping("/offers")
-	public ResponseEntity<?> offers(@RequestParam Map<String, Object> params) {
-		return execute(() -> service.offers(params));
+	public ResponseEntity<?> offers(@RequestParam Map<String, Object> params, jakarta.servlet.http.HttpServletRequest request) {
+		// 하트(나만의 식재료) 표시·맨 위 정렬은 로그인 주인(현장=거래처, 본사=사용자) 기준
+		return execute(() -> service.offers(com.example.demo.security.FavoriteOwner.of(request, params).applyTo(params)));
+	}
+
+	/*
+	 * part : 공급사 연동 method : favorite comment : 나만의 식재료 지정·해제(상품 하트). body: supplier_product_id, favorite(Y/N)
+	 */
+	@PostMapping("/favorites")
+	public ResponseEntity<?> favorite(@RequestBody Map<String, Object> body, jakarta.servlet.http.HttpServletRequest request) {
+		return execute(() -> service.favorite(com.example.demo.security.FavoriteOwner.of(request, body).applyTo(body)));
 	}
 
 	/*

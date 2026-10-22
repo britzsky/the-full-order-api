@@ -30,10 +30,6 @@ public class SupplierCatalogService {
 		return mapper.prices(params);
 	}
 
-	public List<Map<String, Object>> accountProducts(Map<String, Object> params) {
-		return mapper.accountProducts(params);
-	}
-
 	public Map<String, Object> createSupplier(Map<String, Object> body) {
 		require(body, "supplier_code", "supplier_name");
 		mapper.insertSupplier(body);
@@ -135,27 +131,6 @@ public class SupplierCatalogService {
 		return changed(mapper.deletePrice(body), body.get("price_history_id"));
 	}
 
-	@Transactional
-	public Map<String, Object> createAccountProduct(Map<String, Object> body) {
-		require(body, "account_id", "supplier_product_id");
-		if ("Y".equalsIgnoreCase(text(body.get("preferred_yn"))))
-			mapper.clearPreferredProduct(body);
-		mapper.insertAccountProduct(body);
-		return result(body.get("account_ingredient_product_id"));
-	}
-
-	@Transactional
-	public Map<String, Object> updateAccountProduct(Map<String, Object> body) {
-		require(body, "account_ingredient_product_id", "account_id");
-		if ("Y".equalsIgnoreCase(text(body.get("preferred_yn"))))
-			mapper.clearPreferredProduct(body);
-		return changed(mapper.updateAccountProduct(body), body.get("account_ingredient_product_id"));
-	}
-
-	public Map<String, Object> deleteAccountProduct(Map<String, Object> body) {
-		require(body, "account_ingredient_product_id");
-		return changed(mapper.deleteAccountProduct(body), body.get("account_ingredient_product_id"));
-	}
 
 	private void require(Map<String, Object> body, String... fields) {
 		for (String field : fields)

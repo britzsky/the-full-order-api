@@ -35,13 +35,12 @@ class OrderWorkflowServiceTest {
         payload.putArray("items").addObject().put("welstory_item_code","1000000001").put("order_qty",2);
         Map<String,Object> offer=new HashMap<>();
         offer.put("lead_time_days",1);offer.put("cutoff_time","11:00:00");
-        offer.put("supplier_id",1L);offer.put("account_ingredient_product_id",1L);offer.put("product_status","ACTIVE");
+        offer.put("supplier_id",1L);offer.put("product_status","ACTIVE");
         offer.put("purchase_price",1000);offer.put("base_qty",1000);offer.put("minimum_order_qty",1);offer.put("order_increment_qty",1);
         offer.put("decimal_order_allowed","N");offer.put("supplier_item_code","1000000001");offer.put("base_unit","g");offer.put("order_unit","EA");
         when(catalog.offers(anyMap())).thenReturn(List.of(offer));
         offer.put("supplier_product_id", 10L);
         offer.put("product_name", "양파 1kg");
-        when(mapper.lockAccountProduct(anyMap())).thenReturn(Map.of("account_ingredient_product_id",1L));
         when(api.call(eq("/fdapi/service/payer-realtime-item"),any())).thenReturn(json.readTree("{\"dataBody\":{\"resCd\":\"S0000\",\"data\":{\"price\":\"1000\",\"stopType\":\"\"}}}"));
         when(api.call(eq("/fdapi/service/payer-soldto-order"),any())).thenReturn(json.readTree("{\"dataBody\":{\"resCd\":\"S0000\",\"data\":[{\"clientOrdItem\":\"1\",\"resCd\":\"S0000\"}]}}"));
     }
@@ -72,43 +71,51 @@ class OrderWorkflowServiceTest {
         verify(mapper).insertOrder(argThat(p->p.get("client_ord").equals(p.get("purchase_order_id"))));
         var sequence=inOrder(mapper,manager,ourhome);sequence.verify(mapper).insertOrder(anyMap());sequence.verify(manager).commit(any());sequence.verify(ourhome).submit(any(),anyMap(),anyList());
     }
-    @Test void unlinkedIngredientIsRememberedUntilReceipt() {
+    @Test void orderRemembersTheIngredientToStockWithoutLinkingTheProduct() {
         ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","ONION");
         when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
         service.order(payload);
         verify(mapper).insertItem(argThat(row -> "ONION".equals(row.get("source_ingredient_id"))
-            && "PENDING".equals(row.get("ingredient_link_status"))
+            && Long.valueOf(10L).equals(row.get("supplier_product_id"))
             && row.get("product_snapshot").toString().contains("provider_realtime_product")));
     }
-    @Test void unrelatedSourceIsRejectedBeforeProviderOrder() {
+    @Test void unknownIngredientIsRejectedBeforeProviderOrder() {
         ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","OTHER_ACCOUNT");
-        assertThatThrownBy(() -> service.order(payload)).hasMessageContaining("원본 식자재");
+        assertThatThrownBy(() -> service.order(payload)).hasMessageContaining("거래처 식재료");
         verify(api,never()).call(eq("/fdapi/service/payer-soldto-order"),any());
     }
-    @Test void anotherSupplierProductCanBeOrderedForAlreadyLinkedIngredient() {
-        ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","ONION");
-        when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
-        when(mapper.sourceLinks(anyMap())).thenReturn(List.of(Map.of("supplier_product_id",99L)));
-        assertThat(service.order(payload).get("status")).isEqualTo("ORDERED");
-        verify(mapper).insertItem(argThat(row -> "PENDING".equals(row.get("ingredient_link_status"))));
-    }
-    @Test void orderAutomaticallyChoosesAlternatePackAndPreservesExistingStockUnit() {
+    @Test void orderChoosesThePackThatConvertsToTheIngredientUnit() {
         ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","ONION");
         when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
         var offer = new HashMap<>(catalog.offers(Map.of()).get(0));
         offer.put("base_qty",1); offer.put("base_unit","EA"); offer.put("alt_base_qty",2000); offer.put("alt_base_unit","g");
         when(catalog.offers(anyMap())).thenReturn(List.of(offer));
-        when(mapper.productStockUnits(anyMap())).thenReturn(List.of("kg"));
         service.order(payload);
-        verify(mapper).insertItem(argThat(row -> "kg".equals(row.get("base_unit")) && new BigDecimal("2").compareTo((BigDecimal)row.get("base_qty"))==0));
+        verify(mapper).insertItem(argThat(row -> "g".equals(row.get("base_unit")) && new BigDecimal("2000").compareTo((BigDecimal)row.get("base_qty"))==0));
     }
-    @Test void directNewProductPurchaseDoesNotRequireExistingInventory() {
-        var offer=new HashMap<>(catalog.offers(Map.of()).get(0));
-        offer.remove("account_ingredient_product_id");
+    @Test void typedPackQuantityIsUsedWhenUnitsCannotConvert() {
+        var item=(ObjectNode)payload.path("items").get(0);
+        item.put("source_ingredient_id","TOFU");item.put("stock_base_qty_per_unit","300");
+        when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
+        var offer = new HashMap<>(catalog.offers(Map.of()).get(0));
+        offer.put("base_qty",1); offer.put("base_unit","EA");
         when(catalog.offers(anyMap())).thenReturn(List.of(offer));
         service.order(payload);
-        verify(mapper).ensureAccountProduct(anyMap());
-        verify(mapper).insertItem(argThat(row -> "NONE".equals(row.get("ingredient_link_status"))));
+        verify(mapper).insertItem(argThat(row -> "g".equals(row.get("base_unit")) && new BigDecimal("300").compareTo(new BigDecimal(row.get("base_qty").toString()))==0));
+    }
+    @Test void unconvertiblePackWithoutTypedQuantityIsRejected() {
+        ((ObjectNode)payload.path("items").get(0)).put("source_ingredient_id","TOFU");
+        when(mapper.lockSourceIngredient(anyMap())).thenReturn(Map.of("base_unit","g"));
+        var offer = new HashMap<>(catalog.offers(Map.of()).get(0));
+        offer.put("base_qty",1); offer.put("base_unit","EA");
+        when(catalog.offers(anyMap())).thenReturn(List.of(offer));
+        assertThatThrownBy(() -> service.order(payload)).hasMessageContaining("1포장당 수량 입력 요망");
+        verify(api,never()).call(eq("/fdapi/service/payer-soldto-order"),any());
+    }
+    @Test void productOnlyPurchaseLeavesTheIngredientForReceipt() {
+        service.order(payload);
+        verify(mapper).insertItem(argThat(row -> "".equals(row.get("source_ingredient_id")) && Long.valueOf(10L).equals(row.get("supplier_product_id"))));
+        verify(mapper,never()).lockSourceIngredient(anyMap());
         verify(mapper,never()).ensureBalance(anyMap());
     }
     @Test void failedInternalSaveDoesNotSendOrder() {

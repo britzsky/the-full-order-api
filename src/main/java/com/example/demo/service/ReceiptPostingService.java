@@ -67,6 +67,9 @@ public class ReceiptPostingService {
 			row.put("vat_amount", BigDecimal.ZERO);
 			row.put("total_amount", row.get("supply_amount"));
 			row.put("provider_attributes", item.toString());
+			// 상품만 발주한 줄: 입고할 때 재고에 넣을 식재료(와 필요하면 1포장당 식재료 수량)를 고른다.
+			if (item.hasNonNull("ingredient_id") && !item.path("ingredient_id").asText().isBlank())
+				assignIngredient(row, item.path("ingredient_id").asText().trim(), item.path("base_qty_per_order_unit").asText(""));
 			if (post(row))
 				posted++;
 		}
@@ -97,8 +100,10 @@ public class ReceiptPostingService {
 				|| qty.add(number(current.get("received_order_qty"))).compareTo(number(current.get("order_qty"))) > 0)
 			throw new IllegalArgumentException("입고량이 주문 잔량을 초과합니다. 초과입고 대사가 필요합니다.");
 		BigDecimal conversion = number(current.get("base_qty_per_order_unit"));
-		// Inventory identity and conversion always come from the saved order, never provider input.
-		for (String field : List.of("account_ingredient_product_id", "supplier_product_id", "base_unit", "order_unit"))
+		// 재고 식재료와 환산값은 저장된 발주 품목에서만 가져온다(공급사 응답 값은 쓰지 않음). 식재료가 없으면 입고할 수 없다.
+		if (text(current.get("ingredient_id")).isBlank())
+			throw new IllegalArgumentException("재고에 넣을 식재료 선택 요망: " + text(current.get("product_name")));
+		for (String field : List.of("ingredient_id", "supplier_product_id", "base_unit", "order_unit", "product_name"))
 			row.put(field, current.get(field));
 		if (conversion.signum() <= 0)
 			throw new IllegalArgumentException("입고 단위 환산값을 확인하세요.");
@@ -131,7 +136,6 @@ public class ReceiptPostingService {
 		mapper.insertGoodsReceipt(row);
 		if (mapper.insertGoodsReceiptItem(row) == 0)
 			throw new IllegalStateException("입고행을 저장하지 못했습니다.");
-		linkSourceAfterReceipt(row, current);
 		orders.ensureBalance(row);
 		Map<String, Object> before = mapper.inventoryBalanceForUpdate(row);
 		row.put("quantity_before", before.get("current_base_qty"));
@@ -150,11 +154,46 @@ public class ReceiptPostingService {
 		return true;
 	}
 
-	private void linkSourceAfterReceipt(Map<String, Object> receipt, Map<String, Object> current) {
-		if (!"PENDING".equals(text(current.get("ingredient_link_status")))) return;
-		Map<String, Object> p = new LinkedHashMap<>(current);
-		p.put("account_id", receipt.get("account_id"));
-		p.put("purchase_order_id", receipt.get("purchase_order_id"));
-		new OrderProductLinking(orders, new com.fasterxml.jackson.databind.ObjectMapper()).apply(p, false);
+	/**
+	 * 식재료 없이 상품만 발주한 품목에 입고 때 고른 식재료를 기록한다. 환산값은 직접 입력값, 없으면 상품 규격 중
+	 * 식재료 기준단위로 바꿀 수 있는 것. 이미 입고가 시작된 품목의 식재료는 바꾸지 않는다.
+	 */
+	private void assignIngredient(Map<String, Object> row, String ingredientId, String manualQty) {
+		Map<String, Object> current = orders.items(row).stream()
+				.filter(l -> text(l.get("purchase_order_item_id")).equals(text(row.get("purchase_order_item_id"))))
+				.findFirst().orElseThrow(() -> new IllegalArgumentException("입고 품목 연결이 없습니다."));
+		if (ingredientId.equals(text(current.get("ingredient_id"))) && manualQty.isBlank())
+			return;
+		if (!text(current.get("ingredient_id")).isBlank() && number(current.get("received_order_qty")).signum() > 0)
+			throw new IllegalArgumentException("이미 입고가 시작된 품목은 재고 식재료를 바꿀 수 없습니다: " + text(current.get("product_name")));
+		Map<String, Object> key = new LinkedHashMap<>();
+		key.put("account_id", row.get("account_id"));
+		key.put("source_ingredient_id", ingredientId);
+		Map<String, Object> ingredient = orders.lockSourceIngredient(key);
+		if (ingredient == null)
+			throw new IllegalArgumentException("거래처 식재료를 찾을 수 없습니다: " + ingredientId);
+		String unit = QuantityUnits.unit(ingredient.get("base_unit"));
+		BigDecimal perUnit;
+		if (!manualQty.isBlank()) {
+			perUnit = number(manualQty);
+		} else {
+			var packs = new ArrayList<QuantityUnits.Pack>();
+			packs.add(new QuantityUnits.Pack(number(current.get("product_base_qty")), text(current.get("product_base_unit"))));
+			packs.add(new QuantityUnits.Pack(number(current.get("alt_base_qty")), text(current.get("alt_base_unit"))));
+			var pack = QuantityUnits.packFor(packs, unit);
+			if (pack == null)
+				throw new IllegalArgumentException("상품 규격을 식재료 기준단위(" + unit + ")로 바꿀 수 없습니다 · 1포장당 수량 입력 요망: "
+						+ text(current.get("product_name")));
+			perUnit = pack.quantity();
+			unit = pack.baseUnit();
+		}
+		if (perUnit.signum() <= 0)
+			throw new IllegalArgumentException("1포장당 식재료 수량은 0보다 커야 합니다.");
+		Map<String, Object> update = new LinkedHashMap<>();
+		update.put("purchase_order_item_id", current.get("purchase_order_item_id"));
+		update.put("ingredient_id", ingredientId);
+		update.put("base_qty_per_order_unit", perUnit);
+		update.put("base_unit", unit);
+		orders.assignItemIngredient(update);
 	}
 }

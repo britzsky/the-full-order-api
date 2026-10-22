@@ -48,7 +48,7 @@ class LocalWorkspaceReadOnlyTest {
             System.out.println("MEAL_NEXT_WEEK alerts(all accounts, 2026-10-08) = "+all.size()+" "+all.stream().map(a->a.get("account_name")).toList());
             assertThat(mealAlerts.alertsAt("__READONLY_NONEXISTENT__",thursday)).isEmpty();
             var site=new WorkspaceUser("readonly-test","3","__READONLY_NONEXISTENT__");
-            for(String key:List.of("inventory_balance_id","account_ingredient_product_id","account_recipe_detail_id","meal_service_id","purchase_order_id","table_id","supplier_account_site_id","procurement_cart_id","meal_detail_id","supplier_offer_id","procurement_cart_item_id","purchase_order_item_id"))
+            for(String key:List.of("inventory_balance_id","account_recipe_detail_id","meal_service_id","purchase_order_id","table_id","supplier_account_site_id","procurement_cart_id","meal_detail_id","supplier_offer_id","procurement_cart_item_id","purchase_order_item_id"))
                 access.checkResource(site,key,"0");
             var cfg=new Configuration(new Environment("workspace-read-only",new JdbcTransactionFactory(),ds));
             // InventoryMapper가 MenuMapper.accountProductPlanningPrices 조각을 include하므로 함께 읽는다

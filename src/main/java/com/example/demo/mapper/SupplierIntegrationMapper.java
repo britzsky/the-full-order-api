@@ -56,7 +56,6 @@ public interface SupplierIntegrationMapper {
 
 	Long supplierProductId(Map<String, Object> params);
 
-	int refreshAccountProductLead(Map<String, Object> params);
 
 	Long siteIdOfMapping(Map<String, Object> params);
 

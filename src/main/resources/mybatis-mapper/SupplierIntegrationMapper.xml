@@ -33,32 +33,32 @@
      <if test="active_yn!=null and active_yn!=''">AND ss.active_yn=#{active_yn}</if>
      ORDER BY s.supplier_name,ss.external_site_name,ss.external_site_code
   </select>
+  <!--
+    사업장 상품(웰스토리·아워홈) 조회. 식재료와 상품을 연결하지 않는다(2026-10-22).
+    favorite_yn: 나만의 식재료(하트). 주인은 favorite_owner_type/favorite_owner_id(현장=거래처, 본사=사용자).
+    usual_ingredient_ids: 이 거래처가 이 상품으로 어떤 식재료를 발주했었는지(쉼표 목록, '늘 쓰는 상품' 표시·부족량 후보용).
+  -->
   <select id="offers" parameterType="map" resultType="hashmap">
     SELECT o.supplier_offer_id,ss.supplier_account_site_id,ss.account_id,ss.external_site_code,ss.external_site_name,
-           s.supplier_id,s.supplier_code,s.supplier_name,p.supplier_product_id,
-           CASE WHEN ap.active_yn='Y' THEN ap.account_ingredient_product_id END account_ingredient_product_id,
-           ap.preferred_yn,ap.mapped_ingredient_id ingredient_id,p.supplier_item_code,
-           CASE WHEN ap.active_yn='Y' THEN ap.mapped_ingredient_id END linked_ingredient_id,
-           CASE WHEN ap.active_yn='Y' THEN COALESCE(aim.ingredient_name_std,aim.ingredient_name_raw) END linked_ingredient_name,
-           p.image_url,p.thumbnail_url,p.product_name,p.order_unit,p.package_qty,p.package_unit,COALESCE(ap.link_base_qty,p.base_qty) base_qty,COALESCE(ap.link_base_unit,p.base_unit) base_unit,
+           s.supplier_id,s.supplier_code,s.supplier_name,p.supplier_product_id,p.supplier_item_code,
+           CASE WHEN fp.favorite_product_id IS NULL THEN 'N' ELSE 'Y' END favorite_yn,
+           (SELECT GROUP_CONCAT(DISTINCT oi.source_ingredient_id ORDER BY oi.source_ingredient_id)
+              FROM the_full_order.tb_account_purchase_order_item oi
+              JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=oi.purchase_order_id
+             WHERE po.account_id=ss.account_id AND oi.supplier_product_id=p.supplier_product_id
+               AND oi.source_ingredient_id IS NOT NULL AND oi.item_status NOT IN ('FAILED','CANCELED')) usual_ingredient_ids,
+           p.image_url,p.thumbnail_url,p.product_name,p.order_unit,p.package_qty,p.package_unit,p.base_qty,p.base_unit,
            p.base_qty product_base_qty,p.base_unit product_base_unit,p.alt_base_qty,p.alt_base_unit,p.tax_type,
            o.delivery_type,o.lead_time_days,o.cutoff_code,o.cutoff_time,o.minimum_order_qty,o.order_increment_qty,
            o.decimal_order_allowed,o.product_status,o.status_reason,o.valid_from,o.valid_to,o.last_synced_at,
            pr.purchase_price,pr.currency,pr.effective_from price_effective_from,pr.effective_to price_effective_to,
-           av.orderable_yn,av.status_code availability_status,av.status_reason availability_reason,av.checked_at,
-           COALESCE(inv.current_base_qty,0) current_base_qty,COALESCE(ap.safe_stock_base_qty,0) safe_stock_base_qty,
-           GREATEST(COALESCE(#{required_base_qty},0)+COALESCE(ap.safe_stock_base_qty,0)-COALESCE(inv.current_base_qty,0),0) shortage_base_qty
+           av.orderable_yn,av.status_code availability_status,av.status_reason availability_reason,av.checked_at
       FROM the_full_order.tb_supplier_site_product_offer o
       JOIN the_full_order.tb_supplier_account_site ss ON ss.supplier_site_id=o.supplier_site_id
       JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
       JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=o.supplier_product_id
-      LEFT JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=ss.account_id AND ap.supplier_product_id=p.supplier_product_id
-      LEFT JOIN the_full_order.tb_account_ingredient_master aim ON aim.account_id=ss.account_id
-             AND aim.ingredient_id=ap.mapped_ingredient_id
-      <!-- 이 거래처 재고만 합산(전체 거래처 재고를 매 요청 집계하지 않음) -->
-      LEFT JOIN (SELECT account_id,account_ingredient_product_id,SUM(current_base_qty) current_base_qty
-                   FROM the_full_order.tb_account_inventory_balance WHERE account_id=#{account_id} GROUP BY account_id,account_ingredient_product_id) inv
-             ON inv.account_id=ss.account_id AND inv.account_ingredient_product_id=ap.account_ingredient_product_id
+      LEFT JOIN the_full_order.tb_favorite_product fp ON fp.supplier_product_id=p.supplier_product_id
+             AND fp.owner_type=#{favorite_owner_type} AND fp.owner_id=#{favorite_owner_id}
       LEFT JOIN the_full_order.tb_supplier_site_product_price pr ON pr.supplier_price_id=(
              SELECT pr2.supplier_price_id FROM the_full_order.tb_supplier_site_product_price pr2
               WHERE pr2.supplier_offer_id=o.supplier_offer_id AND pr2.effective_from&lt;=COALESCE(#{price_at},NOW())
@@ -68,19 +68,26 @@
              AND av.delivery_date=#{delivery_date} AND (av.expires_at IS NULL OR av.expires_at&gt;NOW())
      WHERE ss.account_id=#{account_id} AND ss.active_yn='Y' AND o.active_yn='Y' AND p.active_yn='Y'
        AND (o.valid_from IS NULL OR o.valid_from&lt;=#{delivery_date}) AND (o.valid_to IS NULL OR o.valid_to&gt;=#{delivery_date})
-     <if test="ingredient_id!=null and ingredient_id!=''">AND ap.mapped_ingredient_id=#{ingredient_id}</if>
-     <!-- 부족량 계산: 계산 대상 식재료에 연결된 상품만(사업장 전체 상품 1만여 건을 읽지 않음). 빈 목록은 호출하지 않는다. -->
-     <if test="ingredient_ids!=null">AND ap.mapped_ingredient_id IN <foreach collection="ingredient_ids" item="id" open="(" separator="," close=")">#{id}</foreach></if>
+     <!-- 부족량 계산: 계산 대상 식재료로 발주했던 상품 또는 식재료 이름(동의어 포함)이 들어간 상품만. 빈 목록은 호출하지 않는다. -->
+     <if test="ingredient_ids!=null">
+       AND (EXISTS(SELECT 1 FROM the_full_order.tb_account_purchase_order_item oi
+                    JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=oi.purchase_order_id
+                   WHERE po.account_id=ss.account_id AND oi.supplier_product_id=p.supplier_product_id
+                     AND oi.source_ingredient_id IN <foreach collection="ingredient_ids" item="id" open="(" separator="," close=")">#{id}</foreach>)
+            <if test="ingredient_name_patterns!=null">OR <foreach collection="ingredient_name_patterns" item="pat" open="(" separator=" OR " close=")">LOWER(REPLACE(p.product_name,' ','')) LIKE CONCAT('%',#{pat},'%')</foreach></if>)
+     </if>
      <!-- 화면 검색: 서버가 만든 정규화 단어·동의어 패턴으로 먼저 좁힌다(정렬·최종 판정은 서비스의 ProductNameMatch). -->
      <if test="name_patterns!=null">AND (<foreach collection="name_patterns" item="pat" separator=" OR ">LOWER(REPLACE(p.product_name,' ','')) LIKE CONCAT('%',#{pat},'%') OR LOWER(p.supplier_item_code) LIKE CONCAT('%',#{pat},'%') OR LOWER(s.supplier_name) LIKE CONCAT('%',#{pat},'%')</foreach>)</if>
+     <if test="favorite_only != null and favorite_only.equals(&quot;Y&quot;)">AND fp.favorite_product_id IS NOT NULL</if>
      <if test="offer_ids!=null">AND o.supplier_offer_id IN <foreach collection="offer_ids" item="id" open="(" separator="," close=")">#{id}</foreach></if>
      <if test="supplier_id!=null and supplier_id!=''">AND s.supplier_id=#{supplier_id}</if>
      <if test="supplier_code!=null and supplier_code!=''">AND s.supplier_code=#{supplier_code}</if>
      <if test="external_site_code!=null and external_site_code!=''">AND ss.external_site_code=#{external_site_code}</if>
      <if test="supplier_item_code!=null and supplier_item_code!=''">AND p.supplier_item_code=#{supplier_item_code}</if>
      <if test="supplier_offer_id!=null and supplier_offer_id!=''">AND o.supplier_offer_id=#{supplier_offer_id}</if>
+     <if test="supplier_product_id!=null and supplier_product_id!=''">AND p.supplier_product_id=#{supplier_product_id}</if>
      <if test="orderable_only != null and orderable_only.equals(&quot;Y&quot;)">AND o.product_status='ACTIVE' AND (av.orderable_yn IS NULL OR av.orderable_yn='Y')</if>
-     ORDER BY ap.mapped_ingredient_id,ap.preferred_yn DESC,pr.purchase_price/NULLIF(COALESCE(ap.link_base_qty,p.base_qty),0),s.supplier_name
+     ORDER BY CASE WHEN fp.favorite_product_id IS NULL THEN 1 ELSE 0 END,pr.purchase_price/NULLIF(p.base_qty,0),s.supplier_name
   </select>
   <!-- 거래처 매핑 ID → 상품·판가를 저장하는 사업장 마스터 ID -->
   <select id="siteIdOfMapping" parameterType="map" resultType="long">
@@ -210,23 +217,12 @@
     UPDATE the_full_order.tb_supplier_ingredient_product p
     SET base_qty=#{base_qty},base_unit=#{base_unit},package_qty=#{package_qty},package_unit=#{package_unit}
     WHERE p.supplier_product_id=#{supplier_product_id} AND #{base_qty}&gt;0
-      AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_ingredient_product ap
-        WHERE ap.supplier_product_id=p.supplier_product_id AND (ap.mapped_ingredient_id IS NOT NULL
-          OR EXISTS (SELECT 1 FROM the_full_order.tb_account_inventory_balance b WHERE b.account_ingredient_product_id=ap.account_ingredient_product_id)
-          OR EXISTS (SELECT 1 FROM the_full_order.tb_account_purchase_order_item i WHERE i.account_ingredient_product_id=ap.account_ingredient_product_id)))
+      AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_purchase_order_item i WHERE i.supplier_product_id=p.supplier_product_id)
+      AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_inventory_lot l WHERE l.supplier_product_id=p.supplier_product_id)
   </update>
   <update id="preserveOurhomeMassOption">
     UPDATE the_full_order.tb_supplier_ingredient_product SET alt_base_qty=#{confirmed_mass},alt_base_unit='g'
     WHERE supplier_product_id=#{supplier_product_id} AND #{confirmed_mass}&gt;0 AND UPPER(base_unit) NOT IN ('G','KG')
-  </update>
-  <!-- 동기화는 거래처 사용상품을 만들지 않는다(연결·발주·레시피 등록 때 생성). 이미 쓰는 상품의 마감 일수만 맞춘다.
-       상품은 사업장 단위로 한 번만 받으므로 이 사업장을 쓰는 거래처 모두 맞춘다. -->
-  <update id="refreshAccountProductLead" parameterType="map">
-    UPDATE the_full_order.tb_account_ingredient_product ap
-      JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=ap.account_id AND ss.supplier_site_id=#{supplier_site_id} AND ss.active_yn='Y'
-       SET ap.lead_time_days=COALESCE(#{lead_time_days},0),ap.user_id=#{user_id}
-     WHERE ap.supplier_product_id=#{supplier_product_id}
-       AND NOT (ap.lead_time_days &lt;=&gt; COALESCE(#{lead_time_days},0))
   </update>
   <insert id="markSyncStarted" parameterType="map">
     INSERT INTO the_full_order.tb_supplier_sync_checkpoint
@@ -247,13 +243,12 @@
 
   <select id="orderLineForReceipt" parameterType="map" resultType="hashmap">
     SELECT po.purchase_order_id,po.supplier_id,ss.supplier_account_site_id,
-           poi.purchase_order_item_id,poi.account_ingredient_product_id,poi.order_qty,
+           poi.purchase_order_item_id,NULLIF(poi.source_ingredient_id,'') ingredient_id,poi.order_qty,
            poi.received_order_qty,poi.base_qty_per_order_unit,poi.base_unit,poi.unit_price_snapshot,
-           p.supplier_product_id
+           p.supplier_product_id,COALESCE(poi.product_name_snapshot,p.product_name) product_name
       FROM the_full_order.tb_account_purchase_order po
       JOIN the_full_order.tb_account_purchase_order_item poi ON poi.purchase_order_id=po.purchase_order_id
-      JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_ingredient_product_id=poi.account_ingredient_product_id
-      JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=ap.supplier_product_id
+      JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=poi.supplier_product_id
       LEFT JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=po.account_id
        AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
      WHERE po.account_id=#{account_id} AND po.client_ord=#{client_ord}
@@ -272,21 +267,21 @@
     INSERT IGNORE INTO the_full_order.tb_goods_receipt_item
       (goods_receipt_id,purchase_order_item_id,supplier_product_id,provider_line_key,ordered_qty,received_qty,
        order_unit,base_received_qty,base_unit,unit_price,supply_amount,vat_amount,total_amount,
-       traceability_no,traceability_type,lot_no,expiration_date,reconciliation_status,provider_attributes)
+       traceability_no,traceability_type,lot_no,expiration_date,ingredient_id,reconciliation_status,provider_attributes)
     VALUES(#{goods_receipt_id},#{purchase_order_item_id},#{supplier_product_id},#{provider_line_key},#{ordered_qty},#{received_qty},
        #{order_unit},#{base_received_qty},#{base_unit},#{unit_price},#{supply_amount},#{vat_amount},#{total_amount},
-       #{traceability_no},#{traceability_type},#{lot_no},#{expiration_date},#{reconciliation_status},#{provider_attributes})
+       #{traceability_no},#{traceability_type},#{lot_no},#{expiration_date},#{ingredient_id},#{reconciliation_status},#{provider_attributes})
   </insert>
   <select id="inventoryBalanceForUpdate" parameterType="map" resultType="hashmap">
     SELECT * FROM the_full_order.tb_account_inventory_balance
-     WHERE account_id=#{account_id} AND account_ingredient_product_id=#{account_ingredient_product_id}
+     WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
        AND location_id=COALESCE(#{location_id},'L999') FOR UPDATE
   </select>
   <insert id="upsertInventoryAtAverageCost" parameterType="map">
     INSERT INTO the_full_order.tb_account_inventory_balance
-      (account_id,account_ingredient_product_id,location_id,current_base_qty,base_unit,current_unit,
+      (account_id,ingredient_id,location_id,current_base_qty,base_unit,current_unit,
        average_unit_cost,inventory_amount,last_movement_at,user_id)
-    VALUES(#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),#{base_received_qty},#{base_unit},#{base_unit},
+    VALUES(#{account_id},#{ingredient_id},COALESCE(#{location_id},'L999'),#{base_received_qty},#{base_unit},#{base_unit},
        #{receipt_base_unit_cost},#{receipt_amount},NOW(),#{user_id})
     ON DUPLICATE KEY UPDATE
        average_unit_cost=CASE WHEN current_base_qty+VALUES(current_base_qty)=0 THEN 0
@@ -296,19 +291,19 @@
   </insert>
   <insert id="insertInventoryLot" parameterType="map">
     INSERT IGNORE INTO the_full_order.tb_account_inventory_lot
-      (account_id,account_ingredient_product_id,location_id,goods_receipt_item_id,lot_no,received_date,expiration_date,
+      (account_id,ingredient_id,supplier_product_id,product_name_snapshot,location_id,goods_receipt_item_id,lot_no,received_date,expiration_date,
        received_base_qty,remaining_base_qty,base_unit,receipt_unit_cost,status,origin_name_snapshot)
-    VALUES(#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),#{goods_receipt_item_id},#{lot_no},#{receipt_date},#{expiration_date},
+    VALUES(#{account_id},#{ingredient_id},#{supplier_product_id},#{product_name},COALESCE(#{location_id},'L999'),#{goods_receipt_item_id},#{lot_no},#{receipt_date},#{expiration_date},
        #{base_received_qty},#{base_received_qty},#{base_unit},#{receipt_base_unit_cost},'AVAILABLE',#{origin_name_snapshot})
   </insert>
   <insert id="insertCostedInventoryMovement" parameterType="map">
     INSERT INTO the_full_order.tb_account_inventory_movement
-      (movement_id,account_id,account_ingredient_product_id,location_id,movement_type,quantity_delta,
+      (movement_id,account_id,ingredient_id,supplier_product_id,product_name_snapshot,location_id,movement_type,quantity_delta,
        quantity_before,quantity_after,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after,
        base_unit,reference_type,reference_id,movement_at,user_id)
-    VALUES(#{movement_id},#{account_id},#{account_ingredient_product_id},COALESCE(#{location_id},'L999'),'IN',#{base_received_qty},
+    VALUES(#{movement_id},#{account_id},#{ingredient_id},#{supplier_product_id},#{product_name},COALESCE(#{location_id},'L999'),'IN',#{base_received_qty},
        #{quantity_before},#{quantity_after},#{receipt_base_unit_cost},#{receipt_amount},#{average_unit_cost_before},#{average_unit_cost_after},
-       #{base_unit},'GOODS_RECEIPT',#{provider_line_key},NOW(),#{user_id})
+       #{base_unit},'GOODS_RECEIPT',CAST(#{goods_receipt_item_id} AS CHAR),NOW(),#{user_id})
   </insert>
   <update id="markReceiptItemPosted" parameterType="map">
     UPDATE the_full_order.tb_goods_receipt_item SET inventory_movement_id=#{movement_id}

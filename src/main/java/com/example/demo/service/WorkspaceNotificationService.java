@@ -37,7 +37,7 @@ public class WorkspaceNotificationService {
             put(account,key,"TASK","오늘 실제 사용 확인 · "+meal.get("meal_slot"),"/operations/table-meals",meal.get("meal_date").toString());
         }
         var today=LocalDate.now(ZoneId.of("Asia/Seoul"));
-        var criteria=new HashMap<String,Object>();criteria.put("account_id",account);criteria.put("source","PLAN");criteria.put("date_from",today.toString());criteria.put("date_to",today.plusDays(7).toString());criteria.put("delivery_date",today.toString());
+        var criteria=new HashMap<String,Object>();criteria.put("account_id",account);criteria.put("source","PLAN");criteria.put("date_from",today.toString());criteria.put("date_to",today.plusDays(7).toString());criteria.put("delivery_date",today.toString());criteria.put("skip_offers",true);
         var result=shortages.shortages(criteria);
         if(result.get("ingredients") instanceof List<?> ingredients) for(Object value:ingredients) {
             var row=(Map<?,?>)value;String key="SHORTAGE:"+hash(Objects.toString(row.get("ingredient_id"))+"|"+row.get("needed_by"));active.add(key);

@@ -43,9 +43,10 @@
       WHERE d.account_id=#{account_id} AND ms.meal_date&lt;=#{meal_date} AND ms.status!='CANCELED'
       GROUP BY d.account_id,d.menu_id
     ) u ON u.account_id=m.account_id AND u.menu_id=m.menu_id
-    LEFT JOIN (SELECT account_id,menu_id,MAX(CASE WHEN `like`=1 THEN 1 ELSE 0 END) favorite
-      FROM the_full_order.tb_like_menu WHERE account_id=#{account_id} AND user_id=#{user_id}
-      GROUP BY account_id,menu_id) f ON f.account_id=m.account_id AND f.menu_id=m.menu_id
+    <!-- 나만의 메뉴: 현장은 거래처 단위, 본사는 사용자 단위 -->
+    LEFT JOIN (SELECT menu_id,1 favorite FROM the_full_order.tb_favorite_menu
+      WHERE (owner_type='ACCOUNT' AND owner_id=#{account_id}) OR (owner_type='USER' AND owner_id=#{user_id})
+      GROUP BY menu_id) f ON f.menu_id=m.menu_id
     WHERE m.account_id=#{account_id} AND m.del_yn='N'
     <if test="meal_plan_type != null and meal_plan_type != ''">AND m.meal_plan_type=#{meal_plan_type}</if>
     ORDER BY score DESC,m.menu_name,m.menu_id LIMIT #{limit}

@@ -30,12 +30,11 @@ public class MealPlanImpactService {
         var changes=diff(before,mapper.draftDemand(p));
         var orders=jdbc.queryForList("""
             SELECT p.purchase_order_id,p.requested_delivery_date,p.status,
-              COALESCE(NULLIF(i.source_ingredient_id,''),a.mapped_ingredient_id) ingredient_id,
+              NULLIF(i.source_ingredient_id,'') ingredient_id,
               i.product_name_snapshot product_name,GREATEST(i.order_qty-COALESCE(i.received_order_qty,0),0) remaining_order_qty,
               i.base_qty_per_order_unit,i.base_unit
             FROM the_full_order.tb_account_purchase_order p
             JOIN the_full_order.tb_account_purchase_order_item i ON i.purchase_order_id=p.purchase_order_id
-            LEFT JOIN the_full_order.tb_account_ingredient_product a ON a.account_ingredient_product_id=i.account_ingredient_product_id AND a.account_id=p.account_id
             WHERE p.account_id=? AND p.status NOT IN ('CANCELED','FAILED','RECEIVED') AND i.item_status NOT IN ('CANCELED','FAILED','RECEIVED')
             ORDER BY p.requested_delivery_date,p.purchase_order_id LIMIT 1000
             """,p.get("account_id"));

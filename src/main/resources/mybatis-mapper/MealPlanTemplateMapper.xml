@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  본사 금액대 식단표 템플릿(2026-10-22). 금액대(price_tier)=1일 식단가를 1,000원 단위로 올린 값(13000 = 12,001~13,000원),
+  금액대·식단유형별 최대 3개. 메뉴는 본사 메뉴이고, 거래처 식단으로 저장할 때 서버가 거래처 메뉴로 복사한다.
+-->
+<mapper namespace="com.example.demo.mapper.MealPlanTemplateMapper">
+ <select id="templates" parameterType="map" resultType="hashmap">
+  SELECT t.*,(SELECT COUNT(*) FROM the_full_order.tb_meal_plan_template_item i WHERE i.meal_plan_template_id=t.meal_plan_template_id) item_count,
+         (SELECT COUNT(DISTINCT i.day_index) FROM the_full_order.tb_meal_plan_template_item i WHERE i.meal_plan_template_id=t.meal_plan_template_id) day_count
+    FROM the_full_order.tb_meal_plan_template t
+   WHERE 1=1
+   <if test="price_tier!=null and price_tier!=''">AND t.price_tier=#{price_tier}</if>
+   <if test="meal_plan_type!=null and meal_plan_type!=''">AND t.meal_plan_type=#{meal_plan_type}</if>
+   <if test="active_only!=null and active_only.equals(&quot;Y&quot;)">AND t.active_yn='Y'</if>
+   <if test="meal_plan_template_id!=null and meal_plan_template_id!=''">AND t.meal_plan_template_id=#{meal_plan_template_id}</if>
+   ORDER BY t.price_tier,t.meal_plan_type,t.template_seq
+ </select>
+ <!-- 템플릿 메뉴(본사 메뉴 정보 포함). 요일·식사·순서대로 -->
+ <select id="items" parameterType="map" resultType="hashmap">
+  SELECT i.template_item_id,i.meal_plan_template_id,i.day_index,i.meal_slot_code,sm.meal_slot_name,i.sort_order,i.menu_id,
+         m.menu_name,m.food_type,m.menu_type,m.menu_gubun,m.meal_plan_type,m.calories_per_serving,m.del_yn menu_del_yn
+    FROM the_full_order.tb_meal_plan_template_item i
+    JOIN the_full_order.tb_menu_master m ON m.menu_id=i.menu_id
+    LEFT JOIN the_full_order.tb_meal_slot_master sm ON sm.meal_slot_code=i.meal_slot_code
+   WHERE i.meal_plan_template_id=#{meal_plan_template_id}
+   ORDER BY i.day_index,COALESCE(sm.display_order,i.meal_slot_code),i.sort_order
+ </select>
+ <insert id="insertTemplate" parameterType="map" useGeneratedKeys="true" keyProperty="meal_plan_template_id">
+  INSERT INTO the_full_order.tb_meal_plan_template(price_tier,meal_plan_type,template_seq,template_name,note,active_yn,user_id)
+  VALUES(#{price_tier},#{meal_plan_type},#{template_seq},#{template_name},NULLIF(#{note},''),COALESCE(NULLIF(#{active_yn},''),'Y'),#{user_id})
+ </insert>
+ <update id="updateTemplate" parameterType="map">
+  UPDATE the_full_order.tb_meal_plan_template
+     SET price_tier=#{price_tier},meal_plan_type=#{meal_plan_type},template_seq=#{template_seq},template_name=#{template_name},
+         note=NULLIF(#{note},''),active_yn=COALESCE(NULLIF(#{active_yn},''),'Y'),user_id=#{user_id},mod_at=NOW()
+   WHERE meal_plan_template_id=#{meal_plan_template_id}
+ </update>
+ <delete id="deleteItems" parameterType="map">DELETE FROM the_full_order.tb_meal_plan_template_item WHERE meal_plan_template_id=#{meal_plan_template_id}</delete>
+ <insert id="insertItem" parameterType="map">
+  INSERT INTO the_full_order.tb_meal_plan_template_item(meal_plan_template_id,day_index,meal_slot_code,sort_order,menu_id,user_id)
+  VALUES(#{meal_plan_template_id},#{day_index},#{meal_slot_code},#{sort_order},#{menu_id},#{user_id})
+ </insert>
+ <delete id="deleteTemplate" parameterType="map">DELETE FROM the_full_order.tb_meal_plan_template WHERE meal_plan_template_id=#{meal_plan_template_id}</delete>
+ <select id="activeMenuCount" parameterType="map" resultType="int">
+  SELECT COUNT(*) FROM the_full_order.tb_menu_master WHERE menu_id=#{menu_id} AND del_yn='N'
+ </select>
+ <!-- 거래처 1일 식단가: 본식(조식·중식·석식) 1인 식단가의 합(서버 단가 뷰 기준) -->
+ <select id="accountDailyBudget" parameterType="map" resultType="hashmap">
+  SELECT SUM(budget_per_person) daily_budget,COUNT(*) main_meal_count,
+         GROUP_CONCAT(CONCAT(meal_slot_name,' ',ROUND(budget_per_person)) ORDER BY meal_slot_code SEPARATOR ' · ') breakdown
+    FROM the_full_order.vw_account_meal_slot_budget
+   WHERE account_id=#{account_id} AND meal_slot_code IN (0,2,5) AND budget_per_person IS NOT NULL
+ </select>
+</mapper>

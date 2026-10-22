@@ -16,12 +16,11 @@ class InventoryOpeningTest {
     final InventoryMapper mapper=mock(InventoryMapper.class);
     final InventoryService service=new InventoryService(mapper,mock(StockAvailabilityService.class));
 
-    // 계란 재고행: 기준단위 EA, 1 PAC = 30 EA
+    // 계란 재고행(식재료 단위): 기준단위 EA
     void stock(Object qty,Object average,Object amount) {
-        var s=new HashMap<String,Object>(Map.of("inventory_balance_id",259L,"account_id","A","account_ingredient_product_id",321L,
+        var s=new HashMap<String,Object>(Map.of("inventory_balance_id",259L,"account_id","A","ingredient_id","EGG",
             "location_id","L999","base_unit","EA","current_base_qty",qty,"average_unit_cost",average,"inventory_amount",amount));
         when(mapper.inventoryForUpdate(anyMap())).thenReturn(s);
-        when(mapper.productPack(anyMap())).thenReturn(Map.of("order_unit","PAC","pack_qty",30,"pack_unit","EA"));
         when(mapper.updateInventoryValue(anyMap())).thenReturn(1);
         when(mapper.updateInventory(anyMap())).thenReturn(1);
     }
@@ -31,7 +30,7 @@ class InventoryOpeningTest {
     static boolean eq(Object v,String expected) { return new BigDecimal(v.toString()).compareTo(new BigDecimal(expected))==0; }
 
     @Test void openingSetsAverageCostAmountAndOpeningHistory() {
-        stock(90,0,0);var b=body(3,"PAC");b.put("unit_cost","196.33");
+        stock(90,0,0);var b=body(90,"EA");b.put("unit_cost","196.33");
         service.opening(b);
         verify(mapper).updateInventoryValue(argThat(p->eq(p.get("current_base_qty"),"90") && eq(p.get("average_unit_cost"),"196.33") && eq(p.get("inventory_amount"),"17669.70")));
         verify(mapper).insertValuedMovement(argThat(p->"OPENING".equals(p.get("movement_type")) && "OPENING".equals(p.get("reference_type"))
@@ -67,7 +66,7 @@ class InventoryOpeningTest {
     @Test void openingWithoutUnitCostUsesSupplierEstimateAndMarksHistory() {
         stock(90,0,0);
         when(mapper.openingCostEstimates(anyMap())).thenReturn(java.util.List.of(Map.of("inventory_balance_id",259L,"price_unit","EA","unit_cost",196.33,"cost_source","SITE_PRICE")));
-        var result=service.opening(body(3,"PAC"));
+        var result=service.opening(body(90,"EA"));
         verify(mapper).updateInventoryValue(argThat(p->eq(p.get("average_unit_cost"),"196.33") && eq(p.get("inventory_amount"),"17669.70")));
         verify(mapper).insertValuedMovement(argThat(p->"OPENING".equals(p.get("movement_type")) && "OPENING_ESTIMATED".equals(p.get("reference_type"))));
         assertThat(result).containsEntry("cost_estimated",true);
@@ -83,8 +82,17 @@ class InventoryOpeningTest {
         assertThat(InventoryService.estimatedCost(Map.of("unit_cost",100,"price_unit","EA"),"g")).isNull();
         assertThat(InventoryService.estimatedCost(null,"g")).isNull();
     }
+    @Test void openingWithoutStockRowCreatesTheIngredientRowFirst() {
+        stock(0,0,0);
+        when(mapper.accountIngredient(anyMap())).thenReturn(Map.of("account_id","A","ingredient_id","EGG","base_unit","EA"));
+        when(mapper.balanceId(anyMap())).thenReturn(259L);
+        var b=new HashMap<String,Object>(Map.of("account_id","A","ingredient_id","EGG","current_qty",30,"current_unit","EA","unit_cost",200,"user_id","T"));
+        service.opening(b);
+        verify(mapper).ensureBalance(argThat(p->"EGG".equals(p.get("ingredient_id")) && "EA".equals(p.get("base_unit")) && "L999".equals(p.get("location_id"))));
+        verify(mapper).insertValuedMovement(argThat(p->"EGG".equals(p.get("ingredient_id")) && "OPENING".equals(p.get("movement_type"))));
+    }
     @Test void unchangedQuantityOnlyUpdatesFieldsWithoutHistory() {
-        stock(90,200,18000);service.update(body(3,"PAC"));
+        stock(90,200,18000);service.update(body(90,"EA"));
         verify(mapper).updateInventory(anyMap());
         verify(mapper,never()).insertValuedMovement(anyMap());
     }

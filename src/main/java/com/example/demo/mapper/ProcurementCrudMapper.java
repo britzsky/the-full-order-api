@@ -28,7 +28,6 @@ public interface ProcurementCrudMapper {
 
 	int deleteCartItem(Map<String, Object> p);
 
-	int insertMealShortages(Map<String, Object> p);
 
 	List<Map<String, Object>> orders(Map<String, Object> p);
 

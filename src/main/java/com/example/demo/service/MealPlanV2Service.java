@@ -14,6 +14,9 @@ public class MealPlanV2Service {
 	private final MealPlanV2Mapper mapper;
 	private final MealUsageService usage;
 	private WorkspaceNotificationService notifications;
+	private AccountMenuRegistrationService menuImporter;
+	@org.springframework.beans.factory.annotation.Autowired
+	public void setMenuImporter(AccountMenuRegistrationService menuImporter) { this.menuImporter=menuImporter; }
 	@org.springframework.beans.factory.annotation.Autowired
 	public void setNotifications(WorkspaceNotificationService notifications) { this.notifications=notifications; }
 
@@ -83,6 +86,20 @@ public class MealPlanV2Service {
 		}
 		if (notifications!=null) notifications.mealChanged(String.valueOf(b.get("account_id")),String.valueOf(b.get("table_id")),String.valueOf(b.get("user_id")));
 		return ok(b.get("table_id"));
+	}
+
+	/**
+	 * 식단표는 본사 메뉴로 만든다(2026-10-22). 거래처 메뉴에 아직 없는 본사 메뉴면 레시피째 거래처 메뉴로 복사한다
+	 * (필요량·재고 차감·발주는 거래처 메뉴 레시피 기준). 이미 있으면 그대로 쓴다.
+	 */
+	private void ensureAccountMenu(Map<String, Object> b) {
+		if (menuImporter == null || mapper.accountMenuExists(b) > 0)
+			return;
+		Map<String, Object> request = new java.util.HashMap<>();
+		request.put("account_id", b.get("account_id"));
+		request.put("menu_id", b.get("menu_id"));
+		request.put("user_id", b.get("user_id"));
+		menuImporter.importStandard(request);
 	}
 
 	public Map<String, Object> createPlan(Map<String, Object> b) {
@@ -165,6 +182,7 @@ public class MealPlanV2Service {
 	private Map<String,Object> insertDetail(Map<String,Object> b) {
 		req(b, "meal_service_id", "table_id", "account_id", "menu_id", "menu_name");
 		usage.reopen(b);
+		ensureAccountMenu(b);
 		if (mapper.countCompatibleMenu(b) == 0) {
 			throw new IllegalArgumentException("메뉴의 식단 유형이 선택한 식사의 식단 유형과 다릅니다.");
 		}
@@ -183,6 +201,7 @@ public class MealPlanV2Service {
 		usage.reopen(b);
 		if (b.get("menu_id") != null) {
 			req(b, "meal_service_id", "account_id");
+			ensureAccountMenu(b);
 			if (mapper.countCompatibleMenu(b) == 0) {
 				throw new IllegalArgumentException("The menu meal_plan_type does not match the meal service.");
 			}
@@ -236,22 +255,79 @@ public class MealPlanV2Service {
 		int menuCount = integer(result.get("menu_count"));
 		int recipeMenuCount = integer(result.get("recipe_menu_count"));
 		int ingredientCount = integer(result.get("ingredient_count"));
-		int pricedIngredientCount = integer(result.get("priced_ingredient_count"));
 		if (menuCount == 0)
 			return;
 		if (recipeMenuCount != menuCount || ingredientCount == 0) {
 			throw new IllegalArgumentException("메뉴에 1인분 식재료 레시피가 등록되어 있어야 합니다.");
 		}
-		if (pricedIngredientCount != ingredientCount) {
-			throw new IllegalArgumentException("식재료 원가를 계산할 수 없습니다. 공급상품 연결·판매상태·포장 환산량·현재 가격을 확인해주세요.");
+		// 레시피 단위를 식재료 기준단위로 바꿀 수 없으면 필요량(재고 차감·발주)을 계산할 수 없으므로 막는다.
+		if (integer(result.get("unit_problem_count")) > 0) {
+			throw new IllegalArgumentException("레시피 단위를 식재료 기준단위로 바꿀 수 없습니다: " + result.get("unit_problem_names")
+					+ " · 메뉴 레시피의 단위 확인 요망");
 		}
+		// 단가 미등록·식단가 초과는 막지 않는다(2026-10-22 결정). 주간 정산(budgetSummary)에서 경고로 보여준다.
+	}
 
-		BigDecimal cost = decimal(result.get("meal_cost_per_person"));
-		BigDecimal budget = decimal(result.get("meal_budget_per_person"));
-		String source = String.valueOf(result.get("budget_source"));
-		if (!"INCLUDED_IN_DIET_PRICE".equals(source) && cost.compareTo(budget) > 0) {
-			throw new IllegalArgumentException("1인 원가 " + cost + "원이 거래처 식사 단가 " + budget + "원을 초과합니다.");
+	/**
+	 * 주간 식단가 정산(2026-10-22 사용자 결정). 끼니별로 식단가를 넘어도 막지 않고, 주 합계로 맞추는지 보여준다(넘어도 경고만).
+	 * 특식 식사의 초과분은 주 합계에서 빼고 '특식 초과'로 따로 보여준다. 금액은 1인 기준이다.
+	 */
+	public Map<String, Object> budgetSummary(Map<String, Object> p) {
+		req(p, "table_id");
+		List<Map<String, Object>> rows = mapper.budgetRows(p);
+		BigDecimal budget = BigDecimal.ZERO, cost = BigDecimal.ZERO, specialOver = BigDecimal.ZERO;
+		int unpriced = 0;
+		List<Map<String, Object>> meals = new java.util.ArrayList<>();
+		java.util.Map<String, Map<String, Object>> days = new java.util.LinkedHashMap<>();
+		for (Map<String, Object> row : rows) {
+			Map<String, Object> meal = new java.util.LinkedHashMap<>(row);
+			BigDecimal mealBudget = decimal(row.get("meal_budget_per_person"));
+			BigDecimal mealCost = decimal(row.get("meal_cost_per_person"));
+			BigDecimal diff = mealCost.subtract(mealBudget);
+			boolean special = "Y".equals(String.valueOf(row.get("special_yn")));
+			boolean includedInDietPrice = "INCLUDED_IN_DIET_PRICE".equals(String.valueOf(row.get("budget_source")));
+			BigDecimal over = includedInDietPrice ? BigDecimal.ZERO : diff.max(BigDecimal.ZERO);
+			meal.put("difference", diff);
+			meal.put("over_budget", over.signum() > 0);
+			if (special && over.signum() > 0) {
+				specialOver = specialOver.add(over);
+				// 특식 초과분은 주 합계에서 뺀다: 원가를 식단가까지만 센다.
+				mealCost = mealCost.subtract(over);
+			}
+			budget = budget.add(mealBudget);
+			cost = cost.add(mealCost);
+			unpriced += integer(row.get("unpriced_ingredient_count"));
+			meals.add(meal);
+			Map<String, Object> day = days.computeIfAbsent(String.valueOf(row.get("meal_date")), date -> {
+				Map<String, Object> value = new java.util.LinkedHashMap<>();
+				value.put("meal_date", date);
+				value.put("weekday", row.get("weekday"));
+				value.put("budget", BigDecimal.ZERO);
+				value.put("cost", BigDecimal.ZERO);
+				return value;
+			});
+			day.put("budget", decimal(day.get("budget")).add(mealBudget));
+			day.put("cost", decimal(day.get("cost")).add(decimal(row.get("meal_cost_per_person"))));
 		}
+		BigDecimal balance = budget.subtract(cost);
+		Map<String, Object> result = new java.util.LinkedHashMap<>();
+		result.put("meals", meals);
+		result.put("days", new java.util.ArrayList<>(days.values()));
+		result.put("budget_total", budget);
+		result.put("cost_total", cost);
+		result.put("special_over_total", specialOver);
+		result.put("balance", balance);
+		result.put("over_budget", balance.signum() < 0);
+		result.put("unpriced_ingredient_count", unpriced);
+		String message = balance.signum() < 0
+				? "이번 주 식단가 합계를 " + balance.negate().setScale(0, java.math.RoundingMode.HALF_UP) + "원 넘었습니다 · 다른 식사에서 조절 요망"
+				: "이번 주 식단가 안에서 " + balance.setScale(0, java.math.RoundingMode.HALF_UP) + "원 남았습니다";
+		if (specialOver.signum() > 0)
+			message += " (특식 초과 " + specialOver.setScale(0, java.math.RoundingMode.HALF_UP) + "원 별도)";
+		if (unpriced > 0)
+			message += " · 단가 미등록 식재료 " + unpriced + "건은 원가에 빠져 있음";
+		result.put("message", message);
+		return result;
 	}
 
 	private int integer(Object value) {

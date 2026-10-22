@@ -41,7 +41,9 @@ public class WorkspaceAccess {
             || path.equals("/Menu/MenuSave") || path.equals("/Menu/RecipeSave")
             || path.startsWith("/v2/ai-usage")
             || (!read && path.equals("/v2/ingredients"))
-            || (!read && path.startsWith("/v2/catalog/") && !path.startsWith("/v2/catalog/ingredient-links/") && !path.equals("/v2/catalog/account-products"))
+            || (!read && path.startsWith("/v2/catalog/"))
+            // 본사 금액대 식단표 템플릿 관리(조회·불러오기는 현장도 가능)
+            || (!read && path.startsWith("/v2/meal-plan-templates"))
             || (!read && path.equals("/v2/supplier-integration/sites"));
         if(headquarters) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본사 담당자만 사용할 수 있습니다.");
     }
@@ -53,7 +55,6 @@ public class WorkspaceAccess {
         if(user.headquarters() || value==null || value.isBlank()) return;
         String table=switch(key) {
             case "inventory_balance_id" -> "tb_account_inventory_balance";
-            case "account_ingredient_product_id" -> "tb_account_ingredient_product";
             case "account_recipe_detail_id" -> "tb_account_recipe_detail";
             case "meal_service_id" -> "tb_account_meal_service";
             case "purchase_order_id" -> "tb_account_purchase_order";

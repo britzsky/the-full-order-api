@@ -64,7 +64,7 @@ public class ProcurementCrudService {
 	}
 
 	public Map<String, Object> createCartItem(Map<String, Object> b) {
-		required(b, "procurement_cart_id", "account_ingredient_product_id", "source_type");
+		required(b, "procurement_cart_id", "supplier_product_id", "source_type");
 		m.insertCartItem(b);
 		return ok(b.get("procurement_cart_item_id"));
 	}
@@ -77,16 +77,6 @@ public class ProcurementCrudService {
 	public Map<String, Object> deleteCartItem(Map<String, Object> b) {
 		required(b, "procurement_cart_item_id");
 		return changed(m.deleteCartItem(b), b.get("procurement_cart_item_id"));
-	}
-
-	@Transactional
-	public Map<String, Object> createFromMealPlan(Map<String, Object> b) {
-		required(b, "account_id", "table_id");
-		m.insertCart(b);
-		b.put("source_id", b.get("table_id"));
-		int count = m.insertMealShortages(b);
-		return Map.of("code", 200, "message", "success", "procurement_cart_id", b.get("procurement_cart_id"),
-				"item_count", count);
 	}
 
 	public Map<String, Object> createOrder(Map<String, Object> b) {
@@ -109,7 +99,7 @@ public class ProcurementCrudService {
 	}
 
 	public Map<String, Object> createOrderItem(Map<String, Object> b) {
-		required(b, "purchase_order_id", "client_ord_item", "account_ingredient_product_id", "supplier_item_code",
+		required(b, "purchase_order_id", "client_ord_item", "supplier_product_id", "supplier_item_code",
 				"order_qty", "order_unit", "base_qty_per_order_unit", "base_unit", "unit_price_snapshot",
 				"line_amount");
 		m.insertOrderItem(b);

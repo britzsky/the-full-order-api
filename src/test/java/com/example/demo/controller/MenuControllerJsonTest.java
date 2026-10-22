@@ -46,10 +46,10 @@ class MenuControllerJsonTest {
         when(service.AccountDetailList(anyMap())).thenReturn(rows);
         when(service.AccountIngredientsList(anyMap())).thenReturn(rows);
         when(service.LikeMenuList(anyMap())).thenReturn(rows);
-        when(service.LikeIngredientsList(anyMap())).thenReturn(rows);
         for (String path : List.of("MenuList", "DetailList", "IngredientsList", "AccountMenuList",
-                "AccountDetailList", "AccountIngredientsList", "LikeMenuList", "LikeIngredientsList")) {
-            mvc.perform(get("/Menu/" + path)).andExpect(status().isOk())
+                "AccountDetailList", "AccountIngredientsList", "LikeMenuList")) {
+            String query = path.equals("AccountMenuList") || path.equals("LikeMenuList") ? "?account_id=A" : "";
+            mvc.perform(get("/Menu/" + path + query)).andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                     .andExpect(jsonPath("$[0].created_at").value("2026-09-10T09:30:00"))
                     .andExpect(jsonPath("$[0].effective_date").value("2026-09-10"))
@@ -77,7 +77,6 @@ class MenuControllerJsonTest {
             """))
             .andExpect(status().isOk());
         verify(accountRecipes).ensureMenuIngredient(anyMap());
-        verify(accountRecipes,never()).ensureIngredientInventory(anyMap());
         verify(service).AccountIngredientsSave(anyMap());
     }
 }

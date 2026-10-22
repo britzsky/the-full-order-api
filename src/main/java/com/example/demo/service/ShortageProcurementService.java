@@ -32,8 +32,9 @@ public class ShortageProcurementService {
 		if (text(p.get("account_id")).isBlank())
 			throw new IllegalArgumentException("거래처 선택 요망");
 		String source = text(p.getOrDefault("source", "INVENTORY"));
-		// PLAN=저장된 식단 필요량, DRAFT=구성 중인 식단, INVENTORY=최근 사용량 기준 부족 예상, STOCK=현재 부족 재고 바로 주문
-		if (!Set.of("PLAN", "INVENTORY", "DRAFT", "STOCK").contains(source))
+		// PLAN=저장된 식단 필요량, DRAFT=구성 중인 식단, INVENTORY=최근 사용량 기준 부족 예상, STOCK=현재 부족 재고 바로 주문,
+		// FAVORITE_MENU=나만의 메뉴에 쓰인 식재료(수량 직접 입력)
+		if (!Set.of("PLAN", "INVENTORY", "DRAFT", "STOCK", "FAVORITE_MENU").contains(source))
 			throw new IllegalArgumentException("부족량 조회 기준 확인 요망");
 		if ("DRAFT".equals(source)) {
 			if (!(p.get("draft_meals") instanceof List<?> meals) || meals.isEmpty() || meals.size() > 2000)
@@ -154,6 +155,13 @@ public class ShortageProcurementService {
 				b.demandByDate.merge(rowDate(row.get("meal_date"),LocalDate.parse(text(p.get("date_from")))),quantity,BigDecimal::add);
 				b.menus.add(text(row.get("menu_name")));
 			}
+		} else if ("FAVORITE_MENU".equals(source)) {
+			if (text(p.get("favorite_owner_type")).isBlank()) throw new IllegalArgumentException("나만의 메뉴 주인 확인 요망");
+			for (var row : mapper.favoriteMenuIngredients(p)) {
+				if (text(row.get("ingredient_id")).isBlank()) continue;
+				Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
+				b.menus.add(text(row.get("menu_name")));
+			}
 		} else if ("INVENTORY".equals(source)) {
 			for (var row : mapper.history(p)) {
 				Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
@@ -173,9 +181,16 @@ public class ShortageProcurementService {
         Map<String,Object> q = new LinkedHashMap<>(p);
         if (!text(p.get("sold_to")).isBlank()) q.put("external_site_code", p.get("sold_to"));
         q.put("orderable_only", "N");
-        // 후보는 식재료에 연결된 상품뿐이므로 계산 대상 식재료로 좁혀 조회한다(사업장 전체 상품을 읽지 않음).
+        q.remove("keyword");
+        // 후보 상품(식재료와 상품을 연결하지 않는다): 이 식재료로 발주했던 상품 + 식재료 이름·동의어가 들어간 상품.
+        // 계산 대상 식재료로 좁혀 조회한다(사업장 전체 상품을 읽지 않음). 재고 화면처럼 수량만 필요하면 조회하지 않는다.
         q.put("ingredient_ids", new ArrayList<>(buckets.keySet()));
-        List<Map<String,Object>> offers = buckets.isEmpty() ? List.of() : suppliers.offers(q);
+        LinkedHashSet<String> patterns = new LinkedHashSet<>();
+        for (Bucket b : buckets.values()) patterns.addAll(SupplierIntegrationService.namePatterns(b.name));
+        if (!patterns.isEmpty()) q.put("ingredient_name_patterns", new ArrayList<>(patterns).subList(0, Math.min(patterns.size(), 400)));
+        List<Map<String,Object>> offers = buckets.isEmpty() || Boolean.TRUE.equals(p.get("skip_offers")) ? List.of() : suppliers.offers(q);
+        List<ProductNameMatch.Product> offerNames = new ArrayList<>();
+        for (var offer : offers) offerNames.add(ProductNameMatch.product(text(offer.get("product_name"))));
 		List<Map<String, Object>> rows = new ArrayList<>();
 		int unknown = 0;
 		for (Bucket b : buckets.values()) {
@@ -200,7 +215,9 @@ public class ShortageProcurementService {
 					b.issues.add("필요일이 납품일보다 빠름 · 납품일자 확인 요망");
 			}
 			// STOCK: 안전재고도 사용 이력도 없는데 현재고+입고예정이 없으면 '수량 직접 입력' 행으로 바로 주문할 수 있게 한다(수량 추정 안 함).
-			boolean manual = "STOCK".equals(source) && b.safety.signum() == 0 && available.add(b.incoming).signum() <= 0;
+			// FAVORITE_MENU: 나만의 메뉴 식재료는 늘 수량 직접 입력.
+			boolean manual = "FAVORITE_MENU".equals(source)
+					|| "STOCK".equals(source) && b.safety.signum() == 0 && available.add(b.incoming).signum() <= 0;
 			if (b.demand.add(b.safety).signum() == 0 && !manual) {
 				unknown++;
 				if (available.signum() <= 0 && !"STOCK".equals(source))
@@ -228,12 +245,25 @@ public class ShortageProcurementService {
 			row.put("menu_names", b.menus);
 			row.put("issues", b.issues);
 			List<Map<String, Object>> candidates = new ArrayList<>();
-			for (var offer : offers)
-				if (b.id.equals(text(offer.get("ingredient_id"))))
-					candidates.add(candidate(offer, b.unit, shortage, b.issues.isEmpty(), manual));
+			var query = ProductNameMatch.query(b.name);
+			for (int i = 0; i < offers.size(); i++) {
+				var offer = offers.get(i);
+				boolean usual = Arrays.asList(text(offer.get("usual_ingredient_ids")).split(",")).contains(b.id);
+				int score = usual ? 100 : ProductNameMatch.score(query, offerNames.get(i)).value();
+				if (score < 25) continue;
+				Map<String, Object> c = candidate(offer, b.unit, shortage, b.issues.isEmpty(), manual);
+				c.put("ingredient_id", b.id);
+				// 늘 쓰던 상품 = 이 식재료로 발주했던 상품(예전 '우선 상품' 표시 자리)
+				c.put("preferred_yn", usual ? "Y" : "N");
+				c.put("match_score", score);
+				candidates.add(c);
+			}
 			candidates.sort(Comparator.comparing((Map<String, Object> c) -> !Boolean.TRUE.equals(c.get("orderable")))
 					.thenComparing(c -> !"Y".equals(text(c.get("preferred_yn"))))
+					.thenComparing(c -> !"Y".equals(text(c.get("favorite_yn"))))
+					.thenComparing(c -> -((Integer) c.get("match_score")))
 					.thenComparing(c -> number(c.get("estimated_amount"))));
+			if (candidates.size() > 12) candidates = new ArrayList<>(candidates.subList(0, 12));
 			row.put("offers", candidates);
 			var preferred = candidates.stream().filter(c -> "Y".equals(text(c.get("preferred_yn")))).toList();
 			Map<String,Object> recommendedOffer = preferred.size()==1 ? preferred.get(0) : candidates.size()==1 ? candidates.get(0) : null;
@@ -264,7 +294,14 @@ public class ShortageProcurementService {
 		BigDecimal pack = BigDecimal.ZERO, qty = BigDecimal.ZERO;
 		String reason = text(offer.get("availability_reason")), packError = "";
 		try {
-			pack = QuantityUnits.convert(number(offer.get("base_qty")), offer.get("base_unit"), unit);
+			// 상품 규격(대표·두 번째) 중 식재료 기준단위로 바꿀 수 있는 것을 쓴다. 없으면 이 상품은 이 식재료로 계산할 수 없다.
+			var packs = new ArrayList<QuantityUnits.Pack>();
+			packs.add(new QuantityUnits.Pack(number(offer.get("base_qty")), text(offer.get("base_unit"))));
+			packs.add(new QuantityUnits.Pack(number(offer.get("alt_base_qty")), text(offer.get("alt_base_unit"))));
+			var chosen = QuantityUnits.packFor(packs, unit);
+			if (chosen == null)
+				throw new IllegalArgumentException("상품 규격(" + text(offer.get("base_unit")) + ")을 식재료 단위(" + unit + ")로 바꿀 수 없음 · 수량 직접 입력 요망");
+			pack = QuantityUnits.convert(chosen.quantity(), chosen.baseUnit(), unit);
 			// 수량 직접 입력 행은 최소 발주수량을 기본값으로만 제안한다(사용자가 정함).
 			qty = manual ? recommended(pack, pack, number(offer.get("minimum_order_qty")),
 					number(offer.get("order_increment_qty")), text(offer.get("decimal_order_allowed")))

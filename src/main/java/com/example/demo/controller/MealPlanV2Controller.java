@@ -55,6 +55,12 @@ public class MealPlanV2Controller {
 	public ResponseEntity<?> origins(@RequestParam Map<String,Object> p) { return run(() -> usage.origins(p)); }
 
 	/*
+	 * part : 식단관리 method : budgetSummary comment : 주간 식단가 정산(끼니별 초과 허용, 주 합계 경고, 특식 초과는 별도)
+	 */
+	@GetMapping("/budget-summary")
+	public ResponseEntity<?> budgetSummary(@RequestParam Map<String,Object> p) { return run(() -> s.budgetSummary(p)); }
+
+	/*
 	 * part : 식단관리 method : plans comment : 식단표 목록 조회 (연/월/주차/식단유형 필터)
 	 */
 	@GetMapping

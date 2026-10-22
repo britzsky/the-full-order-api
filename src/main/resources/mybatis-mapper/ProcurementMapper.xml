@@ -4,29 +4,26 @@
   <!-- 수요와 창고별 재고를 각각 먼저 집계하여 다중 JOIN으로 수량이 증폭되지 않게 한다. -->
   <select id="mealPlanIngredientAnalysis" resultType="map">
     WITH planned AS (
-      SELECT ms.account_id,r.ingredient_id,r.supplier_product_id,r.base_unit,
+      SELECT ms.account_id,r.ingredient_id,r.base_unit,
         SUM(r.total_required_qty) planned_qty,SUM(r.calculated_cost) planned_cost
       FROM the_full_order.tb_account_meal_ingredient_requirement r
       JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
       WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND ms.status!='CANCELED'
-      GROUP BY ms.account_id,r.ingredient_id,r.supplier_product_id,r.base_unit
+      GROUP BY ms.account_id,r.ingredient_id,r.base_unit
     ), stock AS (
-      SELECT account_id,account_ingredient_product_id,SUM(current_base_qty) current_qty
+      SELECT account_id,ingredient_id,SUM(current_base_qty) current_qty
       FROM the_full_order.tb_account_inventory_balance WHERE account_id=#{account_id}
-      GROUP BY account_id,account_ingredient_product_id
+      GROUP BY account_id,ingredient_id
     )
-    SELECT r.*,p.product_name ingredient_name,p.supplier_item_code,p.order_unit,COALESCE(ap.link_base_qty,p.base_qty) convert_value,
-      ap.account_ingredient_product_id,COALESCE(s.current_qty,0) current_qty,
-      COALESCE(ap.safe_stock_base_qty,0) safe_stock_qty,
-      GREATEST(r.planned_qty+COALESCE(ap.safe_stock_base_qty,0)-COALESCE(s.current_qty,0),0) shortage_qty,
-      CEIL(GREATEST(r.planned_qty+COALESCE(ap.safe_stock_base_qty,0)-COALESCE(s.current_qty,0),0)/NULLIF(COALESCE(ap.link_base_qty,p.base_qty),0)) suggested_order_qty,
+    SELECT r.*,COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,COALESCE(s.current_qty,0) current_qty,
+      COALESCE(ai.safe_stock_base_qty,0) safe_stock_qty,
+      GREATEST(r.planned_qty+COALESCE(ai.safe_stock_base_qty,0)-COALESCE(s.current_qty,0),0) shortage_qty,
       CASE WHEN COALESCE(s.current_qty,0)&lt;r.planned_qty THEN 'RED'
-        WHEN COALESCE(s.current_qty,0)&lt;r.planned_qty+COALESCE(ap.safe_stock_base_qty,0) THEN 'ORANGE' ELSE 'GREEN' END stock_status
+        WHEN COALESCE(s.current_qty,0)&lt;r.planned_qty+COALESCE(ai.safe_stock_base_qty,0) THEN 'ORANGE' ELSE 'GREEN' END stock_status
     FROM planned r
-    LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=r.supplier_product_id
-    LEFT JOIN the_full_order.tb_account_ingredient_product ap ON ap.account_id=r.account_id AND ap.supplier_product_id=r.supplier_product_id
-    LEFT JOIN stock s ON s.account_id=ap.account_id AND s.account_ingredient_product_id=ap.account_ingredient_product_id
-    ORDER BY r.ingredient_id,r.supplier_product_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=r.ingredient_id
+    LEFT JOIN stock s ON s.account_id=r.account_id AND s.ingredient_id=r.ingredient_id
+    ORDER BY r.ingredient_id
   </select>
   <select id="mealPlanSummary" resultType="map">
     SELECT COALESCE(SUM(planned_servings),0) total_servings,

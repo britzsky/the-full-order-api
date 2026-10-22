@@ -38,15 +38,15 @@ public interface MenuMapper {
 
 	List<Map<String, Object>> AccountDetailList(Map<String, Object> paramMap);
 
-	Map<String, Object> productPlanningPrice(Map<String, Object> paramMap);
+	// 거래처 식재료 하나의 편성 단가(직접 입력·입고 단가·본사 표준 단가)
+	Map<String, Object> ingredientPlanningPrice(Map<String, Object> paramMap);
 
+	// 나만의 메뉴(favorite_owner_type/favorite_owner_id는 FavoriteOwner가 채운다)
 	List<Map<String, Object>> LikeMenuList(Map<String, Object> paramMap);
 
 	int LikeMenuSave(Map<String, Object> paramMap);
 
-	List<Map<String, Object>> LikeIngredientsList(Map<String, Object> paramMap);
-
-	int LikeIngredientsSave(Map<String, Object> paramMap);
+	int LikeMenuDelete(Map<String, Object> paramMap);
 
 	int RecipeInfoDelete(Map<String, Object> paramMap);
 

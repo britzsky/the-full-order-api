@@ -14,10 +14,24 @@ import com.example.demo.mapper.SupplierIntegrationMapper;
 public class SupplierIntegrationService {
 	private final SupplierIntegrationMapper mapper;
 	private final SupplierSiteService siteService;
+	private com.example.demo.mapper.FavoriteMapper favorites;
 
 	public SupplierIntegrationService(SupplierIntegrationMapper mapper, SupplierSiteService siteService) {
 		this.mapper = mapper;
 		this.siteService = siteService;
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired
+	public void setFavorites(com.example.demo.mapper.FavoriteMapper favorites) { this.favorites = favorites; }
+
+	/** 나만의 식재료 지정(favorite=Y)·해제(N). 주인(favorite_owner_*)은 컨트롤러가 로그인으로 정한다. */
+	public Map<String, Object> favorite(Map<String, Object> body) {
+		require(body, "supplier_product_id", "favorite_owner_type", "favorite_owner_id");
+		if (favorites.productExists(body) == 0)
+			throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
+		boolean on = !"N".equals(String.valueOf(body.get("favorite")));
+		if (on) favorites.addProduct(body); else favorites.removeProduct(body);
+		return Map.of("code", 200, "message", "success", "supplier_product_id", body.get("supplier_product_id"), "favorite_yn", on ? "Y" : "N");
 	}
 
 	public List<Map<String, Object>> sites(Map<String, Object> params) {
@@ -43,6 +57,8 @@ public class SupplierIntegrationService {
 		// ingredient_ids는 서버 내부(부족량 계산)에서 목록으로만 넘긴다. 요청 파라미터 문자열이면 무시.
 		if (params.containsKey("ingredient_ids") && !(params.get("ingredient_ids") instanceof java.util.Collection<?>))
 			params.remove("ingredient_ids");
+		if (params.containsKey("ingredient_name_patterns") && !(params.get("ingredient_name_patterns") instanceof java.util.Collection<?>))
+			params.remove("ingredient_name_patterns");
 		params.remove("name_patterns");
 		// 화면 검색: keyword(동의어 포함)·offer_ids(쉼표 목록)·limit. 사업장 전체 상품(1만여 건, 수십 MB)을 내려보내지 않기 위함.
 		String keyword = java.util.Objects.toString(params.get("keyword"), "").trim();
@@ -72,8 +88,10 @@ public class SupplierIntegrationService {
 			for (Map<String, Object> row : rows)
 				scores.put(row, ProductNameMatch.searchScore(keyword, java.util.Objects.toString(row.get("product_name"), ""),
 						java.util.Objects.toString(row.get("supplier_item_code"), ""), java.util.Objects.toString(row.get("supplier_name"), "")));
+			// 나만의 식재료(하트)는 검색 결과 맨 위(2026-10-22), 그다음 관련도순
 			rows = new java.util.ArrayList<>(rows.stream().filter(row -> scores.get(row) > 0)
-					.sorted(java.util.Comparator.comparing((Map<String, Object> row) -> -scores.get(row))).toList());
+					.sorted(java.util.Comparator.comparing((Map<String, Object> row) -> !"Y".equals(row.get("favorite_yn")))
+							.thenComparing(row -> -scores.get(row))).toList());
 		}
 		if (limit != null && rows.size() > limit) rows = new java.util.ArrayList<>(rows.subList(0, limit));
 		for (Map<String, Object> row : rows) {
