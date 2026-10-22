@@ -42,11 +42,11 @@ public class InventoryService {
 		key.put("inventory_balance_id", params.get("inventory_balance_id"));
 		Map<String, Map<String, Object>> estimates = new java.util.HashMap<>();
 		for (Map<String, Object> estimate : inventoryMapper.openingCostEstimates(key))
-			estimates.put(String.valueOf(estimate.get("inventory_balance_id")), estimate);
+			estimates.put(String.valueOf(estimate.get("ingredient_id")), estimate);
 		for (Map<String, Object> row : rows) {
 			if (!"Y".equals(String.valueOf(row.get("opening_available"))))
 				continue;
-			Map<String, Object> estimate = estimates.get(String.valueOf(row.get("inventory_balance_id")));
+			Map<String, Object> estimate = estimates.get(String.valueOf(row.get("ingredient_id")));
 			BigDecimal cost = estimatedCost(estimate, row.get("base_unit"));
 			if (cost == null)
 				continue;
@@ -237,7 +237,7 @@ public class InventoryService {
 		if (estimated) {
 			Map<String, Object> key = new java.util.HashMap<>();
 			key.put("account_id", stored.get("account_id"));
-			key.put("inventory_balance_id", stored.get("inventory_balance_id"));
+			key.put("ingredient_id", stored.get("ingredient_id"));
 			List<Map<String, Object>> estimates = inventoryMapper.openingCostEstimates(key);
 			unitCost = estimatedCost(estimates.isEmpty() ? null : estimates.get(0), stored.get("base_unit"));
 			if (unitCost == null)

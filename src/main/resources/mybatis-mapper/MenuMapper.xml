@@ -350,6 +350,33 @@
     ) c
  </sql>
 
+ <!--
+   본사 메뉴의 이 거래처 기준 예상 1인 원가(식단표 편집에서 본사 메뉴를 고를 때 식단가와 비교용).
+   거래처 메뉴로 이미 있는 메뉴는 거래처 레시피로(AccountMenuList와 같음), 아니면 본사 레시피 × 거래처 식재료 단가
+   (거래처 식재료가 아직 없으면 본사 표준 단가). 단가가 하나라도 없으면 menu_cost_per_person은 NULL, 이유는 menu_cost_reason.
+ -->
+ <select id="HqMenuCosts" parameterType="map" resultType="hashmap">
+  SELECT m.menu_id,
+         CASE WHEN COUNT(r.ingredient_id)&gt;0 AND COUNT(r.cost)=COUNT(r.ingredient_id) THEN ROUND(SUM(r.cost),4) END menu_cost_per_person,
+         CASE WHEN COUNT(r.ingredient_id)&gt;0 AND COUNT(r.cost)=COUNT(r.ingredient_id) THEN 1 ELSE 0 END menu_cost_complete,
+         CASE WHEN COUNT(r.ingredient_id)=0 THEN '레시피 없음'
+              ELSE GROUP_CONCAT(CASE WHEN r.cost IS NULL THEN CONCAT(r.ingredient_name,': 단가 미등록') END SEPARATOR ', ') END menu_cost_reason
+    FROM the_full_order.tb_menu_master m
+    LEFT JOIN (
+      SELECT hr.menu_id,hr.ingredient_id,COALESCE(hi.ingredient_name_std,hr.ingredient_name_raw,hr.ingredient_id) ingredient_name,
+             CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(
+               pp.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="hr.base_unit"/><property name="toUnit" value="pp.base_unit"/></include>,
+               CASE WHEN hi.standard_unit_cost&gt;0 THEN hi.standard_unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="hr.base_unit"/><property name="toUnit" value="hi.base_unit"/></include> END) END cost
+        FROM the_full_order.tb_recipe_detail hr
+        LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+        LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
+          ON pp.account_id=#{account_id} AND pp.ingredient_id=hr.ingredient_id
+    ) r ON r.menu_id=m.menu_id
+   WHERE m.del_yn='N'
+     AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=m.menu_id AND am.del_yn='N')
+   GROUP BY m.menu_id
+ </select>
+
  <!-- 기준단가 화면: 한 거래처 식재료의 자동 단가(입고·본사 표준)와 직접 입력 단가 -->
  <select id="ingredientPlanningPrice" parameterType="map" resultType="hashmap">
   SELECT pp.account_id,pp.ingredient_id,pp.base_unit,pp.auto_source,pp.auto_unit_cost,pp.auto_source_date,

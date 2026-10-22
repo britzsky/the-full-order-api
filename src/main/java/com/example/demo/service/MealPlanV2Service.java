@@ -34,6 +34,13 @@ public class MealPlanV2Service {
 	}
 
 	public List<Map<String, Object>> details(Map<String, Object> p) {
+		for (String key : List.of("date_from", "date_to")) {
+			Object value = p.get(key);
+			if (value != null && !value.toString().isBlank()) {
+				try { java.time.LocalDate.parse(value.toString()); }
+				catch (java.time.format.DateTimeParseException e) { throw new IllegalArgumentException("날짜는 YYYY-MM-DD 형식이어야 합니다."); }
+			}
+		}
 		return mapper.details(p);
 	}
 

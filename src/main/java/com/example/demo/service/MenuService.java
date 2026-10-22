@@ -135,6 +135,14 @@ public class MenuService {
 		}
 	}
 
+	// 본사 메뉴의 거래처 기준 예상 원가(식단표 편집기에서 본사 메뉴 선택용)
+	public List<Map<String, Object>> HqMenuCosts(Map<String, Object> paramMap) {
+		Object account = paramMap.get("account_id");
+		if (account == null || account.toString().isBlank())
+			throw new IllegalArgumentException("거래처 선택 요망");
+		return menuMapper.HqMenuCosts(paramMap);
+	}
+
 	// 나만의 메뉴 조회 (본사 메뉴. 주인은 FavoriteOwner가 채운 favorite_owner_*)
 	public List<Map<String, Object>> LikeMenuList(Map<String, Object> paramMap) {
 		return menuMapper.LikeMenuList(paramMap);

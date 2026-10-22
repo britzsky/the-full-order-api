@@ -347,6 +347,14 @@ public class MenuController {
 	}
 
 	/*
+	 * part : 식단표 method : HqMenuCosts comment : 본사 메뉴의 이 거래처 기준 예상 1인 원가(거래처 메뉴가 아닌 본사 메뉴만)
+	 */
+	@GetMapping("/Menu/HqMenuCosts")
+	public List<Map<String, Object>> HqMenuCosts(@RequestParam Map<String, Object> paramMap) {
+		return menuService.HqMenuCosts(paramMap);
+	}
+
+	/*
 	 * part : 나만의 메뉴 method : LikeMenuList comment : 나만의 메뉴(본사 메뉴) 조회. 현장은 거래처 단위, 본사는 사용자 단위
 	 */
 	@GetMapping("/Menu/LikeMenuList")

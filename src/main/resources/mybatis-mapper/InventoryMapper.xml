@@ -122,19 +122,20 @@
    단가는 거래처 식재료 기준단위(price_unit)당 금액.
  -->
  <select id="openingCostEstimates" parameterType="map" resultType="hashmap">
-  SELECT b.inventory_balance_id,b.ingredient_id,pp.base_unit price_unit,
+  SELECT b.inventory_balance_id,pp.ingredient_id,pp.base_unit price_unit,
          CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_cost WHEN lot.receipt_unit_cost&gt;0 THEN lot.receipt_unit_cost ELSE pp.standard_cost END unit_cost,
          CASE WHEN pp.manual_cost&gt;0 THEN 'MANUAL' WHEN lot.receipt_unit_cost&gt;0 THEN 'RECENT_RECEIPT' WHEN pp.standard_cost&gt;0 THEN 'STANDARD' END cost_source,
          CASE WHEN pp.manual_cost&gt;0 THEN pp.manual_date WHEN lot.receipt_unit_cost&gt;0 THEN lot.received_date ELSE pp.standard_date END cost_date
-    FROM the_full_order.tb_account_inventory_balance b
-    JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
-      ON pp.account_id=b.account_id AND pp.ingredient_id=b.ingredient_id
+    FROM (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
+    <!-- 재고 행이 아직 없는 식재료도 추정한다(기초재고 등록 때 재고 행을 만든다) -->
+    LEFT JOIN the_full_order.tb_account_inventory_balance b ON b.account_id=pp.account_id AND b.ingredient_id=pp.ingredient_id
     LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
       SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
-       WHERE l.account_id=b.account_id AND l.ingredient_id=b.ingredient_id AND l.receipt_unit_cost&gt;0
+       WHERE l.account_id=pp.account_id AND l.ingredient_id=pp.ingredient_id AND l.receipt_unit_cost&gt;0
        ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
-   WHERE b.account_id=#{account_id}
+   WHERE pp.account_id=#{account_id}
    <if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if>
+   <if test="ingredient_id!=null and ingredient_id!=''"> AND pp.ingredient_id=#{ingredient_id}</if>
  </select>
  <!-- 기초재고 등록 가능 여부 (ADJUST 이외 이력이 있으면 불가) -->
  <select id="hasNonAdjustMovement" parameterType="map" resultType="int">SELECT COUNT(*) FROM the_full_order.tb_account_inventory_movement WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id} AND movement_type&lt;&gt;'ADJUST'</select>
