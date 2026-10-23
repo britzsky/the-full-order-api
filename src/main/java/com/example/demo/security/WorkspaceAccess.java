@@ -44,6 +44,8 @@ public class WorkspaceAccess {
             || (!read && path.startsWith("/v2/catalog/"))
             // 본사 금액대 식단표 템플릿 관리(조회·불러오기는 현장도 가능)
             || (!read && path.startsWith("/v2/meal-plan-templates"))
+            // 본사 끼니 종류 관리(조회는 현장도 가능)
+            || (!read && path.startsWith("/v2/meal-slots"))
             || (!read && path.equals("/v2/supplier-integration/sites"));
         if(headquarters) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본사 담당자만 사용할 수 있습니다.");
     }

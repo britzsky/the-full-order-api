@@ -45,11 +45,11 @@
  <select id="activeMenuCount" parameterType="map" resultType="int">
   SELECT COUNT(*) FROM the_full_order.tb_menu_master WHERE menu_id=#{menu_id} AND del_yn='N'
  </select>
- <!-- 거래처 1일 식단가: 본식(조식·중식·석식) 1인 식단가의 합(서버 단가 뷰 기준) -->
+ <!-- 거래처 1일 식단가: 본식(끼니 마스터 slot_kind=MAIN, 기본 조·중·석식) 1인 식단가의 합(서버 단가 뷰 기준) -->
  <select id="accountDailyBudget" parameterType="map" resultType="hashmap">
   SELECT SUM(budget_per_person) daily_budget,COUNT(*) main_meal_count,
-         GROUP_CONCAT(CONCAT(meal_slot_name,' ',ROUND(budget_per_person)) ORDER BY meal_slot_code SEPARATOR ' · ') breakdown
+         GROUP_CONCAT(CONCAT(meal_slot_name,' ',ROUND(budget_per_person)) ORDER BY slot_display_order,meal_slot_code SEPARATOR ' · ') breakdown
     FROM the_full_order.vw_account_meal_slot_budget
-   WHERE account_id=#{account_id} AND meal_slot_code IN (0,2,5) AND budget_per_person IS NOT NULL
+   WHERE account_id=#{account_id} AND slot_kind='MAIN' AND budget_per_person IS NOT NULL
  </select>
 </mapper>

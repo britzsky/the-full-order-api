@@ -97,7 +97,7 @@ public class MealPlanTemplateService {
 			String menu = Objects.toString(item.get("menu_id"), "").trim();
 			if (day < 1 || day > MAX_DAYS)
 				throw new IllegalArgumentException("요일은 1(월)~7(일)입니다.");
-			if (slot < 0 || slot > 8 || menu.isEmpty())
+			if (slot < 0 || slot > 99 || menu.isEmpty())
 				throw new IllegalArgumentException("식사구분·메뉴를 확인해주세요.");
 			if (!seen.add(day + "|" + slot + "|" + menu))
 				continue;

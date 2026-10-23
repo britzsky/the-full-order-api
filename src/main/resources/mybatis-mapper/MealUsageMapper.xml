@@ -23,7 +23,7 @@
     FROM the_full_order.tb_account_meal_service s
     JOIN the_full_order.tb_account_table_meals t ON t.table_id=s.table_id AND t.account_id=s.account_id
    WHERE s.account_id=#{account_id} AND s.table_id=#{table_id} AND t.status&lt;&gt;'CANCELED'
-   ORDER BY s.meal_date,s.meal_slot,s.meal_service_id
+   ORDER BY s.meal_date,COALESCE((SELECT sm0.display_order FROM the_full_order.tb_meal_slot_master sm0 WHERE sm0.meal_slot_code=s.meal_slot_code),s.meal_slot_code),s.meal_service_id
  </select>
  <!-- 사용 확정 전에 입고 확정이 필요한 발주(납품일이 확정 대상 마지막 날 이전인 미입고·부분입고). -->
  <select id="unreceivedOrders" resultType="map">
