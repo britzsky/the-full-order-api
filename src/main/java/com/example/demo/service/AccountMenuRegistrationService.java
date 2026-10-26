@@ -138,6 +138,33 @@ public class AccountMenuRegistrationService {
 	}
 
 	/**
+	 * 이 업장 레시피를 본사 레시피로 되돌린다(식단표 '이 업장 레시피 수정' 창). 거래처 레시피 줄을 지우고 본사 레시피를 다시 복사한다.
+	 * 메뉴명·칼로리 등 메뉴 정보는 그대로 둔다. 거래처 전용 메뉴(본사 메뉴 없음)는 되돌릴 레시피가 없어 거부한다.
+	 */
+	@Transactional
+	public Map<String, Object> resetToStandard(Map<String, Object> b) {
+		String accountId = required(b, "account_id", "거래처");
+		String menuId = required(b, "menu_id", "메뉴");
+		activeAccountMenu(accountId, menuId);
+		Map<String, Object> standard = mapper.standardMenu(Map.of("menu_id", menuId));
+		if (standard == null || "Y".equals(standard.get("del_yn")))
+			throw new IllegalArgumentException("이 업장에서 만든 메뉴라 되돌릴 본사 레시피가 없습니다.");
+		List<Map<String, Object>> recipe = mapper.standardRecipe(Map.of("menu_id", menuId));
+		if (recipe.isEmpty())
+			throw new IllegalArgumentException("본사 메뉴(" + standard.get("menu_name") + ")에 식재료가 없어 되돌릴 수 없습니다.");
+		int removed = recipeMapper.deleteMenuRecipe(Map.of("account_id", accountId, "menu_id", menuId));
+		for (Map<String, Object> source : recipe) {
+			Map<String, Object> row = new HashMap<>(source);
+			row.put("account_id", accountId);
+			row.put("user_id", b.get("user_id"));
+			recipeService.ensureMenuIngredient(row);
+			recipeMapper.insertRecipeDetail(row);
+		}
+		return Map.of("code", 200, "message", "본사 레시피로 되돌렸습니다.", "menu_id", menuId,
+				"removed_count", removed, "copied_ingredient_count", recipe.size());
+	}
+
+	/**
 	 * 본사 반영 전 미리보기: 레시피 식재료를 본사 식자재로 어떻게 옮길지와 반영 불가 사유.
 	 * 같은 ID가 본사에 있으면 그것(SAME), 없으면 이름·기준단위가 같은 본사 식자재(MATCHED), 그래도 없으면 거래처 식재료를 같은 ID로 본사에 추가(NEW).
 	 */

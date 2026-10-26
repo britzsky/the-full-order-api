@@ -39,4 +39,7 @@ public interface AccountMenuRecipeMapper {
 	int updateRecipeDetail(Map<String, Object> p);
 
 	int deleteRecipeDetail(Map<String, Object> p);
+
+	/** 거래처 메뉴 하나의 레시피 줄 전부(본사 레시피로 되돌리기 전) */
+	int deleteMenuRecipe(Map<String, Object> p);
 }

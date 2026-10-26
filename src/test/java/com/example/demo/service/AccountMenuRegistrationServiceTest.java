@@ -98,4 +98,27 @@ class AccountMenuRegistrationServiceTest {
         assertThatThrownBy(() -> service.importStandard(Map.of("account_id", "A", "menu_id", "TMENU1"))).hasMessageContaining("식재료가 없어");
         verify(recipeMapper, never()).upsertMenu(anyMap());
     }
+
+    @Test void resetToStandardReplacesAccountRecipeWithStandard() {
+        when(mapper.accountMenu(anyMap())).thenReturn(Map.of("menu_id", "TMENU1", "menu_name", "잡곡밥", "del_yn", "N"));
+        when(mapper.standardMenu(anyMap())).thenReturn(Map.of("menu_id", "TMENU1", "menu_name", "잡곡밥", "del_yn", "N"));
+        when(mapper.standardRecipe(anyMap())).thenReturn(List.of(
+                Map.of("recipe_id", 7, "menu_id", "TMENU1", "ingredient_id", "RICE", "ingredient_seq", 1, "qty_per_person", 80),
+                Map.of("recipe_id", 7, "menu_id", "TMENU1", "ingredient_id", "BARLEY", "ingredient_seq", 2, "qty_per_person", 20)));
+        when(recipeMapper.deleteMenuRecipe(anyMap())).thenReturn(3);
+        when(recipeMapper.accountIngredientExists(anyMap())).thenReturn(1);
+        var result = service.resetToStandard(Map.of("account_id", "A", "menu_id", "TMENU1", "user_id", "U"));
+        var order = inOrder(recipeMapper);
+        order.verify(recipeMapper).deleteMenuRecipe(argThat(p -> "A".equals(p.get("account_id")) && "TMENU1".equals(p.get("menu_id"))));
+        order.verify(recipeMapper, times(2)).insertRecipeDetail(argThat(r -> "A".equals(r.get("account_id")) && "U".equals(r.get("user_id"))));
+        verify(recipeMapper, never()).upsertMenu(anyMap());
+        assertThat(result).containsEntry("removed_count", 3).containsEntry("copied_ingredient_count", 2);
+    }
+
+    @Test void resetToStandardRefusesAccountOnlyMenu() {
+        when(mapper.accountMenu(anyMap())).thenReturn(Map.of("menu_id", "AM-1", "menu_name", "크림스프", "del_yn", "N"));
+        when(mapper.standardMenu(anyMap())).thenReturn(null);
+        assertThatThrownBy(() -> service.resetToStandard(Map.of("account_id", "A", "menu_id", "AM-1"))).hasMessageContaining("되돌릴 본사 레시피가 없습니다");
+        verify(recipeMapper, never()).deleteMenuRecipe(anyMap());
+    }
 }

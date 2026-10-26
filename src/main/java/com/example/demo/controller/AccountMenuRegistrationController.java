@@ -37,6 +37,14 @@ public class AccountMenuRegistrationController {
 	}
 
 	/*
+	 * part : 거래처 메뉴관리 method : resetToStandard comment : 이 업장 레시피를 본사 레시피로 되돌리기(거래처 레시피 줄 삭제 후 본사 레시피 복사, 메뉴 정보는 유지)
+	 */
+	@PostMapping("/menus/reset-to-standard")
+	public ResponseEntity<?> resetToStandard(@RequestBody Map<String, Object> b) {
+		return run(() -> service.resetToStandard(b));
+	}
+
+	/*
 	 * part : 거래처 메뉴관리 method : promote comment : 거래처 전용 메뉴를 같은 menu_id로 본사 메뉴·표준 레시피에 반영(사용자가 '예'를 고른 경우만)
 	 */
 	@PostMapping("/menus/promote")
