@@ -346,7 +346,7 @@ public class MealPlanV2Service {
 	}
 
 	/*
-	 * 고객사 유형별 단가는 DB 뷰 한 곳에서 계산한다. 요양원(1)은 elderly를 본식 수로 나누고 간식은 snack, 산업체(4)는
+	 * 고객사 유형별 단가는 DB 뷰 한 곳에서 계산한다. 요양원(1)은 본식마다 elderly(1끼 단가)와 간식은 snack, 산업체(4)는
 	 * 본식마다 diet_price, 학교(5)는 diet_price를 본식 수로 나누며 간식·후식은 본식 총액에 포함한다.
 	 */
 	private void applyServerCalculatedBudget(Map<String, Object> b) {

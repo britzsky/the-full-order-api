@@ -64,8 +64,9 @@ class LocalMealSlotDatabaseTest {
 		long mains = rows.stream().filter(r -> "MAIN".equals(r.get("slot_kind"))).count();
 		assertThat(mainRow.get("slot_kind")).isEqualTo("MAIN");
 		assertThat(((Number) mainRow.get("main_meal_count")).longValue()).isEqualTo(mains);
-		assertThat(new BigDecimal(mainRow.get("budget_per_person").toString()))
-				.isEqualByComparingTo(elderly.divide(BigDecimal.valueOf(mains), 2, java.math.RoundingMode.HALF_UP));
+		// 요양원 본식 1인 단가 = elderly(이미 1끼 단가, 본식 수로 나누지 않음 — 2026-10-26)
+		assertThat(new BigDecimal(mainRow.get("budget_per_person").toString())).isEqualByComparingTo(elderly);
+		assertThat(mainRow.get("budget_source")).isEqualTo("ELDERLY_EACH");
 		assertThat(snackRow.get("budget_source")).isEqualTo("SNACK");
 		assertThat(((Number) snackRow.get("default_food_type")).intValue()).as("간식 끼니 기본 분류 = 간식(6)").isEqualTo(6);
 		// 금액대 템플릿의 1일 식단가 = 본식 단가 합(새 본식 포함, 간식 제외)
