@@ -55,8 +55,9 @@ public class ProcurementController {
 	 * part : 발주관리 method : orders comment : 발주서 목록 조회
 	 */
 	@GetMapping("/Orders")
-	public ResponseEntity<?> orders(@RequestParam Map<String, Object> params) {
-		return execute(() -> workflow.list(params));
+	public ResponseEntity<?> orders(@RequestParam Map<String, Object> params, jakarta.servlet.http.HttpServletRequest request) {
+		// 품목마다 나만의 식재료(하트) 여부를 함께 준다(입고 화면에서 바로 지정)
+		return execute(() -> workflow.list(com.example.demo.security.FavoriteOwner.of(request, params).applyTo(params)));
 	}
 
 	/*

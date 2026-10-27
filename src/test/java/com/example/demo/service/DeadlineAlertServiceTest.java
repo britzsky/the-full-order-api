@@ -49,16 +49,27 @@ class DeadlineAlertServiceTest {
         assertThat(((List<Map<String,Object>>)welstory.get("items")).get(0)).containsEntry("late",true);
     }
 
-    @Test void skipsUnknownRulesIssuesAmbiguousOffersAndFarDeadlines() {
+    @Test void skipsUnknownRulesIssuesAndFarDeadlines() {
         rows(
             row("NORULE","2026-10-09",List.of(),offer("OURHOME","FU0UP",0,null,"1630","Y")),
             row("BLANK","2026-10-09",List.of(),offer("WELSTORY","A001",1,null," ","Y")),
             row("PENDING","2026-10-09",List.of("기존 주문 접수 확인 필요"),offer("OURHOME","FU0UP",2,"16:30",null,"Y")),
-            row("TWO","2026-10-09",List.of(),offer("OURHOME","FU0UP",2,"16:30",null,"N"),offer("WELSTORY","A001",1,"17:00","F01","N")),
             row("FAR","2026-10-15",List.of(),offer("OURHOME","FU0UP",7,"15:00",null,"Y")));   // 10/15 필요 → 마지막 기회 10/8 15:00(26시간 뒤)
         assertThat(alerts(new HashMap<>(Map.of("account_id","A")))).isEmpty();
         assertThat(alerts(new HashMap<>(Map.of("account_id","A","within_hours","48")))).singleElement()
             .satisfies(g->assertThat(g).containsEntry("deadline","2026-10-08T15:00"));
+        // 범위 밖이어도 식단 기준 발주 필요 요약에는 들어간다(확인 필요 품목은 개수만, 마감 계산은 빼고)
+        @SuppressWarnings("unchecked") var upcoming=(Map<String,Object>)service.alerts(new HashMap<>(Map.of("account_id","A")),clock).get("upcoming");
+        assertThat(upcoming).containsEntry("items",4).containsEntry("needed_from","2026-10-09")
+            .containsEntry("first_deadline","2026-10-08T15:00").containsEntry("first_deadline_supplier","아워홈");
+    }
+
+    @Test void firstCandidateWhenNoPreferredSoNewSitesGetAlerts() {
+        // 처음 발주하는 사업장: 늘 쓰던 상품이 없고 후보가 여러 개 → 발주 화면 첫 후보(정렬 순서) 기준
+        rows(row("TWO","2026-10-09",List.of(),offer("OURHOME","FU0UP",2,"16:30",null,"N"),offer("WELSTORY","A001",1,"17:00","F01","N")),
+            row("NONE","2026-10-09",List.of()));
+        assertThat(alerts(new HashMap<>(Map.of("account_id","A")))).singleElement()
+            .satisfies(g->assertThat(g).containsEntry("supplier_code","OURHOME").containsEntry("deadline","2026-10-07T16:30"));
     }
 
     @Test void onlyPreferredWhenSeveralAndValidatesInput() {

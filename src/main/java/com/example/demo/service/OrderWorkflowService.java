@@ -52,8 +52,13 @@ public class OrderWorkflowService {
 			if (!text(p.get(field)).isBlank())
 				LocalDate.parse(text(p.get(field)));
 		List<Map<String, Object>> orders = mapper.orders(p);
-		for (Map<String, Object> order : orders)
-			order.put("items", mapper.items(order));
+		for (Map<String, Object> order : orders) {
+			// 나만의 식재료 주인은 품목 조회에만 쓰고 발주서 응답에는 넣지 않는다
+			Map<String, Object> q = new LinkedHashMap<>(order);
+			q.put("favorite_owner_type", p.get("favorite_owner_type"));
+			q.put("favorite_owner_id", p.get("favorite_owner_id"));
+			order.put("items", mapper.items(q));
+		}
 		return Map.of("orders", orders, "limit", p.get("limit"), "offset", p.get("offset"));
 	}
 

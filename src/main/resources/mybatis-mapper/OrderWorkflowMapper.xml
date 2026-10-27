@@ -36,18 +36,24 @@
     <if test="supplier_id != null and supplier_id != ''">AND po.supplier_id=#{supplier_id}</if>
     ORDER BY po.created_at DESC,po.purchase_order_id DESC LIMIT #{limit} OFFSET #{offset}
   </select>
-  <!-- 발주 품목. ingredient_id = 재고에 넣을 거래처 식재료(source_ingredient_id). 비어 있으면 입고할 때 사람이 고른다 -->
+  <!-- 발주 품목. ingredient_id = 재고에 넣을 거래처 식재료(source_ingredient_id). 비어 있으면 입고할 때 사람이 고른다.
+       favorite_yn: 나만의 식재료(하트). 주인(favorite_owner_type/id)을 넘긴 발주서 목록 조회에서만 채운다 -->
   <select id="items" resultType="map">
     SELECT i.*,po.account_id,po.supplier_id,po.sold_to,po.client_ord,
            NULLIF(i.source_ingredient_id,'') ingredient_id,
            COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,ai.base_unit ingredient_base_unit,
            COALESCE(i.product_name_snapshot,p.product_name) product_name,p.base_qty product_base_qty,p.base_unit product_base_unit,
-           p.alt_base_qty,p.alt_base_unit,ai.default_location_id,ss.supplier_account_site_id
+           p.alt_base_qty,p.alt_base_unit,ai.default_location_id,ss.supplier_account_site_id,
+           <choose><when test="favorite_owner_type != null">CASE WHEN fp.favorite_product_id IS NULL THEN 'N' ELSE 'Y' END</when><otherwise>NULL</otherwise></choose> favorite_yn
     FROM the_full_order.tb_account_purchase_order_item i
     JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
     JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
     LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=po.account_id AND ai.ingredient_id=i.source_ingredient_id
     LEFT JOIN the_full_order.tb_supplier_account_site ss ON ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
+    <if test="favorite_owner_type != null">
+    LEFT JOIN the_full_order.tb_favorite_product fp ON fp.supplier_product_id=i.supplier_product_id
+           AND fp.owner_type=#{favorite_owner_type} AND fp.owner_id=#{favorite_owner_id}
+    </if>
     WHERE po.account_id=#{account_id} AND po.purchase_order_id=#{purchase_order_id} ORDER BY i.purchase_order_item_id
     <if test="lock_rows != null and lock_rows">FOR UPDATE</if>
   </select>

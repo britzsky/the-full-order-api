@@ -9,7 +9,8 @@ import org.springframework.stereotype.Service;
  * 발주 마감 알림 대상. 저장된 식단(PLAN) 기준 부족 식재료마다 우선(또는 유일한) 공급상품의 다음 발주 마감을
  * 공급사 가이드 규칙(OrderAvailability.deadline)으로 계산해 공급사·사업장·마감·납품일별로 묶는다.
  * 이미 발주한 수량은 부족량 계산(기발주 미입고)에서 빠지므로 발주를 마치면 자동으로 사라진다.
- * 마감 규칙을 모르는 상품, 기존 주문 확인이 필요한 품목, 우선 상품이 정해지지 않은 품목은 알리지 않는다(추정 금지).
+ * 마감 규칙을 모르는 상품, 기존 주문 확인이 필요한 품목, 판매중 후보가 없는 품목은 알리지 않는다(추정 금지).
+ * upcoming: 알림 범위와 상관없이 식단 기준으로 지금 발주가 필요한 품목 수·가장 빠른 필요일·가장 빠른 마감(홈 '오늘 할 일'·종 알림).
  */
 @Service
 public class DeadlineAlertService {
@@ -42,8 +43,18 @@ public class DeadlineAlertService {
         var rows = (List<Map<String, Object>>) shortages.shortages(criteria).get("ingredients");
 
         Map<String, Map<String, Object>> groups = new LinkedHashMap<>();
+        int upcomingItems = 0;
+        LocalDate upcomingNeeded = null;
+        LocalDateTime upcomingDeadline = null;
+        Map<String, Object> upcomingOffer = null;
         for (Map<String, Object> row : rows) {
             if (new BigDecimal(Objects.toString(row.get("shortage_qty"), "0")).signum() <= 0) continue;
+            upcomingItems++;
+            String neededRaw = Objects.toString(row.get("needed_by"), "");
+            if (!neededRaw.isBlank()) {
+                LocalDate needed = LocalDate.parse(neededRaw);
+                if (upcomingNeeded == null || needed.isBefore(upcomingNeeded)) upcomingNeeded = needed;
+            }
             if (!((Collection<?>) row.getOrDefault("issues", List.of())).isEmpty()) continue;
             Map<String, Object> offer = chosenOffer((List<Map<String, Object>>) row.getOrDefault("offers", List.of()));
             if (offer == null) continue;
@@ -63,7 +74,9 @@ public class DeadlineAlertService {
                     if (candidate.isAfter(now)) { delivery = today.plusDays(i); deadline = candidate; }
                 }
             }
-            if (deadline == null || deadline.isAfter(now.plusHours(hours))) continue;
+            if (deadline == null) continue;
+            if (upcomingDeadline == null || deadline.isBefore(upcomingDeadline)) { upcomingDeadline = deadline; upcomingOffer = offer; }
+            if (deadline.isAfter(now.plusHours(hours))) continue;
             String key = offer.get("supplier_code") + "|" + offer.get("external_site_code") + "|" + deadline + "|" + delivery;
             Map<String, Object> group = groups.get(key);
             if (group == null) {
@@ -98,11 +111,18 @@ public class DeadlineAlertService {
         response.put("checked_at", now.toString());
         response.put("within_hours", hours);
         response.put("alerts", result);
+        Map<String, Object> upcoming = new LinkedHashMap<>();
+        upcoming.put("items", upcomingItems);
+        upcoming.put("needed_from", upcomingNeeded == null ? null : (upcomingNeeded.isBefore(today) ? today : upcomingNeeded).toString());
+        upcoming.put("first_deadline", upcomingDeadline == null ? null : upcomingDeadline.toString());
+        upcoming.put("first_deadline_supplier", upcomingOffer == null ? null : upcomingOffer.get("supplier_name"));
+        response.put("upcoming", upcoming);
         return response;
     }
 
     /**
-     * 부족 발주 추천과 같은 기준: 우선 상품이 하나면 그것, 후보가 하나뿐이면 그것. 판매중 상품만.
+     * 부족 발주 추천과 같은 기준: 우선 상품(이 식재료로 발주했던 상품)이 하나면 그것, 아니면 발주 화면이 먼저 보여 주는 첫 후보
+     * (후보는 주문 가능·늘 쓰던·나만의 식재료·이름 일치·금액 순으로 정렬돼 온다). 처음 발주하는 사업장도 알림이 되도록. 판매중 상품만.
      * 후보는 공급사 사업장 상품(offer)뿐이라 직접구매 상품은 원래 들어오지 않는다. 마감 규칙이 없는 공급사는 deadline이 null이라 제외된다.
      */
     static Map<String, Object> chosenOffer(List<Map<String, Object>> offers) {
@@ -111,6 +131,6 @@ public class DeadlineAlertService {
             .toList();
         List<Map<String, Object>> preferred = usable.stream().filter(o -> "Y".equals(o.get("preferred_yn"))).toList();
         if (preferred.size() == 1) return preferred.get(0);
-        return usable.size() == 1 ? usable.get(0) : null;
+        return usable.isEmpty() ? null : usable.get(0);
     }
 }
