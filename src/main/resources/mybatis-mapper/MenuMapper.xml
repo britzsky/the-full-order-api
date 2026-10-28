@@ -90,7 +90,43 @@
 		  AND rd.qty_num IS NOT NULL
 		ORDER BY rd.ingredient_seq
 	</select>
-	
+
+	<!-- 거래처에 아직 없는 본사 메뉴(식단표 불러오기 후 저장 전)의 상세: 본사 레시피 × 이 거래처 재고·단가. 저장하면 이 레시피가 거래처로 복사된다(2026-10-28) -->
+	<select id="HqDetailListForAccount" parameterType="map" resultType="hashmap">
+		SELECT 'HQ' AS recipe_source, hr.recipe_id, hr.menu_id, hr.ingredient_id,
+		       COALESCE(hi.ingredient_name_std, hr.ingredient_name_raw) AS ingredient_name,
+		       hr.ingredient_name_raw, hi.ingredient_name_std, hi.category_name, hi.storage_type,
+		       hr.qty_num AS per_person_qty, hr.qty_num, hr.qty_unit, hr.qty_raw, hr.recipe_yield_servings, hr.review_flag,
+		       COALESCE(#{servingQty}, 1) AS serving_qty,
+		       ROUND(CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(#{servingQty},1) END, 3) AS required_qty,
+		       ROUND(COALESCE(ib.current_base_qty, 0), 3) AS current_qty,
+		       COALESCE(ib.location_id, 'L999') AS location_id,
+		       ROUND(GREATEST(CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(#{servingQty},1) END - COALESCE(ib.current_base_qty, 0), 0), 3) AS shortage_qty,
+		       ROUND(GREATEST(CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(#{servingQty},1) END + COALESCE(ai.safe_stock_base_qty, 0) - COALESCE(ib.current_base_qty, 0), 0), 3) AS order_needed_qty,
+		       hr.base_unit,
+		       COALESCE(ai.safe_stock_base_qty, 0) AS safe_stock_qty,
+		       hr.ingredient_seq,
+		       pp.unit_cost AS cost_unit_cost, pp.base_unit AS cost_base_unit,
+		       CASE WHEN hr.review_flag=0 THEN ROUND(hr.qty_per_person*pp.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>, 4) END AS cost_per_person,
+		       CASE WHEN pp.unit_cost IS NULL THEN '단가 미등록' END AS cost_reason, pp.cost_source
+		FROM the_full_order.tb_recipe_detail hr
+		LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+		LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=hr.ingredient_id
+		LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
+		  ON pp.account_id=#{account_id} AND pp.ingredient_id=hr.ingredient_id
+		<!-- 재고는 거래처 식재료 기준단위로 쌓이므로 본사 레시피 단위와 같을 때만 비교한다 -->
+		LEFT JOIN (
+		  SELECT b.ingredient_id,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
+		  FROM the_full_order.tb_account_inventory_balance b
+		  WHERE b.account_id=#{account_id}
+		  GROUP BY b.ingredient_id
+		) ib ON ib.ingredient_id=hr.ingredient_id AND LOWER(COALESCE(ai.base_unit, hr.base_unit))=LOWER(hr.base_unit)
+		WHERE hr.menu_id = #{menu_id}
+		  AND hr.qty_num IS NOT NULL
+		  AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=hr.menu_id AND am.del_yn='N')
+		ORDER BY hr.ingredient_seq
+	</select>
+
 	<select id="IngredientsList" parameterType="map" resultType="hashmap">
 		SELECT ingredient_id,
 			   ingredient_name_raw,

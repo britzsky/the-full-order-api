@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.demo.mapper.MealRecipeRefreshMapper">
+ <!-- 거래처 레시피가 바뀐 메뉴가 들어 있는 식사 중 다시 계산할 것: 오늘 이후 + 사용 확정 안 함(COMPLETED·CANCELED 아님, 유효한 재고 차감 없음).
+      지난 식사·사용 확정한 식사는 그때 쓴 양(재고 이력·차감)을 그대로 둔다(2026-10-28 사용자 결정) -->
+ <select id="targets" parameterType="map" resultType="long">
+  SELECT DISTINCT s.meal_service_id
+    FROM the_full_order.tb_account_meal_service s
+    JOIN the_full_order.tb_account_table_meals_detail d ON d.meal_service_id=s.meal_service_id AND d.menu_id=#{menu_id}
+    JOIN the_full_order.tb_account_table_meals t ON t.table_id=s.table_id
+   WHERE s.account_id=#{account_id} AND s.meal_date&gt;=CURRENT_DATE
+     AND s.status NOT IN ('COMPLETED','CANCELED') AND t.status&lt;&gt;'CANCELED'
+     AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_meal_stock_usage u
+                     WHERE u.meal_service_id=s.meal_service_id AND u.reversed_at IS NULL)
+   ORDER BY s.meal_service_id
+ </select>
+</mapper>

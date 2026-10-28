@@ -115,6 +115,10 @@ public class MenuService {
 		validateCostDate(paramMap);
 		List<Map<String, Object>> resultList = new ArrayList<>();
 		resultList = menuMapper.AccountDetailList(paramMap);
+		// 식단표 불러오기는 본사 메뉴로 맞추고 저장할 때 거래처 메뉴로 복사하므로, 저장 전에는 본사 레시피로 보여준다
+		Object account = paramMap.get("account_id");
+		if (resultList.isEmpty() && account != null && !account.toString().isBlank())
+			resultList = menuMapper.HqDetailListForAccount(paramMap);
 		availability.enrich(resultList, paramMap, true);
 		var origins = recipes.origins(paramMap);
 		for (var row : resultList) {

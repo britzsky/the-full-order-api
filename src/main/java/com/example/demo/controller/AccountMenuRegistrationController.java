@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.example.demo.security.WorkspaceAccess;
 import com.example.demo.service.AccountMenuRegistrationService;
+import com.example.demo.service.MealRecipeRefreshService;
 import com.example.demo.service.MenuRecipeDraftService;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -14,10 +15,13 @@ import jakarta.servlet.http.HttpServletRequest;
 public class AccountMenuRegistrationController {
 	private final AccountMenuRegistrationService service;
 	private final MenuRecipeDraftService draftService;
+	private final MealRecipeRefreshService refresh;
 
-	public AccountMenuRegistrationController(AccountMenuRegistrationService service, MenuRecipeDraftService draftService) {
+	public AccountMenuRegistrationController(AccountMenuRegistrationService service, MenuRecipeDraftService draftService,
+			MealRecipeRefreshService refresh) {
 		this.service = service;
 		this.draftService = draftService;
+		this.refresh = refresh;
 	}
 
 	/*
@@ -41,7 +45,8 @@ public class AccountMenuRegistrationController {
 	 */
 	@PostMapping("/menus/reset-to-standard")
 	public ResponseEntity<?> resetToStandard(@RequestBody Map<String, Object> b) {
-		return run(() -> service.resetToStandard(b));
+		// 되돌린 레시피로 오늘 이후·사용 확정 전 식사의 필요량도 다시 계산(2026-10-28)
+		return run(() -> refresh.withRefresh(service.resetToStandard(b), b.get("account_id"), b.get("menu_id")));
 	}
 
 	/*

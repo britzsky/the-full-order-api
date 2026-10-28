@@ -126,6 +126,13 @@ public class AccountMenuRecipeService {
 		return result(mapper.updateRecipeDetail(b));
 	}
 
+	/** 레시피 줄 하나가 속한 거래처·메뉴(수정·삭제 뒤 식단 다시 계산용). 없으면 null */
+	public Map<String, Object> recipeOwner(Map<String, Object> b) {
+		if (text(b.get("account_recipe_detail_id")).isBlank()) return null;
+		Map<String, Object> stored = mapper.recipeById(b);
+		return stored == null ? null : Map.of("account_id", stored.get("account_id"), "menu_id", stored.get("menu_id"));
+	}
+
 	public Map<String, Object> deleteRecipe(Map<String, Object> b) {
 		require(b, "account_recipe_detail_id");
 		return result(mapper.deleteRecipeDetail(b));

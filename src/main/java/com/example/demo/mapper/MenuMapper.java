@@ -38,6 +38,9 @@ public interface MenuMapper {
 
 	List<Map<String, Object>> AccountDetailList(Map<String, Object> paramMap);
 
+	// 거래처에 아직 없는 본사 메뉴의 상세(본사 레시피 × 이 거래처 재고·단가)
+	List<Map<String, Object>> HqDetailListForAccount(Map<String, Object> paramMap);
+
 	// 본사 메뉴의 이 거래처 기준 예상 1인 원가(거래처 메뉴가 아닌 본사 메뉴만)
 	List<Map<String, Object>> HqMenuCosts(Map<String, Object> paramMap);
 

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 식단표 부속 서류(조리계획표·급식운영일지·보존식 라벨) 조회. 기준: docs/MEAL_DOCUMENTS_RULES.md -->
+<mapper namespace="com.example.demo.mapper.MealDocumentMapper">
+ <select id="plan" parameterType="map" resultType="hashmap">
+  SELECT table_id,account_id,account_name,table_name,table_year,table_month,table_week,status
+    FROM the_full_order.tb_account_table_meals
+   WHERE table_id=#{table_id} AND account_id=#{account_id}
+ </select>
+ <!-- 거래처 식사 구성(고른 끼니)과 이 식단표에 실제로 있는 끼니를 합쳐 순서대로 -->
+ <select id="slots" parameterType="map" resultType="hashmap">
+  SELECT m.meal_slot_code,m.meal_slot_name,m.slot_kind,COALESCE(st.display_order,m.display_order+100) display_order
+    FROM the_full_order.tb_meal_slot_master m
+    LEFT JOIN the_full_order.tb_account_meal_slot_setting st ON st.account_id=#{account_id} AND st.meal_slot_code=m.meal_slot_code
+   WHERE st.account_id IS NOT NULL
+      OR EXISTS(SELECT 1 FROM the_full_order.tb_account_meal_service s
+                 WHERE s.table_id=#{table_id} AND s.meal_slot_code=m.meal_slot_code AND s.status&lt;&gt;'CANCELED')
+   ORDER BY display_order,m.meal_slot_code
+ </select>
+ <select id="services" parameterType="map" resultType="hashmap">
+  SELECT s.meal_service_id,s.meal_date,s.meal_slot_code,s.planned_servings
+    FROM the_full_order.tb_account_meal_service s
+   WHERE s.table_id=#{table_id} AND s.status&lt;&gt;'CANCELED' AND s.meal_slot_code IS NOT NULL
+   ORDER BY s.meal_date,s.meal_slot_code
+ </select>
+ <select id="menus" parameterType="map" resultType="hashmap">
+  SELECT d.meal_service_id,d.menu_id,d.menu_name,d.sort_order
+    FROM the_full_order.tb_account_table_meals_detail d
+    JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=d.meal_service_id
+   WHERE d.table_id=#{table_id} AND s.status&lt;&gt;'CANCELED'
+   ORDER BY d.meal_service_id,d.sort_order
+ </select>
+ <!-- 조리계획표: 메뉴별 식재료 총량. 품목명·규격은 그 식재료로 가장 최근 들어온 상품(없으면 식재료 이름·규격 빈칸) -->
+ <select id="requirements" parameterType="map" resultType="hashmap">
+  SELECT r.meal_service_id,r.menu_id,r.ingredient_id,r.total_required_qty,r.base_unit,
+         COALESCE(NULLIF(r.product_name_snapshot,''),lot.product_name_snapshot,p.product_name,
+                  ai.ingredient_name_std,ai.ingredient_name_raw,i.ingredient_name_std,i.ingredient_name_raw,r.ingredient_id) item_name,
+         p.package_qty,p.package_unit,p.order_unit,
+         (SELECT MIN(rd.ingredient_seq) FROM the_full_order.tb_account_recipe_detail rd
+           WHERE rd.account_id=s.account_id AND rd.menu_id=r.menu_id AND rd.ingredient_id=r.ingredient_id) ingredient_seq
+    FROM the_full_order.tb_account_meal_ingredient_requirement r
+    JOIN the_full_order.tb_account_meal_service s ON s.meal_service_id=r.meal_service_id
+    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=s.account_id AND ai.ingredient_id=r.ingredient_id
+    LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+    LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+      SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+       WHERE l.account_id=s.account_id AND l.ingredient_id=r.ingredient_id
+       ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
+    LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=lot.supplier_product_id
+   WHERE s.table_id=#{table_id} AND s.status&lt;&gt;'CANCELED'
+   ORDER BY r.meal_service_id,r.menu_id,ingredient_seq IS NULL,ingredient_seq,r.ingredient_id
+ </select>
+</mapper>

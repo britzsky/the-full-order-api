@@ -56,6 +56,9 @@ dependencies {
 	implementation 'org.openpnp:opencv:4.9.0-0'
 	// ✅ WebClient (Spring WebFlux)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	// 식단표 부속 서류: 조리계획표·급식운영일지(엑셀), 보존식 라벨(PDF, 나눔고딕 resources/fonts)
+	implementation 'org.apache.poi:poi-ooxml:5.4.1'
+	implementation 'org.apache.pdfbox:pdfbox:3.0.5'
 }
 
 tasks.named('test') {

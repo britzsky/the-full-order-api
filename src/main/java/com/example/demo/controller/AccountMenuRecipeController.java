@@ -5,14 +5,18 @@ import java.util.function.Supplier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.example.demo.service.AccountMenuRecipeService;
+import com.example.demo.service.MealRecipeRefreshService;
 
 @RestController
 @RequestMapping("/v2/menu-management")
 public class AccountMenuRecipeController {
 	private final AccountMenuRecipeService service;
+	/** 레시피 줄을 바꾸면 그 메뉴가 든 오늘 이후·사용 확정 전 식사의 필요량을 다시 계산(2026-10-28) */
+	private final MealRecipeRefreshService refresh;
 
-	public AccountMenuRecipeController(AccountMenuRecipeService service) {
+	public AccountMenuRecipeController(AccountMenuRecipeService service, MealRecipeRefreshService refresh) {
 		this.service = service;
+		this.refresh = refresh;
 	}
 
 	/*
@@ -92,7 +96,7 @@ public class AccountMenuRecipeController {
 	 */
 	@PostMapping("/recipes")
 	public ResponseEntity<?> createRecipe(@RequestBody Map<String, Object> b) {
-		return run(() -> service.createRecipe(b));
+		return run(() -> refresh.withRefresh(service.createRecipe(b), b.get("account_id"), b.get("menu_id")));
 	}
 
 	/*
@@ -100,7 +104,11 @@ public class AccountMenuRecipeController {
 	 */
 	@PatchMapping("/recipes")
 	public ResponseEntity<?> updateRecipe(@RequestBody Map<String, Object> b) {
-		return run(() -> service.updateRecipe(b));
+		return run(() -> {
+			Map<String, Object> owner = service.recipeOwner(b);
+			Object result = service.updateRecipe(b);
+			return owner == null ? result : refresh.withRefresh(result, owner.get("account_id"), owner.get("menu_id"));
+		});
 	}
 
 	/*
@@ -108,7 +116,12 @@ public class AccountMenuRecipeController {
 	 */
 	@DeleteMapping("/recipes")
 	public ResponseEntity<?> deleteRecipe(@RequestBody Map<String, Object> b) {
-		return run(() -> service.deleteRecipe(b));
+		return run(() -> {
+			// 지우기 전에 어느 메뉴 줄인지 읽어 둔다
+			Map<String, Object> owner = service.recipeOwner(b);
+			Object result = service.deleteRecipe(b);
+			return owner == null ? result : refresh.withRefresh(result, owner.get("account_id"), owner.get("menu_id"));
+		});
 	}
 
 	private ResponseEntity<?> run(Supplier<?> a) {

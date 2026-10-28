@@ -141,8 +141,9 @@ class LocalIngredientStockFlowDatabaseTest {
 		meal.put("meal_slot_code", 2);
 		meal.put("food_type", 1);
 		meal.put("meal_plan_type", 0);
-		if (special) { meal.put("special_yn", "Y"); meal.put("special_note", "테스트 특식"); }
-		meal.put("menus", List.of(Map.of("menu_id", menuId, "menu_name", "테스트", "sort_order", 1, "menu_type", 0, "menu_gubun", 3, "food_type", 1)));
+		if (special) meal.put("special_note", "테스트 특식");
+		// 특식은 메뉴 단위(끼니 special_yn은 서버가 메뉴에서 계산)
+		meal.put("menus", List.of(Map.of("menu_id", menuId, "menu_name", "테스트", "sort_order", 1, "menu_type", 0, "menu_gubun", 3, "food_type", 1, "special_yn", special ? "Y" : "N")));
 		return meal;
 	}
 

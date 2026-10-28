@@ -70,6 +70,7 @@ public class MealPlanV2Service {
 			for (String key : List.of("table_id", "account_id", "user_id", "planned_servings"))
 				service.put(key, b.get(key));
 			service.put("status", "DRAFT");
+			markSpecialMeal(service, meal.get("menus"));
 			try {
 				createService(service);
 				if (!(meal.get("menus") instanceof List<?> menus) || menus.isEmpty())
@@ -79,6 +80,8 @@ public class MealPlanV2Service {
 						throw new IllegalArgumentException("메뉴 형식을 확인해주세요.");
 					Map<String, Object> detail = new java.util.HashMap<>(service);
 					menu.forEach((k, v) -> detail.put(k.toString(), v));
+					// 끼니 값(service.special_yn)이 메뉴로 번지지 않게 메뉴 값만 쓴다
+					detail.put("special_yn", "Y".equals(String.valueOf(menu.get("special_yn"))) ? "Y" : "N");
 					try {
 						insertDetail(detail);
 					} catch (IllegalArgumentException e) {
@@ -93,6 +96,24 @@ public class MealPlanV2Service {
 		}
 		if (notifications!=null) notifications.mealChanged(String.valueOf(b.get("account_id")),String.valueOf(b.get("table_id")),String.valueOf(b.get("user_id")));
 		return ok(b.get("table_id"));
+	}
+
+	/**
+	 * 특식은 메뉴 하나 단위(2026-10-27 사용자 결정: 나머지는 일반식이고 메뉴 하나가 특식). 끼니 special_yn은 특식 메뉴가 하나라도 있으면 Y,
+	 * 메모가 없으면 특식 메뉴 이름을 넣는다(정산 화면 '특식: 11-02 중식(삼계탕)'). 메뉴에 특식 표시가 하나도 없으면 끼니 값 그대로(예전 요청 호환).
+	 */
+	static void markSpecialMeal(Map<String, Object> service, Object menus) {
+		if (!(menus instanceof List<?> list)) return;
+		List<String> names = new java.util.ArrayList<>();
+		for (Object value : list)
+			if (value instanceof Map<?, ?> menu && "Y".equals(String.valueOf(menu.get("special_yn")))) names.add(String.valueOf(menu.get("menu_name")));
+		if (names.isEmpty()) return;
+		service.put("special_yn", "Y");
+		Object note = service.get("special_note");
+		if (note == null || note.toString().isBlank()) {
+			String joined = String.join(", ", names);
+			service.put("special_note", joined.length() > 200 ? joined.substring(0, 200) : joined);
+		}
 	}
 
 	/**
@@ -277,7 +298,8 @@ public class MealPlanV2Service {
 
 	/**
 	 * 주간 식단가 정산(2026-10-22 사용자 결정). 끼니별로 식단가를 넘어도 막지 않고, 주 합계로 맞추는지 보여준다(넘어도 경고만).
-	 * 특식 식사의 초과분은 주 합계에서 빼고 '특식 초과'로 따로 보여준다. 금액은 1인 기준이다.
+	 * 특식 메뉴 때문에 넘은 금액(초과분 중 특식 메뉴 원가까지)은 주 합계에서 빼고 '특식 초과'로 따로 보여준다. 금액은 1인 기준이다.
+	 * 특식 메뉴 원가가 없는 특식 끼니(메뉴별 특식 전 데이터)는 예전처럼 초과분 전부를 뺀다.
 	 */
 	public Map<String, Object> budgetSummary(Map<String, Object> p) {
 		req(p, "table_id");
@@ -297,9 +319,11 @@ public class MealPlanV2Service {
 			meal.put("difference", diff);
 			meal.put("over_budget", over.signum() > 0);
 			if (special && over.signum() > 0) {
-				specialOver = specialOver.add(over);
-				// 특식 초과분은 주 합계에서 뺀다: 원가를 식단가까지만 센다.
-				mealCost = mealCost.subtract(over);
+				BigDecimal specialCost = decimal(row.get("special_cost_per_person"));
+				// 일반 메뉴 때문에 넘은 금액은 그대로 초과로 남긴다
+				BigDecimal specialPart = specialCost.signum() > 0 ? over.min(specialCost) : over;
+				specialOver = specialOver.add(specialPart);
+				mealCost = mealCost.subtract(specialPart);
 			}
 			budget = budget.add(mealBudget);
 			cost = cost.add(mealCost);
