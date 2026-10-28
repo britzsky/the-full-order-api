@@ -5,8 +5,8 @@
  <!-- 구성 중인 식단의 필요량. 거래처 메뉴면 거래처 레시피, 아직 거래처 메뉴가 아닌 본사 메뉴면 본사 레시피(저장 때 거래처 메뉴로 복사된다) -->
  <select id="draftDemand" resultType="map">
   SELECT COALESCE(ar.ingredient_id,hr.ingredient_id) ingredient_id,
-         COALESCE(i.ingredient_name_std,i.ingredient_name_raw,hi.ingredient_name_std,hi.ingredient_name_raw,ar.ingredient_name_raw,hr.ingredient_name_raw) ingredient_name,
-         COALESCE(i.base_unit,hi.base_unit) master_unit,COALESCE(ar.base_unit,hr.base_unit) base_unit,
+         COALESCE(i.ingredient_name_std,i.ingredient_name_raw,hai.ingredient_name_std,hai.ingredient_name_raw,hi.ingredient_name_std,hi.ingredient_name_raw,ar.ingredient_name_raw,hr.ingredient_name_raw) ingredient_name,
+         COALESCE(i.base_unit,hai.base_unit,hi.base_unit) master_unit,COALESCE(ar.base_unit,hr.base_unit) base_unit,
          CASE WHEN COALESCE(ar.review_flag,hr.review_flag)=0 THEN COALESCE(ar.qty_per_person,hr.qty_per_person)*d.planned_servings END quantity,
          COALESCE(m.menu_name,hm.menu_name) menu_name,d.menu_id,d.meal_date
     FROM (
@@ -21,6 +21,8 @@
     LEFT JOIN the_full_order.tb_menu_master hm ON m.menu_id IS NULL AND hm.menu_id=d.menu_id AND hm.del_yn='N'
     LEFT JOIN the_full_order.tb_recipe_detail hr ON hr.menu_id=hm.menu_id
     LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+    <!-- 저장 전 본사 메뉴도 이 거래처에 이미 있는 식재료면 거래처 기준단위로 센다(재고·발주가 그 단위, 2026-10-28) -->
+    LEFT JOIN the_full_order.tb_account_ingredient_master hai ON hai.account_id=#{account_id} AND hai.ingredient_id=hr.ingredient_id
  </select>
  <!-- 이미 지난 날짜인데 아직 사용 확정하지 않은 식사(주 단위 확정 전). 실제로는 소비됐으므로 재고에서 뺀다.
       조회 기간(date_from 이후)은 demand에서 세므로 제외하고, 2주 넘게 방치된 식단은 계산하지 않는다. 식단표 필터와 무관하게 거래처 전체. -->

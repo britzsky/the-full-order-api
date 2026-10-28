@@ -27,7 +27,8 @@ public class MealPlanImpactService {
             JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=m.account_id AND i.ingredient_id=r.ingredient_id
             WHERE m.account_id=? AND m.table_id=? AND m.status='DRAFT'
             """,p.get("account_id"),table);
-        var changes=diff(before,mapper.draftDemand(p));
+        var unitIssues=new LinkedHashSet<String>();
+        var changes=diff(before,mapper.draftDemand(p),unitIssues);
         var orders=jdbc.queryForList("""
             SELECT p.purchase_order_id,p.requested_delivery_date,p.status,
               NULLIF(i.source_ingredient_id,'') ingredient_id,
@@ -41,10 +42,14 @@ public class MealPlanImpactService {
         var ids=new HashSet<String>();for(var c:changes) ids.add(c.get("ingredient_id").toString());
         var affected=orders.stream().filter(o->ids.contains(Objects.toString(o.get("ingredient_id"),""))).toList();
         long completed=table.isBlank()?0:jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_meal_service WHERE account_id=? AND table_id=? AND status='COMPLETED'",Long.class,p.get("account_id"),table);
-        return Map.of("changes",changes,"affected_orders",affected,"completed_meals",completed,
+        return Map.of("changes",changes,"affected_orders",affected,"completed_meals",completed,"unit_issues",List.copyOf(unitIssues),
             "notice","감소량은 이 식단의 필요량 감소입니다. 다른 식단·재고를 확인하고 공급사에 주문 감량·취소 가능 여부를 확인하세요. 주문은 자동 변경되지 않습니다.");
     }
     static List<Map<String,Object>> diff(List<Map<String,Object>> before,List<Map<String,Object>> after) {
+        return diff(before,after,new LinkedHashSet<>());
+    }
+    /** 단위를 바꿀 수 없는 줄(예: 레시피 ml, 식재료 g)은 비교에서 빼고 unitIssues에 남긴다 — 한 줄 때문에 확인 전체가 멈추지 않게(2026-10-28) */
+    static List<Map<String,Object>> diff(List<Map<String,Object>> before,List<Map<String,Object>> after,Set<String> unitIssues) {
         Map<String,Map<String,Object>> rows=new TreeMap<>();
         for(int side=0;side<2;side++) for(var r:side==0?before:after) {
             String id=Objects.toString(r.get("ingredient_id"),""), date=Objects.toString(r.get("meal_date"),"");
@@ -52,7 +57,12 @@ public class MealPlanImpactService {
             String unit=Objects.toString(r.get("master_unit"),"");
             var row=rows.computeIfAbsent(date+"|"+id,k->{Map<String,Object> v=new LinkedHashMap<>();v.put("ingredient_id",id);v.put("ingredient_name",Objects.toString(r.get("ingredient_name"),id));v.put("meal_date",date);v.put("base_unit",unit);v.put("before_qty",BigDecimal.ZERO);v.put("after_qty",BigDecimal.ZERO);return v;});
             String field=side==0?"before_qty":"after_qty";
-            var qty=QuantityUnits.convert(new BigDecimal(r.get("quantity").toString()),r.get("base_unit"),row.get("base_unit"));
+            BigDecimal qty;
+            try { qty=QuantityUnits.convert(new BigDecimal(r.get("quantity").toString()),r.get("base_unit"),row.get("base_unit")); }
+            catch(IllegalArgumentException e) {
+                unitIssues.add(row.get("ingredient_name")+": 레시피 단위 "+r.get("base_unit")+"를 식재료 단위 "+unit+"로 바꿀 수 없음 · 레시피 단위 확인 요망");
+                continue;
+            }
             row.put(field,((BigDecimal)row.get(field)).add(qty));
         }
         var result=new ArrayList<Map<String,Object>>();

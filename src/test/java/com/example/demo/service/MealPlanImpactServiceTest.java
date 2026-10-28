@@ -13,4 +13,11 @@ class MealPlanImpactServiceTest {
     @Test void sumsMenuRequirementsAndDoesNotInventDifferenceForUnitChanges() {
         assertThat(MealPlanImpactService.diff(List.of(row("2026-10-03",1,"kg")),List.of(row("2026-10-03",500,"g"),row("2026-10-03",500,"g")))).isEmpty();
     }
+    @Test void unconvertibleUnitIsReportedInsteadOfFailingTheWholeCheck() {
+        var issues=new LinkedHashSet<String>();
+        var result=MealPlanImpactService.diff(List.of(),List.of(row("2026-10-03",3,"ml"),row("2026-10-03",200,"g")),issues);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).get("additional_required_qty").toString()).isEqualTo("200");
+        assertThat(issues).singleElement().asString().contains("ml").contains("g");
+    }
 }
