@@ -291,7 +291,7 @@
 		 COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
 		 COALESCE(#{qty_per_person},
 		          COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
-		 CASE WHEN #{review_flag} IS NULL OR #{review_flag}='' OR #{review_flag}='0' THEN 0 ELSE 1 END,
+		 CASE WHEN COALESCE(CAST(#{review_flag} AS CHAR),'') IN ('','0') THEN 0 ELSE 1 END,
 		 DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
 		ON DUPLICATE KEY UPDATE
 	    <trim suffixOverrides=",">
@@ -311,7 +311,7 @@
 	        base_unit = COALESCE(NULLIF(#{base_unit}, ''), #{qty_unit}),
 	        qty_per_person = COALESCE(#{qty_per_person},
 	                                  COALESCE(#{qty_base}, #{qty_num}, 0) / COALESCE(NULLIF(#{recipe_yield_servings}, 0), 1)),
-	        review_flag = CASE WHEN #{review_flag} IS NULL OR #{review_flag}='' OR #{review_flag}='0' THEN 0 ELSE 1 END,
+	        review_flag = CASE WHEN COALESCE(CAST(#{review_flag} AS CHAR),'') IN ('','0') THEN 0 ELSE 1 END,
 	        mod_at = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
 	        user_id = #{user_id}
 	    </trim>
