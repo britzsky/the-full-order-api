@@ -61,6 +61,23 @@ class HygieneServiceTest {
         assertThatThrownBy(() -> service.saveCategories("A", List.of())).hasMessageContaining("1개 이상");
     }
 
+    @SuppressWarnings("unchecked")
+    @Test void categoriesFallBackToErpDefaults() {
+        // ERP 위생관리 화면처럼: 저장된 카테고리가 없으면 기본 11개(보존식 … 기타)
+        when(erp.categories("A")).thenReturn(List.of());
+        List<Map<String, Object>> defaults = (List<Map<String, Object>>) service.categories("A").get("categories");
+        assertThat(defaults).hasSize(11);
+        assertThat(defaults.get(0)).containsEntry("category_key", "preservedFood").containsEntry("category_name", "보존식").containsEntry("use_yn", "Y");
+        assertThat(defaults.get(10)).containsEntry("category_name", "기타");
+        // 저장된 카테고리가 있으면 그대로, 빈 관리 포인트만 기본 값
+        when(erp.categories("B")).thenReturn(List.of(Map.of("category_key", "fridge", "category_name", "냉장고", "manage_point", ""),
+                Map.of("category_key", "C1", "category_name", "후드")));
+        List<Map<String, Object>> saved = (List<Map<String, Object>>) service.categories("B").get("categories");
+        assertThat(saved).hasSize(2);
+        assertThat(saved.get(0)).containsEntry("manage_point", "냉장보관 및 표시사항 관리");
+        assertThat(saved.get(1)).containsEntry("manage_point", "");
+    }
+
     @Test void photoMustBeImage() {
         assertThatThrownBy(() -> service.uploadPhoto("A", new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] { 1 })))
                 .hasMessageContaining("이미지");

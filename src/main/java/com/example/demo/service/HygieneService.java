@@ -26,9 +26,55 @@ public class HygieneService {
 		this.erp = erp;
 	}
 
+	/**
+	 * ERP 위생관리 화면(thefull.kr #/Operate/OperateTabs)과 같은 기본 카테고리 — 거래처에 저장된 카테고리가 없으면 이 목록을 쓴다
+	 * (2026-10-29 ERP 화면 코드에서 확인: 키·이름·설명·관리 포인트 동일, use/main/status Y). 카테고리 편집에서 저장하면 ERP에 저장된다.
+	 */
+	static final List<List<String>> DEFAULT_CATEGORIES = List.of(
+			List.of("preservedFood", "보존식", "보존식 라벨 / 중량 / 보관상태", "보존식 라벨 및 중량 확인"),
+			List.of("fridge", "냉장고", "소분라벨 / 밀폐보관 / 계란보관 / 온도 / 청결", "냉장보관 및 표시사항 관리"),
+			List.of("freezer", "냉동고", "성에 / 소분라벨 / 선입선출 / 온도 / 청결", "냉동보관·라벨·선입선출 관리"),
+			List.of("storage", "창고·식재료 보관", "식자재·세제 혼재 / 바닥적재 / 구분보관", "식품·비식품류 분리 및 적정 적재"),
+			List.of("crossContamination", "식재료 보관·교차오염", "밀폐보관 / 전처리 식재 / 교차오염", "밀폐 및 교차오염 예방"),
+			List.of("labeling", "표시·소비기한", "소분·제조 라벨 / 소비기한 / 유통기한", "제품명·일자·소비기한 표시"),
+			List.of("documents", "서류·법정서류", "보건증 / 면허증 / 위생서류 / 교육자료 / 점검표", "서류 비치 및 유효기간 관리"),
+			List.of("personalHygiene", "개인위생", "위생모 / 마스크 / 장신구 / 손톱 등", "조리종사자 개인위생 준수"),
+			List.of("equipment", "조리기구·시설", "조리도구 / 온도계 / 방충망 / 살균기 / 후드 등", "파손·노후·시설 상태 점검"),
+			List.of("cleaning", "청소·정리정돈", "청소 / 세척 / 청결 / 먼지 / 곰팡이 등", "청소 및 정리정돈 상태 관리"),
+			List.of("etc", "기타", "위 항목에 해당하지 않는 사항", "개별 확인 및 조치"));
+
 	public Map<String, Object> categories(String accountId) {
 		require(accountId);
-		return Map.of("categories", erp.categories(accountId));
+		return Map.of("categories", withDefaults(erp.categories(accountId)));
+	}
+
+	/** 저장된 카테고리가 없으면 기본 목록, 있으면 비어 있는 관리 포인트만 기본 값으로(ERP 화면과 같게) */
+	static List<Map<String, Object>> withDefaults(List<Map<String, Object>> saved) {
+		Map<String, String> points = new LinkedHashMap<>();
+		for (List<String> row : DEFAULT_CATEGORIES) points.put(row.get(0), row.get(3));
+		List<Map<String, Object>> result = new ArrayList<>();
+		if (saved == null || saved.isEmpty()) {
+			for (List<String> row : DEFAULT_CATEGORIES) {
+				Map<String, Object> category = new LinkedHashMap<>();
+				category.put("category_key", row.get(0));
+				category.put("category_name", row.get(1));
+				category.put("description", row.get(2));
+				category.put("manage_point", row.get(3));
+				category.put("use_yn", "Y");
+				category.put("main_yn", "Y");
+				category.put("status_yn", "Y");
+				category.put("default_yn", "Y");
+				result.add(category);
+			}
+			return result;
+		}
+		for (Map<String, Object> row : saved) {
+			Map<String, Object> category = new LinkedHashMap<>(row);
+			if (text(category.get("manage_point")).isBlank())
+				category.put("manage_point", points.getOrDefault(text(category.get("category_key")), ""));
+			result.add(category);
+		}
+		return result;
 	}
 
 	public Map<String, Object> records(String accountId, String year, String month) {
@@ -73,7 +119,7 @@ public class HygieneService {
 		body.put("account_id", accountId);
 		body.put("categories", categories);
 		erp.saveCategories(body);
-		return Map.of("code", 200, "message", "카테고리를 저장했습니다.", "categories", erp.categories(accountId));
+		return Map.of("code", 200, "message", "카테고리를 저장했습니다.", "categories", withDefaults(erp.categories(accountId)));
 	}
 
 	/**

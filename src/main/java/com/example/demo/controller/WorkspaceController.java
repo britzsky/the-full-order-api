@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 import com.example.demo.security.WorkspaceAccess;
+import com.example.demo.service.HqOverviewService;
 import com.example.demo.service.MealPlanAlertService;
 
 @RestController
@@ -14,6 +15,9 @@ public class WorkspaceController {
     private final WorkspaceAccess access;
     private final MealPlanAlertService mealPlanAlerts;
     private com.example.demo.service.ErpBudgetClient erpBudget;
+    private HqOverviewService hqOverview;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setHqOverview(HqOverviewService hqOverview) { this.hqOverview=hqOverview; }
     @org.springframework.beans.factory.annotation.Autowired
     public void setErpBudget(com.example.demo.service.ErpBudgetClient erpBudget) { this.erpBudget=erpBudget; }
     public WorkspaceController(JdbcTemplate jdbc,WorkspaceAccess access,MealPlanAlertService mealPlanAlerts) { this.jdbc=jdbc;this.access=access;this.mealPlanAlerts=mealPlanAlerts; }
@@ -46,6 +50,13 @@ public class WorkspaceController {
             FROM the_full.tb_account a WHERE a.del_yn='N'
             """+scope+" ORDER BY pending_orders DESC,due_receipts DESC,a.account_name LIMIT 500",args);
         return Map.of("role",user.headquarters()?"HEADQUARTERS":"SITE","accounts",rows,"checked_at",java.time.LocalDateTime.now().toString());
+    }
+    /** 본사 홈 '오늘 할 일'(전체 거래처): 식단표 제작 필요·발주 필요·위생 조치 필요 업장 목록(account_id가 있으면 그 거래처만). 본사만(WorkspaceAccess.authorize). */
+    @GetMapping("/hq-overview")
+    public Map<String,Object> hqOverview(@RequestParam(name="account_id",defaultValue="") String account_id,HttpServletRequest request) {
+        if(!WorkspaceAccess.user(request).headquarters())
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,"본사 담당자만 사용할 수 있습니다.");
+        return hqOverview.overview(account_id.trim());
     }
     /**
      * 홈 오른쪽 거래처 카드: 거래처명·로그인 사용자 이름·담당자(the_full.tb_account_info)·이달 예산/사용/여유.
