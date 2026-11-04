@@ -48,7 +48,7 @@ public class OrderWorkflowService {
 		required(p, "account_id");
 		p.put("limit", Math.min(200, Math.max(1, Integer.parseInt(text(p.getOrDefault("limit", 50))))));
 		p.put("offset", Math.max(0, Integer.parseInt(text(p.getOrDefault("offset", 0)))));
-		for (String field : List.of("date_from", "date_to"))
+		for (String field : List.of("date_from", "date_to", "delivery_date"))
 			if (!text(p.get(field)).isBlank())
 				LocalDate.parse(text(p.get(field)));
 		List<Map<String, Object>> orders = mapper.orders(p);

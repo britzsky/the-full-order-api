@@ -10,7 +10,7 @@ import com.example.demo.service.PlanningCostService;
 public class PlanningCostController {
     private final PlanningCostService service;
     public PlanningCostController(PlanningCostService service){this.service=service;}
-    @GetMapping public ResponseEntity<?> preview(@RequestParam String account_id,@RequestParam String ingredient_id) {
+    @GetMapping public ResponseEntity<?> preview(@RequestParam("account_id") String account_id,@RequestParam("ingredient_id") String ingredient_id) {
         try{return ResponseEntity.ok(service.preview(account_id,ingredient_id));}
         catch(IllegalArgumentException e){return ResponseEntity.badRequest().body(Map.of("message",e.getMessage()));}
     }

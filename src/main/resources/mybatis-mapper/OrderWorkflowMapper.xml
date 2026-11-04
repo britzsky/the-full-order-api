@@ -33,6 +33,8 @@
     <if test="date_from != null and date_from != ''">AND po.created_at&gt;=#{date_from}</if>
     <if test="date_to != null and date_to != ''">AND po.created_at&lt;DATE_ADD(#{date_to},INTERVAL 1 DAY)</if>
     <if test="status != null and status != ''">AND po.status=#{status}</if>
+    <!-- 검수서 인쇄: 납품일 하루치 발주서(공급사 구분 없이) -->
+    <if test="delivery_date != null and delivery_date != ''">AND po.requested_delivery_date=#{delivery_date}</if>
     <if test="supplier_id != null and supplier_id != ''">AND po.supplier_id=#{supplier_id}</if>
     ORDER BY po.created_at DESC,po.purchase_order_id DESC LIMIT #{limit} OFFSET #{offset}
   </select>

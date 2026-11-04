@@ -34,6 +34,9 @@ public class ReceiptPostingService {
 		if (!Set.of("ORDERED", "CONFIRMED", "PARTIAL_RECEIVED", "RECEIVED", "NOT_RECEIVED")
 				.contains(text(order.get("status"))))
 			throw new IllegalArgumentException("주문 확정 상태를 확인한 뒤 입고 처리하세요.");
+		// 수동 입고는 현장 검수(공급사 발주서별 '검수완료') 뒤에만. 공급사 입고 대사(post 직접 호출)는 해당 없음
+		if (order.get("inspected_at") == null)
+			throw new IllegalArgumentException("검수완료 전 · 검수서로 확인 후 검수완료 요망");
 		String key = required(payload, "receipt_key");
 		if (!key.matches("[A-Za-z0-9-]{1,60}"))
 			throw new IllegalArgumentException("입고 요청키 형식이 올바르지 않습니다.");

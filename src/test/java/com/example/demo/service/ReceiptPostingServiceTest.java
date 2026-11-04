@@ -21,6 +21,20 @@ class ReceiptPostingServiceTest {
         when(orders.receiptItem(anyMap())).thenReturn(null);
         return row;
     }
+    private com.fasterxml.jackson.databind.JsonNode manualReceipt() throws Exception {
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree("{\"account_id\":\"A\",\"purchase_order_id\":\"O\",\"receipt_key\":\"K1\",\"receipt_date\":\"2026-10-29\",\"items\":[{\"client_ord_item\":\"1\",\"received_qty\":1}]}");
+    }
+    @Test void manualReceiptNeedsInspectionFirst() throws Exception {
+        when(orders.lockOrder(anyMap())).thenReturn(new HashMap<>(Map.of("status","ORDERED")));
+        assertThatThrownBy(()->service.receive(manualReceipt())).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("검수완료");
+        verify(orders,never()).items(anyMap());verifyNoInteractions(mapper);
+    }
+    @Test void inspectedOrderPassesTheInspectionGate() throws Exception {
+        when(orders.lockOrder(anyMap())).thenReturn(new HashMap<>(Map.of("status","ORDERED","inspected_at",java.time.LocalDateTime.now())));
+        when(orders.items(anyMap())).thenReturn(List.of());
+        // 검수 관문은 통과하고 다음 검사(주문에 없는 품목)에서 멈춘다
+        assertThatThrownBy(()->service.receive(manualReceipt())).hasMessageContaining("주문에 없는 품목");
+    }
     @Test void repeatedReceiptDoesNotIncreaseInventory() {
         var row=row();when(orders.receiptItem(anyMap())).thenReturn(Map.of("received_qty",4,"supply_amount",4000));
         assertThat(service.post(row)).isFalse();verifyNoInteractions(mapper);

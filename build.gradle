@@ -59,6 +59,8 @@ dependencies {
 	// 식단표 부속 서류: 조리계획표·급식운영일지(엑셀), 보존식 라벨(PDF, 나눔고딕 resources/fonts)
 	implementation 'org.apache.poi:poi-ooxml:5.4.1'
 	implementation 'org.apache.pdfbox:pdfbox:3.0.5'
+	// 더채움 유통 상품 상세 설명(편집기 HTML)을 저장 전에 허용 태그만 남기기
+	implementation 'org.jsoup:jsoup:1.24.1'
 }
 
 tasks.named('test') {

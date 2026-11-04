@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.demo.service.ProcurementService;
 import com.example.demo.service.OrderWorkflowService;
+import com.example.demo.service.PurchaseOrderInspectionService;
 import com.example.demo.service.ReceiptPostingService;
 import com.example.demo.service.SupplierOrderMonitorService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,13 +26,15 @@ public class ProcurementController {
 	private final OrderWorkflowService workflow;
 	private final ReceiptPostingService receipts;
 	private final SupplierOrderMonitorService monitor;
+	private final PurchaseOrderInspectionService inspections;
 
 	public ProcurementController(ProcurementService service, OrderWorkflowService workflow,
-			ReceiptPostingService receipts, SupplierOrderMonitorService monitor) {
+			ReceiptPostingService receipts, SupplierOrderMonitorService monitor, PurchaseOrderInspectionService inspections) {
 		this.service = service;
 		this.workflow = workflow;
 		this.receipts = receipts;
 		this.monitor = monitor;
+		this.inspections = inspections;
 	}
 
 	/*
@@ -82,6 +85,19 @@ public class ProcurementController {
 	@PostMapping("/Receive")
 	public ResponseEntity<?> receive(@RequestBody JsonNode payload) {
 		return execute(() -> receipts.receive(payload));
+	}
+
+	/*
+	 * part : 발주관리 method : inspect comment : 발주서(공급사별) 검수완료·검수 취소. 검수완료 뒤에만 입고 처리 가능
+	 */
+	@PostMapping("/Inspect")
+	public ResponseEntity<?> inspect(@RequestBody Map<String, Object> params) {
+		return execute(() -> inspections.inspect(text(params.get("account_id")), text(params.get("purchase_order_id")),
+				text(params.get("user_id")), !Boolean.FALSE.equals(params.get("done"))));
+	}
+
+	private static String text(Object value) {
+		return value == null ? "" : String.valueOf(value).trim();
 	}
 
 	/*
