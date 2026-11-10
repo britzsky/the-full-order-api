@@ -20,6 +20,12 @@ public class WorkspaceController {
     public void setHqOverview(HqOverviewService hqOverview) { this.hqOverview=hqOverview; }
     @org.springframework.beans.factory.annotation.Autowired
     public void setErpBudget(com.example.demo.service.ErpBudgetClient erpBudget) { this.erpBudget=erpBudget; }
+    private com.example.demo.service.ErpNoticeClient erpNotice;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setErpNotice(com.example.demo.service.ErpNoticeClient erpNotice) { this.erpNotice=erpNotice; }
+    private com.example.demo.service.InstagramFeedClient instagram;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setInstagram(com.example.demo.service.InstagramFeedClient instagram) { this.instagram=instagram; }
     public WorkspaceController(JdbcTemplate jdbc,WorkspaceAccess access,MealPlanAlertService mealPlanAlerts) { this.jdbc=jdbc;this.access=access;this.mealPlanAlerts=mealPlanAlerts; }
     /** 머리글 종 알림(다음 주 식단표 미작성). 발주 마감은 프런트가 /Procurement/DeadlineAlerts 결과를 함께 보여준다. 본사가 거래처를 고르지 않으면 전체 거래처. */
     @GetMapping("/alerts")
@@ -80,6 +86,18 @@ public class WorkspaceController {
         // 예산은 기존 ERP API(식자재 budget_grant/day_use_amount, 소모품 supplies_budget/supplies_used) 그대로
         result.put("budget",erpBudget.monthly(account,month.getYear(),month.getMonthValue()));
         return result;
+    }
+    /** PC 홈 B 영역 공지사항: 기존 ERP 본사 공지(ErpNoticeClient, 게시 기한 지난 것 제외·최신순). 로그인한 본사·현장 모두 같은 목록. */
+    @GetMapping("/notices")
+    public Map<String,Object> notices(HttpServletRequest request) {
+        WorkspaceAccess.user(request);
+        return erpNotice.list();
+    }
+    /** PC 홈 C 영역: 더채움 인스타그램 최근 게시물(InstagramFeedClient — thefull.co.kr/instagram-proxy를 서버가 대신 조회, 5분 기억). */
+    @GetMapping("/instagram")
+    public Map<String,Object> instagram(HttpServletRequest request,@RequestParam(name="limit",defaultValue="4") int limit) {
+        WorkspaceAccess.user(request);
+        return instagram.recent(limit);
     }
     private Object first(String sql,Object... args) {
         var rows=jdbc.queryForList(sql,args);
