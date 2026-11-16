@@ -27,13 +27,13 @@ public class DistShopController {
 	 * part : 더채움몰 method : context comment : 구매 유형·거래처·후불 가능 여부·입금 계좌·카테고리
 	 */
 	@GetMapping("/context")
-	public ResponseEntity<?> context(HttpServletRequest request) { return run(request, service::context); }
+	public ResponseEntity<?> context(HttpServletRequest request) { return guest(request, service::context); }
 
 	/*
 	 * part : 더채움몰 method : products comment : 판매 중인 상품(구매 유형별 적용 가격). buyer_type, category_id, keyword
 	 */
 	@GetMapping("/products")
-	public ResponseEntity<?> products(@RequestParam Map<String, String> q, HttpServletRequest request) { return run(request, user -> service.products(user, q)); }
+	public ResponseEntity<?> products(@RequestParam Map<String, String> q, HttpServletRequest request) { return guest(request, user -> service.products(user, q)); }
 
 	/*
 	 * part : 더채움몰 method : product comment : 상품 상세(설명·이미지·남은 수량)
@@ -41,7 +41,7 @@ public class DistShopController {
 	@GetMapping("/products/{productId}")
 	public ResponseEntity<?> product(@PathVariable("productId") String productId, @RequestParam(name = "buyer_type", defaultValue = "") String buyerType,
 			HttpServletRequest request) {
-		return run(request, user -> service.product(user, productId, buyerType));
+		return guest(request, user -> service.product(user, productId, buyerType));
 	}
 
 	/*
@@ -79,8 +79,17 @@ public class DistShopController {
 	}
 
 	private ResponseEntity<?> run(HttpServletRequest request, Function<WorkspaceUser, ?> action) {
+		return handle(() -> action.apply(WorkspaceAccess.user(request)));
+	}
+
+	/** 상품 보기: 로그인 안 한 손님은 user=null(개인 구매가만, DistShopService) */
+	private ResponseEntity<?> guest(HttpServletRequest request, Function<WorkspaceUser, ?> action) {
+		return handle(() -> action.apply(WorkspaceAccess.optionalUser(request)));
+	}
+
+	private ResponseEntity<?> handle(java.util.function.Supplier<?> action) {
 		try {
-			return ResponseEntity.ok(action.apply(WorkspaceAccess.user(request)));
+			return ResponseEntity.ok(action.get());
 		} catch (IllegalArgumentException e) {
 			return ResponseEntity.badRequest().body(Map.of("code", 400, "message", e.getMessage()));
 		} catch (IllegalStateException e) {

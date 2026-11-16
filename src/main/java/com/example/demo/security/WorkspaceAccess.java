@@ -19,6 +19,20 @@ public class WorkspaceAccess {
         return Set.of("v2","Procurement","Order","Inventory","Menu","Table","Account","Analytics","AI")
             .contains(path.split("/",3).length>1 ? path.split("/",3)[1] : "");
     }
+    /**
+     * 로그인 없이(손님) 읽을 수 있는 GET(2026-11-12 사용자 결정: 로그인 안 하면 더채움몰 말고는 접근 불가, 홈은 손님도 봄).
+     * 더채움몰 상품 보기(개인 구매가)·홈 인스타그램만. 장바구니 금액·주문·내 주문은 로그인 필요.
+     * 로그인 세션이 있으면 평소처럼 그 사용자로 처리한다.
+     */
+    public static boolean guestReadable(String path) {
+        return path.equals("/v2/dist/shop/context") || path.equals("/v2/dist/shop/products") || path.startsWith("/v2/dist/shop/products/")
+            || path.equals("/v2/workspace/instagram");
+    }
+    /** 로그인 세션 사용자, 없으면 null(손님). 세션은 있는데 역할이 맞지 않으면 user()와 같이 막는다 */
+    public static WorkspaceUser optionalUser(HttpServletRequest request) {
+        var session=request.getSession(false);
+        return session==null || session.getAttribute(WorkspaceUser.SESSION_KEY)==null ? null : user(request);
+    }
     public static WorkspaceUser user(HttpServletRequest request) {
         var session=request.getSession(false);
         Object value=session==null ? null : session.getAttribute(WorkspaceUser.SESSION_KEY);

@@ -45,6 +45,16 @@ public class DistShopService {
 	/** 이 사용자가 고를 수 있는 구매 유형·거래처·후불 가능 여부·입금 계좌·카테고리 */
 	public Map<String, Object> context(WorkspaceUser user) {
 		Map<String, Object> result = new LinkedHashMap<>();
+		if (user == null) { // 손님(로그인 전): 개인 구매가로 상품만 본다. 금액 계산·주문은 로그인 후
+			result.put("guest", true);
+			result.put("buyer_types", List.of("PERSONAL"));
+			result.put("user_id", "");
+			result.put("deposit", null);
+			result.put("seller_ready", admin.seller() != null);
+			result.put("order_ready", crypto.configured());
+			result.put("categories", shop.categories());
+			return result;
+		}
 		boolean site = !user.headquarters();
 		result.put("buyer_types", site ? List.of("ACCOUNT", "PERSONAL") : List.of("PERSONAL"));
 		result.put("user_id", user.userId());
@@ -148,6 +158,13 @@ public class DistShopService {
 	/** 구매 유형 확인: 거래처 구매는 현장 계정만, 거래처는 로그인 거래처로 고정 */
 	Map<String, Object> scope(WorkspaceUser user, String buyerType) {
 		String type = text(buyerType).toUpperCase();
+		if (user == null) { // 손님: 개인 구매가만
+			if (!type.isEmpty() && !"PERSONAL".equals(type)) throw new IllegalArgumentException("거래처 구매가는 로그인 후 볼 수 있습니다.");
+			Map<String, Object> p = new HashMap<>();
+			p.put("buyer_type", "PERSONAL");
+			p.put("account_id", null);
+			return p;
+		}
 		if (type.isEmpty()) type = user.headquarters() ? "PERSONAL" : "ACCOUNT";
 		if (!BUYER_TYPES.contains(type)) throw new IllegalArgumentException("구매 유형을 확인해주세요: " + type);
 		if ("ACCOUNT".equals(type) && user.headquarters())

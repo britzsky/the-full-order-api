@@ -93,10 +93,9 @@ public class WorkspaceController {
         WorkspaceAccess.user(request);
         return erpNotice.list();
     }
-    /** PC 홈 C 영역: 더채움 인스타그램 최근 게시물(InstagramFeedClient — thefull.co.kr/instagram-proxy를 서버가 대신 조회, 5분 기억). */
+    /** PC 홈 C 영역: 더채움 인스타그램 최근 게시물(InstagramFeedClient — thefull.co.kr/instagram-proxy를 서버가 대신 조회, 5분 기억). 공개 게시물이라 손님(로그인 전 홈)도 본다(WorkspaceAccess.guestReadable). */
     @GetMapping("/instagram")
-    public Map<String,Object> instagram(HttpServletRequest request,@RequestParam(name="limit",defaultValue="4") int limit) {
-        WorkspaceAccess.user(request);
+    public Map<String,Object> instagram(@RequestParam(name="limit",defaultValue="4") int limit) {
         return instagram.recent(limit);
     }
     private Object first(String sql,Object... args) {

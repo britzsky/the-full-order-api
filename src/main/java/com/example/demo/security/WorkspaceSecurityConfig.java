@@ -21,6 +21,8 @@ public class WorkspaceSecurityConfig implements WebMvcConfigurer {
             @Override public boolean preHandle(HttpServletRequest request,HttpServletResponse response,Object handler) {
                 String path=WorkspaceAccess.path(request);
                 if("OPTIONS".equals(request.getMethod()) || !WorkspaceAccess.protectedPath(path)) return true;
+                // 손님(로그인 안 함)도 읽는 화면: 더채움몰 상품·홈 인스타그램(WorkspaceAccess.guestReadable)
+                if("GET".equals(request.getMethod()) && WorkspaceAccess.guestReadable(path) && WorkspaceAccess.optionalUser(request)==null) return true;
                 WorkspaceUser user=WorkspaceAccess.user(request);
                 access.authorize(user,path,request.getMethod());
                 if(!"GET".equals(request.getMethod()) && !"1".equals(request.getHeader("X-Workspace-Request")))

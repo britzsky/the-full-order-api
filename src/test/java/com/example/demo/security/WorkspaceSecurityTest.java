@@ -17,7 +17,7 @@ class WorkspaceSecurityTest {
     JdbcTemplate jdbc;
     MockMvc mvc;
     @RestController static class Endpoint {
-        @GetMapping({"/v2/inventory/movements", "/v2/supplier-integration/site-mapping"})
+        @GetMapping({"/v2/inventory/movements", "/v2/supplier-integration/site-mapping", "/v2/dist/shop/products", "/v2/dist/shop/orders", "/v2/workspace/instagram"})
         Map<String,Object> read() { return Map.of("ok",true); }
         @PostMapping("/v2/inventory/adjust")
         Map<String,Object> write(@RequestBody Map<String,Object> body) { return body; }
@@ -36,6 +36,13 @@ class WorkspaceSecurityTest {
     }
     @Test void requiresSession() throws Exception {
         mvc.perform(get("/v2/inventory/movements").param("account_id","A")).andExpect(status().isUnauthorized());
+    }
+    /** 손님은 더채움몰 상품·인스타그램만(2026-11-12), 내 주문은 로그인 필요 */
+    @Test void guestReadsOnlyMallProductsAndInstagram() throws Exception {
+        mvc.perform(get("/v2/dist/shop/products")).andExpect(status().isOk());
+        mvc.perform(get("/v2/workspace/instagram")).andExpect(status().isOk());
+        mvc.perform(get("/v2/dist/shop/orders")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/v2/inventory/adjust").contentType("application/json").content("{}")).andExpect(status().isUnauthorized());
     }
     @Test void siteMustUseOwnScope() throws Exception {
         mvc.perform(get("/v2/inventory/movements").session(session("3"))).andExpect(status().isForbidden());

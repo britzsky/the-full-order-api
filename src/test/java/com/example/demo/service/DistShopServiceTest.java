@@ -115,4 +115,15 @@ class DistShopServiceTest {
 		assertThat(service.creditStatus("A1", limited, new BigDecimal("20000")).get("allowed")).isEqualTo(true);
 		assertThat(service.creditStatus("A1", limited, new BigDecimal("20001")).get("reason").toString()).contains("한도");
 	}
+
+	/** 손님(로그인 전 더채움몰): 개인 구매가로만 상품을 보고, 거래처 구매가는 막는다 */
+	@Test void guestSeesPersonalPricesOnly() {
+		when(shop.products(any())).thenReturn(new ArrayList<>(List.of(product(1, 10, "1000", "0", "Y", null))));
+		assertThat(service.products(null, Map.of()).get("buyer_type")).isEqualTo("PERSONAL");
+		assertThatThrownBy(() -> service.products(null, Map.of("buyer_type", "ACCOUNT"))).hasMessageContaining("로그인");
+		Map<String, Object> context = service.context(null);
+		assertThat(context.get("guest")).isEqualTo(true);
+		assertThat(context.get("buyer_types")).isEqualTo(List.of("PERSONAL"));
+		assertThat(context).doesNotContainKey("account_id");
+	}
 }
