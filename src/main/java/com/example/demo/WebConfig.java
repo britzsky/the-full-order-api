@@ -2,7 +2,6 @@ package com.example.demo;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
@@ -44,9 +43,6 @@ public class WebConfig implements WebMvcConfigurer {
 				.maxAge(3600);
 	}
 
-	@Override
-	public void addResourceHandlers(ResourceHandlerRegistry registry) {
-		registry.addResourceHandler(REAL_HANDLE)
-				.addResourceLocations(REAL_PATH);
-	}
+	// /image/** 는 S3ImageController가 보여 준다(2026-11-16: 운영 S3·로컬 디스크를 S3FileStorageService가 고름).
+	// 예전 정적 파일 연결(REAL_PATH /opt/thefull/uploads/image)은 file.upload-dir 설정으로 대신한다.
 }

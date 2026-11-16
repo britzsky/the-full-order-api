@@ -1,11 +1,7 @@
 package com.example.demo.controller;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -18,7 +14,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,6 +28,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import com.example.demo.security.FavoriteOwner;
 import com.example.demo.service.MenuService;
 import com.example.demo.service.AccountMenuRecipeService;
+import com.example.demo.service.S3FileStorageService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,15 +41,16 @@ public class MenuController {
 
 	private final MenuService menuService;
 	private final AccountMenuRecipeService accountMenuRecipeService;
-	private final String uploadDir;
+	/** 메뉴·레시피 사진 저장(운영 S3, 로컬 디스크). DB에는 '/image/menu|recipe/파일' 경로 */
+	private final S3FileStorageService fileStorage;
 	private final ObjectMapper objectMapper;
 
 	@Autowired
 	public MenuController(MenuService menuService, AccountMenuRecipeService accountMenuRecipeService,
-			@Value("${file.upload-dir}") String uploadDir, ObjectMapper objectMapper) {
+			S3FileStorageService fileStorage, ObjectMapper objectMapper) {
 		this.menuService = menuService;
 		this.accountMenuRecipeService = accountMenuRecipeService;
-		this.uploadDir = uploadDir;
+		this.fileStorage = fileStorage;
 		this.objectMapper = objectMapper;
 	}
 
@@ -179,87 +176,58 @@ public class MenuController {
 		String originalName = firstString(imageMapValue(menuImg, "file_name", "name"),
 				fileNameFromImageReference(fallbackUrl), fileNameFromImageReference(imageText(menuImg)));
 		ImageBytes imageBytes = getMenuImageBytes(menuImg);
-		String staticPath = new File(uploadDir).getAbsolutePath();
-		String basePath = staticPath + File.separator + "menu" + File.separator;
 
 		if (imageBytes == null) {
+			// 새 사진이 없으면 이미 저장된 사진을 그대로 가리킨다(저장소가 S3라 다른 폴더로 복사하지 않음)
 			String safeFileName = sanitizeFileName(originalName);
-			String fileUrl = normalizeMenuImageUrl(fallbackUrl, safeFileName);
-
-			if (safeFileName != null) {
-				try {
-					Path dirPath = Paths.get(basePath);
-					Files.createDirectories(dirPath);
-
-					Path targetPath = dirPath.resolve(safeFileName).normalize();
-					Path sourcePath = findExistingImagePath(staticPath, null, fallbackUrl, safeFileName);
-
-					if (sourcePath != null && !sourcePath.equals(targetPath)) {
-						Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-					}
-
-					if (Files.exists(targetPath)) {
-						fileUrl = "/image/menu/" + safeFileName;
-					}
-				} catch (IOException e) {
-					throw new IllegalStateException("Menu image file copy failed.", e);
-				}
-			}
-
-			return fileUrl;
+			String found = findStoredImage(fallbackUrl, safeFileName);
+			return found != null ? found : normalizeMenuImageUrl(fallbackUrl, safeFileName);
 		}
 
+		return storeImage(imageBytes.bytes(), originalName, imageBytes.contentType(), "menu");
+	}
+
+	private String saveMenuImageFile(MultipartFile imageFile) {
 		try {
-			Path dirPath = Paths.get(basePath);
-			Files.createDirectories(dirPath);
-
-			System.out.println("staticPath :: " + staticPath);
-			System.out.println("basePath :: " + basePath);
-
-			String extension = getImageExtension(originalName, imageBytes.contentType());
-			String safeOriginalName = sanitizeFileName(originalName);
-			String fileName = safeOriginalName == null ? UUID.randomUUID() + extension
-					: UUID.randomUUID() + "_" + appendExtensionIfMissing(safeOriginalName, extension);
-			Path filePath = dirPath.resolve(fileName).normalize();
-			Files.write(filePath, imageBytes.bytes());
-
-			String fileUrl = "/image/menu/" + fileName;
-
-			System.out.println("menu_img :: " + fileUrl);
-
-			return fileUrl;
+			return storeImage(imageFile.getBytes(), imageFile.getOriginalFilename(), imageFile.getContentType(), "menu");
 		} catch (IOException e) {
 			throw new IllegalStateException("Menu image file save failed.", e);
 		}
 	}
 
-	private String saveMenuImageFile(MultipartFile imageFile) {
-		String staticPath = new File(uploadDir).getAbsolutePath();
-		String basePath = staticPath + File.separator + "menu" + File.separator;
-
+	/** 사진 저장 → '/image/폴더/UUID_이름.확장자'. 이름이 없거나 확장자가 없으면 내용 형식으로 붙인다 */
+	private String storeImage(byte[] bytes, String originalName, String contentType, String folder) {
+		String extension = getImageExtension(originalName, contentType);
+		String safeOriginalName = sanitizeFileName(originalName);
+		String fileName = safeOriginalName == null ? "image" + extension : appendExtensionIfMissing(safeOriginalName, extension);
 		try {
-			Path dirPath = Paths.get(basePath);
-			Files.createDirectories(dirPath);
-
-			System.out.println("staticPath :: " + staticPath);
-			System.out.println("basePath :: " + basePath);
-
-			String originalName = imageFile.getOriginalFilename();
-			String extension = getImageExtension(originalName, imageFile.getContentType());
-			String safeOriginalName = sanitizeFileName(originalName);
-			String fileName = safeOriginalName == null ? UUID.randomUUID() + extension
-					: UUID.randomUUID() + "_" + appendExtensionIfMissing(safeOriginalName, extension);
-			Path filePath = dirPath.resolve(fileName).normalize();
-			imageFile.transferTo(filePath);
-
-			String fileUrl = "/image/menu/" + fileName;
-
-			System.out.println("menu_img :: " + fileUrl);
-
-			return fileUrl;
+			return fileStorage.uploadBytes(bytes, fileName, contentType, folder);
 		} catch (IOException e) {
-			throw new IllegalStateException("Menu image file save failed.", e);
+			throw new IllegalStateException(folder + " image file save failed.", e);
 		}
+	}
+
+	/**
+	 * 이미 저장된 사진 찾기(예전 화면이 file_url 없이 이름만 보내는 경우 포함): 주소 그대로 → menu/ → recipe/ → 맨 위 순서.
+	 * 없으면 null.
+	 */
+	private String findStoredImage(String fileUrl, String fileName) {
+		List<String> candidates = new ArrayList<>();
+		if (fileUrl != null && !fileUrl.startsWith("data:") && fileUrl.replace("\\", "/").contains(S3FileStorageService.LEGACY_PREFIX)) {
+			String path = fileUrl.replace("\\", "/");
+			candidates.add(path.substring(path.indexOf(S3FileStorageService.LEGACY_PREFIX)).split("[?#]", 2)[0]);
+		}
+		if (fileName != null) {
+			candidates.add("/image/menu/" + fileName);
+			candidates.add("/image/recipe/" + fileName);
+			candidates.add("/image/" + fileName);
+		}
+		for (String candidate : candidates) {
+			if (fileStorage.exists(candidate)) {
+				return candidate;
+			}
+		}
+		return null;
 	}
 
 	/*
@@ -475,62 +443,23 @@ public class MenuController {
 		String fallbackPath = firstString(image.get("file_path"));
 		Long fallbackSize = toLong(image.get("file_size"));
 		ImageBytes imageBytes = getImageBytes(image);
-		String staticPath = new File(uploadDir).getAbsolutePath();
-		String basePath = staticPath + File.separator + "recipe" + File.separator;
 
 		if (imageBytes == null) {
+			// 새 사진이 없으면 이미 저장된 사진을 그대로 가리킨다(복사하지 않음)
 			String fileName = firstString(originalName, fileNameFromRecipeUrl(fallbackUrl));
 			String safeFileName = sanitizeFileName(fileName);
-			String fileUrl = normalizeRecipeImageUrl(fallbackUrl, safeFileName);
-			String filePath = fallbackPath;
-
-			if (safeFileName != null) {
-				try {
-					Path dirPath = Paths.get(basePath);
-					Files.createDirectories(dirPath);
-
-					Path targetPath = dirPath.resolve(safeFileName).normalize();
-					Path sourcePath = findExistingImagePath(staticPath, fallbackPath, fallbackUrl, safeFileName);
-
-					if (sourcePath != null && !sourcePath.equals(targetPath)) {
-						Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-					}
-
-					if (Files.exists(targetPath)) {
-						filePath = targetPath.toString();
-						fallbackSize = Files.size(targetPath);
-						fileUrl = "/image/recipe/" + safeFileName;
-					}
-				} catch (IOException e) {
-					throw new IllegalStateException("Recipe image file copy failed.", e);
-				}
+			String found = findStoredImage(fallbackUrl, safeFileName);
+			if (found == null) {
+				return new RecipeImageFile(fileId, safeFileName, normalizeRecipeImageUrl(fallbackUrl, safeFileName), fallbackPath,
+						fallbackSize);
 			}
-
-			if (filePath == null && safeFileName != null) {
-				filePath = Paths.get(basePath).resolve(safeFileName).normalize().toString();
-			}
-
-			return new RecipeImageFile(fileId, safeFileName, fileUrl, filePath, fallbackSize);
+			return new RecipeImageFile(fileId, safeFileName, found, fileStorage.location(found),
+					fileStorage.metadata(found).contentLength());
 		}
 
-		try {
-			Path dirPath = Paths.get(basePath);
-			Files.createDirectories(dirPath);
-
-			String extension = getImageExtension(originalName, imageBytes.contentType());
-			String safeOriginalName = sanitizeFileName(originalName);
-			String fileName = safeOriginalName == null ? UUID.randomUUID() + extension
-					: UUID.randomUUID() + "_" + appendExtensionIfMissing(safeOriginalName, extension);
-			Path filePath = dirPath.resolve(fileName).normalize();
-			Files.write(filePath, imageBytes.bytes());
-
-			String fileUrl = "/image/recipe/" + fileName;
-
-			return new RecipeImageFile(fileId, fileName, fileUrl, filePath.toString(),
-					(long) imageBytes.bytes().length);
-		} catch (IOException e) {
-			throw new IllegalStateException("Recipe image file save failed.", e);
-		}
+		String fileUrl = storeImage(imageBytes.bytes(), originalName, imageBytes.contentType(), "recipe");
+		return new RecipeImageFile(fileId, fileNameFromRecipeUrl(fileUrl), fileUrl, fileStorage.location(fileUrl),
+				(long) imageBytes.bytes().length);
 	}
 
 	// 이미지 용량
@@ -690,53 +619,6 @@ public class MenuController {
 		}
 
 		return fileName + extension;
-	}
-
-	private Path findExistingImagePath(String staticPath, String filePath, String fileUrl, String fileName) {
-		Path fromFilePath = existingPath(filePath);
-		if (fromFilePath != null) {
-			return fromFilePath;
-		}
-
-		Path fromUrl = pathFromImageUrl(staticPath, fileUrl);
-		if (fromUrl != null && Files.exists(fromUrl)) {
-			return fromUrl;
-		}
-
-		Path menuPath = Paths.get(staticPath, "menu", fileName).normalize();
-		if (Files.exists(menuPath)) {
-			return menuPath;
-		}
-
-		Path recipePath = Paths.get(staticPath, "recipe", fileName).normalize();
-		if (Files.exists(recipePath)) {
-			return recipePath;
-		}
-
-		Path rootPath = Paths.get(staticPath, fileName).normalize();
-		return Files.exists(rootPath) ? rootPath : null;
-	}
-
-	private Path existingPath(String filePath) {
-		if (filePath == null || filePath.isBlank()) {
-			return null;
-		}
-
-		Path path = Paths.get(filePath).normalize();
-		return Files.exists(path) ? path : null;
-	}
-
-	private Path pathFromImageUrl(String staticPath, String fileUrl) {
-		if (fileUrl == null || fileUrl.isBlank() || fileUrl.startsWith("data:")) {
-			return null;
-		}
-
-		String path = fileUrl.split("\\?", 2)[0].split("#", 2)[0].replace("\\", "/");
-		if (path.startsWith("/image/")) {
-			return Paths.get(staticPath, path.substring("/image/".length())).normalize();
-		}
-
-		return null;
 	}
 
 	private String normalizeRecipeImageUrl(String url, String fileName) {

@@ -42,6 +42,9 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 	implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
 	implementation 'com.google.code.gson:gson:2.8.6'
+	// 업로드 사진 S3 저장(the-full-api와 같은 버전)
+	implementation platform('software.amazon.awssdk:bom:2.31.68')
+	implementation 'software.amazon.awssdk:s3'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
 	annotationProcessor 'org.projectlombok:lombok'
