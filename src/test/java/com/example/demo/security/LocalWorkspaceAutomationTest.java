@@ -31,8 +31,8 @@ class LocalWorkspaceAutomationTest {
             String ddl=Files.readString(Path.of("docs/WORKSPACE_NOTIFICATION_DB_UPDATE.sql"));assertThat(ddl).doesNotContain("DROP TABLE");
             jdbc.execute(ddl);
             // Remove only synthetic rows from this opt-in test's interrupted prior runs.
-            for(var row:jdbc.queryForList("SELECT DISTINCT account_id FROM the_full_order.tb_workspace_notification WHERE LEFT(account_id,18)=?","__AUTOMATION_TEST_"))
-                jdbc.update("DELETE FROM the_full_order.tb_workspace_notification WHERE account_id=?",row.get("account_id"));
+            for(var row:jdbc.queryForList("SELECT DISTINCT account_id FROM tb_workspace_notification WHERE LEFT(account_id,18)=?","__AUTOMATION_TEST_"))
+                jdbc.update("DELETE FROM tb_workspace_notification WHERE account_id=?",row.get("account_id"));
             connection.setAutoCommit(false);
             try {
                 String account="__AUTOMATION_TEST_"+UUID.randomUUID().toString().substring(0,8);

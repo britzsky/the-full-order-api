@@ -37,12 +37,12 @@ public class SupplierOrderMonitorService {
 	public Map<String, Object> reconcileUnresolved() {
 		int checked = 0, resolved = 0, failed = 0;
 		for (var order : jdbc.queryForList("""
-				SELECT po.purchase_order_id,po.account_id,po.status FROM the_full_order.tb_account_purchase_order po
-				JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+				SELECT po.purchase_order_id,po.account_id,po.status FROM tb_account_purchase_order po
+				JOIN tb_supplier s ON s.supplier_id=po.supplier_id
 				WHERE s.supplier_code IN ('WELSTORY','OURHOME')
 				  AND COALESCE(po.ordered_at,po.created_at) BETWEEN DATE_SUB(NOW(),INTERVAL 7 DAY) AND DATE_SUB(NOW(),INTERVAL 5 MINUTE)
 				  AND (po.status IN ('SENDING','UNKNOWN') OR (po.status='PARTIAL_FAILED' AND EXISTS (
-				    SELECT 1 FROM the_full_order.tb_account_purchase_order_item i WHERE i.purchase_order_id=po.purchase_order_id
+				    SELECT 1 FROM tb_account_purchase_order_item i WHERE i.purchase_order_id=po.purchase_order_id
 				      AND i.item_status NOT IN ('ORDERED','CONFIRMED','FAILED','RECEIVED','PARTIAL_RECEIVED','NOT_RECEIVED','CANCELED'))))
 				ORDER BY COALESCE(po.ordered_at,po.created_at) LIMIT 100
 				""")) {
@@ -64,7 +64,7 @@ public class SupplierOrderMonitorService {
 	public Map<String, Object> checkOurhomeShipments() {
 		var openOrders = jdbc.queryForList("""
 				SELECT po.purchase_order_id,po.account_id,po.sold_to,po.client_ord,DATE_FORMAT(po.requested_delivery_date,'%Y-%m-%d') delivery_date
-				FROM the_full_order.tb_account_purchase_order po JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+				FROM tb_account_purchase_order po JOIN tb_supplier s ON s.supplier_id=po.supplier_id
 				WHERE s.supplier_code='OURHOME' AND po.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED')
 				  AND po.requested_delivery_date BETWEEN DATE_SUB(CURRENT_DATE,INTERVAL 7 DAY) AND DATE_ADD(CURRENT_DATE,INTERVAL 1 DAY)
 				  AND COALESCE(po.ordered_at,po.created_at)<DATE_SUB(NOW(),INTERVAL 10 MINUTE)
@@ -102,7 +102,7 @@ public class SupplierOrderMonitorService {
 	public Map<String, Object> ourhomeShipment(String account, String orderId) {
 		var found = jdbc.queryForList("""
 				SELECT po.purchase_order_id,po.sold_to,po.client_ord,DATE_FORMAT(po.requested_delivery_date,'%Y-%m-%d') delivery_date,s.supplier_code
-				FROM the_full_order.tb_account_purchase_order po JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+				FROM tb_account_purchase_order po JOIN tb_supplier s ON s.supplier_id=po.supplier_id
 				WHERE po.account_id=? AND po.purchase_order_id=?
 				""", account, orderId);
 		if (found.isEmpty())
@@ -112,7 +112,7 @@ public class SupplierOrderMonitorService {
 			return Map.of("supported", false, "lines", List.of());
 		var lines = ourhome.orders(text(order.get("sold_to")), text(order.get("delivery_date"))).orders();
 		List<Map<String, Object>> result = new ArrayList<>();
-		for (var item : jdbc.queryForList("SELECT client_ord_item FROM the_full_order.tb_account_purchase_order_item WHERE purchase_order_id=? ORDER BY client_ord_item", orderId)) {
+		for (var item : jdbc.queryForList("SELECT client_ord_item FROM tb_account_purchase_order_item WHERE purchase_order_id=? ORDER BY client_ord_item", orderId)) {
 			var matches = lines.stream().filter(l -> text(order.get("client_ord")).equals(l.get("extnOrderKey"))
 					&& text(item.get("client_ord_item")).equals(l.get("extnOrderNo"))).toList();
 			Map<String, Object> row = new LinkedHashMap<>();
@@ -133,7 +133,7 @@ public class SupplierOrderMonitorService {
 
 	private List<Map<String, Object>> items(Map<String, Object> order) {
 		return jdbc.queryForList("""
-				SELECT client_ord_item,supplier_item_code,order_qty,item_status FROM the_full_order.tb_account_purchase_order_item
+				SELECT client_ord_item,supplier_item_code,order_qty,item_status FROM tb_account_purchase_order_item
 				WHERE purchase_order_id=? AND item_status NOT IN ('FAILED','CANCELED') ORDER BY client_ord_item
 				""", order.get("purchase_order_id"));
 	}

@@ -14,7 +14,7 @@
 			   del_yn,
 			   food_type,
 			   DATE_FORMAT(created_at, '%Y-%m-%d') as created_at
-		FROM the_full_order.tb_menu_master
+		FROM tb_menu_master
 	</select>
 	
 	<select id="PlanList" parameterType="map" resultType="hashmap">
@@ -27,7 +27,7 @@
 			   currency,
 			   is_active,
 			   DATE_FORMAT(reg_dt, '%Y-%m-%d') as reg_dt
-		FROM the_full_order.tb_thefull_plan
+		FROM tb_thefull_plan
 	</select>
 	
 	<select id="SubscriptionStatus" parameterType="map" resultType="hashmap">
@@ -45,7 +45,7 @@
 		       cancel_reason,
 		       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') as created_at,
 		       DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
-		FROM the_full_order.tb_thefull_subscription
+		FROM tb_thefull_subscription
 		WHERE account_id = #{account_id}
 		
 		UNION ALL
@@ -55,6 +55,6 @@
 		       NULL, NULL, NULL, NULL, NULL, 
 		       NULL, NULL, NULL, NULL
 		FROM DUAL
-		WHERE NOT EXISTS (SELECT 1 FROM the_full_order.tb_thefull_subscription)
+		WHERE NOT EXISTS (SELECT 1 FROM tb_thefull_subscription)
 	</select>
 </mapper>

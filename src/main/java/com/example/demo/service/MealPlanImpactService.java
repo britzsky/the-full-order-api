@@ -22,9 +22,9 @@ public class MealPlanImpactService {
         List<Map<String,Object>> before=table.isBlank()?List.of():jdbc.queryForList("""
             SELECT r.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
               i.base_unit master_unit,r.base_unit,r.total_required_qty quantity,m.meal_date
-            FROM the_full_order.tb_account_meal_ingredient_requirement r
-            JOIN the_full_order.tb_account_meal_service m ON m.meal_service_id=r.meal_service_id
-            JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=m.account_id AND i.ingredient_id=r.ingredient_id
+            FROM tb_account_meal_ingredient_requirement r
+            JOIN tb_account_meal_service m ON m.meal_service_id=r.meal_service_id
+            JOIN tb_account_ingredient_master i ON i.account_id=m.account_id AND i.ingredient_id=r.ingredient_id
             WHERE m.account_id=? AND m.table_id=? AND m.status='DRAFT'
             """,p.get("account_id"),table);
         var unitIssues=new LinkedHashSet<String>();
@@ -34,14 +34,14 @@ public class MealPlanImpactService {
               NULLIF(i.source_ingredient_id,'') ingredient_id,
               i.product_name_snapshot product_name,GREATEST(i.order_qty-COALESCE(i.received_order_qty,0),0) remaining_order_qty,
               i.base_qty_per_order_unit,i.base_unit
-            FROM the_full_order.tb_account_purchase_order p
-            JOIN the_full_order.tb_account_purchase_order_item i ON i.purchase_order_id=p.purchase_order_id
+            FROM tb_account_purchase_order p
+            JOIN tb_account_purchase_order_item i ON i.purchase_order_id=p.purchase_order_id
             WHERE p.account_id=? AND p.status NOT IN ('CANCELED','FAILED','RECEIVED') AND i.item_status NOT IN ('CANCELED','FAILED','RECEIVED')
             ORDER BY p.requested_delivery_date,p.purchase_order_id LIMIT 1000
             """,p.get("account_id"));
         var ids=new HashSet<String>();for(var c:changes) ids.add(c.get("ingredient_id").toString());
         var affected=orders.stream().filter(o->ids.contains(Objects.toString(o.get("ingredient_id"),""))).toList();
-        long completed=table.isBlank()?0:jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_account_meal_service WHERE account_id=? AND table_id=? AND status='COMPLETED'",Long.class,p.get("account_id"),table);
+        long completed=table.isBlank()?0:jdbc.queryForObject("SELECT COUNT(*) FROM tb_account_meal_service WHERE account_id=? AND table_id=? AND status='COMPLETED'",Long.class,p.get("account_id"),table);
         return Map.of("changes",changes,"affected_orders",affected,"completed_meals",completed,"unit_issues",List.copyOf(unitIssues),
             "notice","감소량은 이 식단의 필요량 감소입니다. 다른 식단·재고를 확인하고 공급사에 주문 감량·취소 가능 여부를 확인하세요. 주문은 자동 변경되지 않습니다.");
     }

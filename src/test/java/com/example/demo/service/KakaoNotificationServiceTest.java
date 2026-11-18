@@ -20,7 +20,7 @@ class KakaoNotificationServiceTest {
 
 		@Override
 		public List<Map<String, Object>> queryForList(String sql, Object... args) {
-			if (sql.contains("FROM the_full_order.tb_account_kakao_recipient WHERE account_id=?"))
+			if (sql.contains("FROM tb_account_kakao_recipient WHERE account_id=?"))
 				return List.of(Map.of("kakao_recipient_id", 7L, "phone", "01012345678"));
 			if (sql.contains("the_full.tb_account"))
 				return List.of(Map.of("account_name", "테스트 식당"));
@@ -29,9 +29,9 @@ class KakaoNotificationServiceTest {
 
 		@Override
 		public int update(String sql, Object... args) {
-			if (sql.contains("INSERT IGNORE INTO the_full_order.tb_kakao_message_log"))
+			if (sql.contains("INSERT IGNORE INTO tb_kakao_message_log"))
 				return logged.add(args[0] + "|" + args[1] + "|" + args[2] + "|" + args[3]) ? 1 : 0;
-			if (sql.contains("UPDATE the_full_order.tb_kakao_message_log"))
+			if (sql.contains("UPDATE tb_kakao_message_log"))
 				results.add(args);
 			return 1;
 		}

@@ -30,8 +30,8 @@
 		       M.active_yn,
 		       COALESCE(S.display_order, M.display_order) AS display_order,
 		       CASE WHEN S.account_id IS NULL THEN 'N' ELSE 'Y' END AS selected_yn
-		FROM the_full_order.tb_meal_slot_master M
-		LEFT JOIN the_full_order.tb_account_meal_slot_setting S
+		FROM tb_meal_slot_master M
+		LEFT JOIN tb_account_meal_slot_setting S
 		  ON S.meal_slot_code = M.meal_slot_code
 		 AND S.account_id = #{account_id}
 		<!-- 본사가 '사용 안 함'으로 바꾼 끼니는 새로 고를 수 없지만, 이미 고른 거래처에는 계속 보인다 -->
@@ -43,13 +43,13 @@
 
 	<!-- 저장 전에 해당 고객사의 기존 식사구분 선택값을 제거한다. -->
 	<delete id="DeleteMealSlotSetting" parameterType="map">
-		DELETE FROM the_full_order.tb_account_meal_slot_setting
+		DELETE FROM tb_account_meal_slot_setting
 		WHERE account_id = #{account_id}
 	</delete>
 
 	<!-- 화면에서 선택한 식사구분을 고객사 설정으로 일괄 등록한다. -->
 	<insert id="InsertMealSlotSetting" parameterType="map">
-		INSERT INTO the_full_order.tb_account_meal_slot_setting
+		INSERT INTO tb_account_meal_slot_setting
 		    (account_id, meal_slot_code, display_order, created_at, user_id)
 		VALUES
 		<foreach collection="meal_slots" item="mealSlot" separator=",">
@@ -83,8 +83,8 @@
 		       COALESCE(B.default_meal_plan_type, 0) AS default_meal_plan_type,
 		       B.template_id,
 		       T.template_name
-		FROM the_full_order.vw_account_meal_slot_budget B
-		LEFT JOIN the_full_order.tb_meal_composition_template T
+		FROM vw_account_meal_slot_budget B
+		LEFT JOIN tb_meal_composition_template T
 		  ON T.template_id = B.template_id
 		WHERE B.account_id = #{account_id}
 		ORDER BY B.slot_display_order, B.meal_slot_code
@@ -92,13 +92,13 @@
 
 	<!-- FK CASCADE에 의존하지 않고 저장 순서를 명확하게 유지하기 위해 프로필을 먼저 삭제한다. -->
 	<delete id="DeleteMealSlotProfile" parameterType="map">
-		DELETE FROM the_full_order.tb_account_meal_slot_profile
+		DELETE FROM tb_account_meal_slot_profile
 		WHERE account_id = #{account_id}
 	</delete>
 
 	<!-- 화면에서 선택한 식사구분마다 자동 식단 생성의 기본 분류와 식단유형을 저장한다. -->
 	<insert id="InsertMealSlotProfile" parameterType="map">
-		INSERT INTO the_full_order.tb_account_meal_slot_profile
+		INSERT INTO tb_account_meal_slot_profile
 		    (account_id, meal_slot_code, default_food_type, default_meal_plan_type,
 		     template_id, created_at, user_id)
 		VALUES

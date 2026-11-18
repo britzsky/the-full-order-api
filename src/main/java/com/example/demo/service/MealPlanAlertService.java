@@ -44,9 +44,9 @@ public class MealPlanAlertService {
         var rows = jdbc.queryForList("""
             SELECT a.account_id, a.account_name FROM the_full.tb_account a
             WHERE a.del_yn='N'
-              AND EXISTS (SELECT 1 FROM the_full_order.tb_account_meal_service m WHERE m.account_id=a.account_id
+              AND EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                 AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')
-              AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_meal_service m WHERE m.account_id=a.account_id
+              AND NOT EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                 AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')
             """ + scope + " ORDER BY a.account_name LIMIT 500", args.toArray());
         String period = monday.getMonthValue() + "/" + monday.getDayOfMonth() + "~" + sunday.getMonthValue() + "/" + sunday.getDayOfMonth();

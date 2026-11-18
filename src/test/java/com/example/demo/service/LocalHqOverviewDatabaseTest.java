@@ -35,7 +35,7 @@ class LocalHqOverviewDatabaseTest {
 		assertTrue(order.stream().allMatch(row -> row.get("items") == null || ((Number) row.get("items")).intValue() > 0));
 		// 관리 거래처 전체가 대상: 다음 주 식단이 없는 업장 수와 같다
 		Integer noPlan = jdbc.queryForObject("""
-				SELECT COUNT(*) FROM the_full.tb_account a WHERE a.del_yn='N' AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_meal_service m
+				SELECT COUNT(*) FROM the_full.tb_account a WHERE a.del_yn='N' AND NOT EXISTS(SELECT 1 FROM tb_account_meal_service m
 				WHERE m.account_id=a.account_id AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')""", Integer.class, result.get("week_start"), result.get("week_end"));
 		assertEquals(Boolean.TRUE.equals(result.get("meal_plan_due")) ? noPlan : 0, meal.size());
 		if (!hygiene.isEmpty()) {

@@ -44,14 +44,14 @@ public class WorkspaceController {
         Object[] args=account.isBlank()?new Object[0]:new Object[]{account};
         var rows=jdbc.queryForList("""
             SELECT a.account_id,a.account_name,
-              (SELECT COUNT(*) FROM the_full_order.tb_account_purchase_order p WHERE p.account_id=a.account_id
+              (SELECT COUNT(*) FROM tb_account_purchase_order p WHERE p.account_id=a.account_id
                 AND p.status IN ('SENDING','UNKNOWN','PARTIAL_FAILED')) pending_orders,
-              (SELECT COUNT(*) FROM the_full_order.tb_account_purchase_order p WHERE p.account_id=a.account_id
+              (SELECT COUNT(*) FROM tb_account_purchase_order p WHERE p.account_id=a.account_id
                 AND p.requested_delivery_date<=CURRENT_DATE AND p.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')) due_receipts,
-              (SELECT COUNT(*) FROM the_full_order.tb_account_meal_service m WHERE m.account_id=a.account_id
+              (SELECT COUNT(*) FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                 AND m.meal_date=CURRENT_DATE AND m.status='DRAFT') pending_meals,
-              (SELECT COUNT(*) FROM the_full_order.tb_supplier_account_site s WHERE s.account_id=a.account_id AND s.active_yn='Y') mapped_suppliers,
-              (SELECT COUNT(*) FROM the_full_order.tb_workspace_notification n WHERE n.account_id=a.account_id
+              (SELECT COUNT(*) FROM tb_supplier_account_site s WHERE s.account_id=a.account_id AND s.active_yn='Y') mapped_suppliers,
+              (SELECT COUNT(*) FROM tb_workspace_notification n WHERE n.account_id=a.account_id
                 AND n.event_type='SUPPLIER_STATUS' AND n.status<>'RESOLVED') supplier_notices
             FROM the_full.tb_account a WHERE a.del_yn='N'
             """+scope+" ORDER BY pending_orders DESC,due_receipts DESC,a.account_name LIMIT 500",args);
@@ -119,14 +119,14 @@ public class WorkspaceController {
             SELECT DATE_FORMAT(requested_delivery_date,'%Y-%m-%d') d,
               SUM(status='RECEIVED') received,
               SUM(status IN ('SENDING','UNKNOWN','PARTIAL_FAILED','ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')) open_orders
-            FROM the_full_order.tb_account_purchase_order WHERE account_id=? AND requested_delivery_date BETWEEN ? AND ?
+            FROM tb_account_purchase_order WHERE account_id=? AND requested_delivery_date BETWEEN ? AND ?
             GROUP BY requested_delivery_date
             """,account,from,to)) {
             var day=days.computeIfAbsent(row.get("d").toString(),k->new LinkedHashMap<>());
             day.put("received",row.get("received"));day.put("open_orders",row.get("open_orders"));
         }
         for(var row:jdbc.queryForList("""
-            SELECT DATE_FORMAT(meal_date,'%Y-%m-%d') d,COUNT(*) meals FROM the_full_order.tb_account_meal_service
+            SELECT DATE_FORMAT(meal_date,'%Y-%m-%d') d,COUNT(*) meals FROM tb_account_meal_service
             WHERE account_id=? AND meal_date BETWEEN ? AND ? AND status<>'CANCELED' GROUP BY meal_date
             """,account,from,to))
             days.computeIfAbsent(row.get("d").toString(),k->new LinkedHashMap<>()).put("meals",row.get("meals"));

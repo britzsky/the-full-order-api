@@ -23,7 +23,7 @@ public class PurchaseOrderInspectionService {
 	public Map<String, Object> inspect(String account, String orderId, String user, boolean done) {
 		if (account == null || account.isBlank() || orderId == null || orderId.isBlank())
 			throw new IllegalArgumentException("거래처와 발주서를 확인하세요.");
-		var found = jdbc.queryForList("SELECT status FROM the_full_order.tb_account_purchase_order WHERE account_id=? AND purchase_order_id=?",
+		var found = jdbc.queryForList("SELECT status FROM tb_account_purchase_order WHERE account_id=? AND purchase_order_id=?",
 				account, orderId);
 		if (found.isEmpty())
 			throw new IllegalArgumentException("발주서를 찾을 수 없습니다.");
@@ -31,12 +31,12 @@ public class PurchaseOrderInspectionService {
 		if (!INSPECTABLE.contains(status))
 			throw new IllegalArgumentException(done ? "공급사 접수 확인 후 검수 가능" : "입고 완료된 발주서 · 검수 취소 불가");
 		if (done)
-			jdbc.update("UPDATE the_full_order.tb_account_purchase_order SET inspected_at=COALESCE(inspected_at,NOW()),"
+			jdbc.update("UPDATE tb_account_purchase_order SET inspected_at=COALESCE(inspected_at,NOW()),"
 					+ "inspected_by=COALESCE(inspected_by,NULLIF(?,'')) WHERE account_id=? AND purchase_order_id=?", user == null ? "" : user, account, orderId);
 		else
-			jdbc.update("UPDATE the_full_order.tb_account_purchase_order SET inspected_at=NULL,inspected_by=NULL WHERE account_id=? AND purchase_order_id=?",
+			jdbc.update("UPDATE tb_account_purchase_order SET inspected_at=NULL,inspected_by=NULL WHERE account_id=? AND purchase_order_id=?",
 					account, orderId);
-		return jdbc.queryForMap("SELECT purchase_order_id,status,inspected_at,inspected_by FROM the_full_order.tb_account_purchase_order WHERE account_id=? AND purchase_order_id=?",
+		return jdbc.queryForMap("SELECT purchase_order_id,status,inspected_at,inspected_by FROM tb_account_purchase_order WHERE account_id=? AND purchase_order_id=?",
 				account, orderId);
 	}
 }

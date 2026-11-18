@@ -1,19 +1,19 @@
 -- Meal cost, stock forecasting and procurement support.
 -- Run once against the_full_order before using the new endpoints.
 
-ALTER TABLE the_full_order.tb_account_table_meals
+ALTER TABLE tb_account_table_meals
     ADD COLUMN meal_budget_per_person DECIMAL(15,2) NULL COMMENT '고객사 1인 식단가';
 
-ALTER TABLE the_full_order.tb_account_table_meals_detail
+ALTER TABLE tb_account_table_meals_detail
     ADD COLUMN serving_qty DECIMAL(13,3) NOT NULL DEFAULT 1 COMMENT '예상 식수';
 
-ALTER TABLE the_full_order.tb_account_ingredient_master
+ALTER TABLE tb_account_ingredient_master
     ADD COLUMN welstory_item_code VARCHAR(18) NULL COMMENT '웰스토리 품목코드',
     ADD COLUMN purchase_price DECIMAL(15,2) NULL COMMENT '구매 포장 단가',
     ADD COLUMN package_base_qty DECIMAL(13,3) NULL COMMENT '포장당 기준용량',
     ADD COLUMN max_stock_qty DECIMAL(13,3) NULL COMMENT '최대 보유량';
 
-CREATE TABLE IF NOT EXISTS the_full_order.tb_account_inventory_movement (
+CREATE TABLE IF NOT EXISTS tb_account_inventory_movement (
     movement_id VARCHAR(40) NOT NULL,
     account_id VARCHAR(40) NOT NULL,
     ingredient_id VARCHAR(40) NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS the_full_order.tb_account_inventory_movement (
     UNIQUE KEY uk_inventory_movement_reference (account_id, reference_type, reference_id, ingredient_id)
 );
 
-CREATE TABLE IF NOT EXISTS the_full_order.tb_account_purchase_order (
+CREATE TABLE IF NOT EXISTS tb_account_purchase_order (
     purchase_order_id VARCHAR(40) NOT NULL,
     account_id VARCHAR(40) NOT NULL,
     sold_to VARCHAR(10) NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS the_full_order.tb_account_purchase_order (
     KEY idx_purchase_order_account (account_id, ordered_at)
 );
 
-CREATE TABLE IF NOT EXISTS the_full_order.tb_account_purchase_order_item (
+CREATE TABLE IF NOT EXISTS tb_account_purchase_order_item (
     purchase_order_id VARCHAR(40) NOT NULL,
     client_ord_item VARCHAR(6) NOT NULL,
     ingredient_id VARCHAR(40) NOT NULL,

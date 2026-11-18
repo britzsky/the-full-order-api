@@ -8,8 +8,8 @@
           WHEN LOCATE(#{query},im.ingredient_name_std)&gt;0 THEN im.ingredient_name_std
           WHEN LOCATE(#{query},rd.ingredient_name_raw)&gt;0 THEN rd.ingredient_name_raw
           ELSE im.ingredient_name_raw END ORDER BY rd.ingredient_seq SEPARATOR ', ') matched_ingredients
-      FROM the_full_order.tb_recipe_detail rd
-      LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+      FROM tb_recipe_detail rd
+      LEFT JOIN tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
       WHERE LOCATE(#{query},im.ingredient_name_std)&gt;0
          OR LOCATE(#{query},im.ingredient_name_raw)&gt;0
          OR LOCATE(#{query},rd.ingredient_name_raw)&gt;0
@@ -18,12 +18,12 @@
     SELECT * FROM (
       SELECT 'MENU' entity_type,m.menu_id entity_id,m.menu_name title,'메뉴' category,
         r.matched_ingredients
-      FROM the_full_order.tb_menu_master m
+      FROM tb_menu_master m
       LEFT JOIN recipe_matches r ON r.menu_id=m.menu_id
       WHERE m.del_yn='N' AND (LOCATE(#{query},m.menu_name)&gt;0 OR r.menu_id IS NOT NULL)
       UNION ALL
       SELECT 'INGREDIENT',ingredient_id,ingredient_name_std,'식재료',NULL
-      FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND active_yn='Y'
+      FROM tb_account_ingredient_master WHERE account_id=#{account_id} AND active_yn='Y'
         AND LOCATE(#{query},ingredient_name_std)&gt;0
     ) results ORDER BY CASE WHEN title=#{query} THEN 0 WHEN LOCATE(#{query},title)&gt;0 THEN 1 ELSE 2 END,
       CHAR_LENGTH(title),title,entity_id LIMIT #{limit}
@@ -34,17 +34,17 @@
       COALESCE(u.usage_count,0) usage_count,COALESCE(u.recent_count,0) recent_count,
       COALESCE(f.favorite,0) favorite,
       COALESCE(f.favorite,0)*10+LEAST(COALESCE(u.usage_count,0),20)-COALESCE(u.recent_count,0)*5 score
-    FROM the_full_order.tb_account_menu_master m
+    FROM tb_account_menu_master m
     LEFT JOIN (
       SELECT d.account_id,d.menu_id,COUNT(*) usage_count,
         SUM(CASE WHEN ms.meal_date&gt;=DATE_SUB(#{meal_date},INTERVAL 7 DAY) AND ms.meal_date&lt;=#{meal_date} THEN 1 ELSE 0 END) recent_count
-      FROM the_full_order.tb_account_table_meals_detail d
-      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=d.meal_service_id
+      FROM tb_account_table_meals_detail d
+      JOIN tb_account_meal_service ms ON ms.meal_service_id=d.meal_service_id
       WHERE d.account_id=#{account_id} AND ms.meal_date&lt;=#{meal_date} AND ms.status!='CANCELED'
       GROUP BY d.account_id,d.menu_id
     ) u ON u.account_id=m.account_id AND u.menu_id=m.menu_id
     <!-- 나만의 메뉴: 현장은 거래처 단위, 본사는 사용자 단위 -->
-    LEFT JOIN (SELECT menu_id,1 favorite FROM the_full_order.tb_favorite_menu
+    LEFT JOIN (SELECT menu_id,1 favorite FROM tb_favorite_menu
       WHERE (owner_type='ACCOUNT' AND owner_id=#{account_id}) OR (owner_type='USER' AND owner_id=#{user_id})
       GROUP BY menu_id) f ON f.menu_id=m.menu_id
     WHERE m.account_id=#{account_id} AND m.del_yn='N'

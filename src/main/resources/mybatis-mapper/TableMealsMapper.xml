@@ -22,7 +22,7 @@
 		       H.user_id,
 		       DATE_FORMAT(H.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
 		       DATE_FORMAT(H.mod_at, '%Y-%m-%d %H:%i:%s') AS mod_at
-		  FROM the_full_order.tb_account_table_meals H
+		  FROM tb_account_table_meals H
 		  LEFT OUTER JOIN the_full.tb_account_diners_number T2
 		  ON T2.account_id = H.account_id
 		 WHERE 1 = 1
@@ -76,10 +76,10 @@
 		       D.food_type,
 		       D.menu_type,
 		       D.menu_gubun
-		  FROM the_full_order.tb_account_table_meals H
-		  LEFT JOIN the_full_order.tb_account_table_meals_detail D
+		  FROM tb_account_table_meals H
+		  LEFT JOIN tb_account_table_meals_detail D
 		    ON D.table_id = H.table_id
-		  LEFT JOIN the_full_order.tb_account_menu_master M
+		  LEFT JOIN tb_account_menu_master M
 		    ON M.account_id = H.account_id AND M.menu_id = D.menu_id
 		  LEFT OUTER JOIN the_full.tb_account_diners_number T2
 		  	ON T2.account_id = H.account_id
@@ -103,7 +103,7 @@
 	</select>
 	
 	<insert id="TableMealsHeaderSave" parameterType="map">
-		INSERT INTO the_full_order.tb_account_table_meals
+		INSERT INTO tb_account_table_meals
 		(table_id, account_id, account_name, table_name, table_year, table_month, table_week, source, meal_plan_type, meal_budget_per_person, user_id, created_at)
 		VALUES
 		(#{table_id}, #{account_id}, #{account_name}, #{table_name}, #{table_year}, #{table_month}, #{table_week}, #{source}, COALESCE(#{meal_plan_type}, 0), #{meal_budget_per_person}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
@@ -121,12 +121,12 @@
 	</insert>
 	
 	<delete id="TableMealsDetailDelete" parameterType="map">
-		DELETE FROM the_full_order.tb_account_table_meals_detail
+		DELETE FROM tb_account_table_meals_detail
 		 WHERE table_id = #{table_id}
 	</delete>
 	
 	<insert id="TableMealsDetailSave" parameterType="map">
-		INSERT INTO the_full_order.tb_account_table_meals_detail
+		INSERT INTO tb_account_table_meals_detail
 		(table_id, account_id, meal_date, weekday, meal_slot, sort_order, serving_qty, menu_id, menu_name, food_type, menu_type, menu_gubun, user_id, created_at)
 		VALUES
 		(#{table_id}, #{account_id}, #{meal_date}, #{weekday}, #{meal_slot}, #{sort_order}, COALESCE(#{serving_qty}, 1), #{menu_id}, #{menu_name}, #{food_type}, #{menu_type}, #{menu_gubun}, #{user_id}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))

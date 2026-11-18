@@ -33,13 +33,13 @@ class LocalSupplierSiteSharedDatabaseTest {
                 // 상품이 가장 많이 받아진 사용 중 사업장과 그 거래처
                 var source=jdbc.queryForList("""
                     SELECT ss.account_id,ss.supplier_id,ss.supplier_site_id,ss.external_site_code,COUNT(o.supplier_offer_id) offers
-                      FROM the_full_order.tb_supplier_account_site ss
-                      JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_site_id=ss.supplier_site_id AND o.active_yn='Y'
+                      FROM tb_supplier_account_site ss
+                      JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=ss.supplier_site_id AND o.active_yn='Y'
                      WHERE ss.active_yn='Y' GROUP BY ss.supplier_account_site_id ORDER BY offers DESC LIMIT 1""").get(0);
-                long offerRows=jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_offer",Long.class);
-                long priceRows=jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_price",Long.class);
+                long offerRows=jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_offer",Long.class);
+                long priceRows=jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_price",Long.class);
                 String shared="SHARE"+UUID.randomUUID().toString().replace("-","").substring(0,10);
-                jdbc.update("INSERT INTO the_full_order.tb_supplier_account_site(account_id,supplier_id,supplier_site_id,external_site_code,active_yn) VALUES(?,?,?,?,'Y')",
+                jdbc.update("INSERT INTO tb_supplier_account_site(account_id,supplier_id,supplier_site_id,external_site_code,active_yn) VALUES(?,?,?,?,'Y')",
                     shared,source.get("supplier_id"),source.get("supplier_site_id"),source.get("external_site_code"));
 
                 var cfg=new org.apache.ibatis.session.Configuration(new org.apache.ibatis.mapping.Environment("site-shared",new org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory(),new SingleConnectionDataSource(c,true)));
@@ -81,8 +81,8 @@ class LocalSupplierSiteSharedDatabaseTest {
                     System.out.println("SITE_SHARED site="+site+" offers="+source.get("offers")+" status="+sharedDay);
                 } finally { service.close(); }
                 // 공급사 재조회·저장 없이: 상품 제공 조건·판가 행 수는 그대로
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_offer",Long.class)).isEqualTo(offerRows);
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_supplier_site_product_price",Long.class)).isEqualTo(priceRows);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_offer",Long.class)).isEqualTo(offerRows);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_price",Long.class)).isEqualTo(priceRows);
             } finally { c.rollback(); }
         }
     }

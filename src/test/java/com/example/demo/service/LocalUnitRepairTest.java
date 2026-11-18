@@ -41,12 +41,12 @@ class LocalUnitRepairTest {
             try {
                 // Historical movement/order quantities must never silently be reinterpreted.
                 for(String table:List.of("tb_account_inventory_balance","tb_account_purchase_order_item","tb_account_meal_ingredient_requirement"))
-                    assertThat(rows(c,"SELECT * FROM the_full_order."+table+" FOR UPDATE")).as("기존 거래가 있으면 별도 수량 이관 필요: "+table).isEmpty();
+                    assertThat(rows(c,"SELECT * FROM "+table+" FOR UPDATE")).as("기존 거래가 있으면 별도 수량 이관 필요: "+table).isEmpty();
                 Map<String,List<Map<String,Object>>> backup=new LinkedHashMap<>();
                 for(String table:List.of("tb_supplier_ingredient_product","tb_ingredient_master","tb_account_ingredient_master","tb_recipe_detail","tb_account_recipe_detail"))
-                    backup.put(table,rows(c,"SELECT * FROM the_full_order."+table+" FOR UPDATE"));
+                    backup.put(table,rows(c,"SELECT * FROM "+table+" FOR UPDATE"));
                 Files.writeString(out.resolve("before.json"),json.writerWithDefaultPrettyPrinter().writeValueAsString(backup));
-                List<Map<String,Object>> products=rows(c,"SELECT p.*,JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.standard')) spec,JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.unit')) raw_unit FROM the_full_order.tb_supplier_ingredient_product p JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id LEFT JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=(SELECT MAX(x.supplier_offer_id) FROM the_full_order.tb_supplier_site_product_offer x WHERE x.supplier_product_id=p.supplier_product_id) WHERE s.supplier_code='WELSTORY'");
+                List<Map<String,Object>> products=rows(c,"SELECT p.*,JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.standard')) spec,JSON_UNQUOTE(JSON_EXTRACT(o.provider_attributes,'$.unit')) raw_unit FROM tb_supplier_ingredient_product p JOIN tb_supplier s ON s.supplier_id=p.supplier_id LEFT JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=(SELECT MAX(x.supplier_offer_id) FROM tb_supplier_site_product_offer x WHERE x.supplier_product_id=p.supplier_product_id) WHERE s.supplier_code='WELSTORY'");
                 int corrected=0,unknown=0;List<Map<String,Object>> plan=new ArrayList<>();
                 Map<String,QuantityUnits.Pack> ingredients=new HashMap<>();Set<String> conflict=new HashSet<>();
                 for(var p:products) {
@@ -57,29 +57,29 @@ class LocalUnitRepairTest {
                     String ingredient=String.valueOf(p.get("ingredient_id"));
                     if(ingredients.containsKey(ingredient)&&!ingredients.get(ingredient).equals(pack))conflict.add(ingredient);
                     ingredients.put(ingredient,pack);
-                    update(c,"UPDATE the_full_order.tb_supplier_ingredient_product SET base_qty=?,base_unit=?,package_qty=?,package_unit=? WHERE supplier_product_id=?",pack.quantity(),pack.baseUnit(),pack.quantity(),pack.baseUnit(),p.get("supplier_product_id"));
+                    update(c,"UPDATE tb_supplier_ingredient_product SET base_qty=?,base_unit=?,package_qty=?,package_unit=? WHERE supplier_product_id=?",pack.quantity(),pack.baseUnit(),pack.quantity(),pack.baseUnit(),p.get("supplier_product_id"));
                     if(pack.quantity().signum()>0)corrected++;else unknown++;
                 }
                 for(var e:ingredients.entrySet()) {
                     var pack=e.getValue();if(conflict.contains(e.getKey()))continue;
                     // Require the existing master to still be in the legacy supplier order unit.
-                    update(c,"UPDATE the_full_order.tb_ingredient_master SET base_unit=?,convert_value=?,needs_review=? WHERE ingredient_id=? AND LOWER(base_unit)=LOWER(order_unit)",pack.baseUnit(),pack.quantity().signum()>0?pack.quantity():BigDecimal.ONE,pack.quantity().signum()>0?0:1,e.getKey());
-                    update(c,"UPDATE the_full_order.tb_account_ingredient_master a JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=a.ingredient_id SET a.base_unit=i.base_unit,a.needs_review=i.needs_review WHERE a.ingredient_id=?",e.getKey());
+                    update(c,"UPDATE tb_ingredient_master SET base_unit=?,convert_value=?,needs_review=? WHERE ingredient_id=? AND LOWER(base_unit)=LOWER(order_unit)",pack.baseUnit(),pack.quantity().signum()>0?pack.quantity():BigDecimal.ONE,pack.quantity().signum()>0?0:1,e.getKey());
+                    update(c,"UPDATE tb_account_ingredient_master a JOIN tb_ingredient_master i ON i.ingredient_id=a.ingredient_id SET a.base_unit=i.base_unit,a.needs_review=i.needs_review WHERE a.ingredient_id=?",e.getKey());
                 }
                 int recipeRows=0;
                 for(String table:List.of("tb_recipe_detail","tb_account_recipe_detail")) {
                     String key=table.equals("tb_recipe_detail")?"recipe_detail_id":"account_recipe_detail_id";
-                    for(var r:rows(c,"SELECT r.*,i.base_unit master_unit FROM the_full_order."+table+" r JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id")) {
+                    for(var r:rows(c,"SELECT r.*,i.base_unit master_unit FROM "+table+" r JOIN tb_ingredient_master i ON i.ingredient_id=r.ingredient_id")) {
                         QuantityUnits.recipe(r,String.valueOf(r.get("master_unit")));
-                        update(c,"UPDATE the_full_order."+table+" SET qty_base=?,base_unit=?,qty_per_person=?,review_flag=? WHERE "+key+"=?",r.get("qty_base"),r.get("base_unit"),r.get("qty_per_person"),r.get("review_flag"),r.get(key));recipeRows++;
+                        update(c,"UPDATE "+table+" SET qty_base=?,base_unit=?,qty_per_person=?,review_flag=? WHERE "+key+"=?",r.get("qty_base"),r.get("base_unit"),r.get("qty_per_person"),r.get("review_flag"),r.get(key));recipeRows++;
                     }
                 }
-                Map<String,Object> params=new HashMap<>();params.put("servingQty",1);params.put("menu_id","M0001");params.put("account_id",rows(c,"SELECT account_id FROM the_full_order.tb_account_ingredient_master LIMIT 1").get(0).get("account_id"));params.put("user_id","");
+                Map<String,Object> params=new HashMap<>();params.put("servingQty",1);params.put("menu_id","M0001");params.put("account_id",rows(c,"SELECT account_id FROM tb_account_ingredient_master LIMIT 1").get(0).get("account_id"));params.put("user_id","");
                 var menus=session.getMapper(com.example.demo.mapper.MenuMapper.class);
                 menus.MenuList(params);menus.DetailList(params);menus.AccountDetailList(params);menus.AccountMenuList(params);
                 var inventory=session.getMapper(com.example.demo.mapper.InventoryMapper.class);inventory.ingredientMasterList(params);inventory.AccountInventoryList(params);
                 for(String[] expected:new String[][]{{"W1000503878","300","20000","0.015"},{"W1000775583","100","10000","0.01"},{"W1000748126","50","1000","0.05"}}) {
-                    var r=rows(c,"SELECT r.qty_base,r.base_unit,r.review_flag,p.base_qty FROM the_full_order.tb_recipe_detail r JOIN the_full_order.tb_supplier_ingredient_product p ON p.ingredient_id=r.ingredient_id WHERE r.ingredient_id='"+expected[0]+"'").get(0);
+                    var r=rows(c,"SELECT r.qty_base,r.base_unit,r.review_flag,p.base_qty FROM tb_recipe_detail r JOIN tb_supplier_ingredient_product p ON p.ingredient_id=r.ingredient_id WHERE r.ingredient_id='"+expected[0]+"'").get(0);
                     assertThat(r.get("base_unit")).isEqualTo("g");assertThat(new BigDecimal(r.get("qty_base").toString())).isEqualByComparingTo(expected[1]);assertThat(new BigDecimal(r.get("base_qty").toString())).isEqualByComparingTo(expected[2]);
                     assertThat(new BigDecimal(r.get("qty_base").toString()).divide(new BigDecimal(r.get("base_qty").toString()))).isEqualByComparingTo(expected[3]);
                 }

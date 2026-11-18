@@ -3,34 +3,34 @@
 <mapper namespace="com.example.demo.mapper.SupplierCatalogMapper">
     <select id="suppliers" parameterType="map" resultType="hashmap">
         <!-- 직접구매(DIRECT)는 거래처 자체 상품용 시스템 공급사라 본사 공급처 관리 목록에서 뺀다 -->
-        SELECT * FROM the_full_order.tb_supplier WHERE supplier_type&lt;&gt;'DIRECT'
+        SELECT * FROM tb_supplier WHERE supplier_type&lt;&gt;'DIRECT'
         <if test="supplier_id != null and supplier_id != ''">AND supplier_id=#{supplier_id}</if>
         <if test="active_yn != null and active_yn != ''">AND active_yn=#{active_yn}</if>
         ORDER BY supplier_name
     </select>
     <insert id="insertSupplier" parameterType="map" useGeneratedKeys="true" keyProperty="supplier_id">
-        INSERT INTO the_full_order.tb_supplier
+        INSERT INTO tb_supplier
         (supplier_code,supplier_name,supplier_type,active_yn,user_id)
         VALUES (#{supplier_code},#{supplier_name},COALESCE(#{supplier_type},'FOOD'),COALESCE(#{active_yn},'Y'),#{user_id})
     </insert>
     <update id="updateSupplier" parameterType="map">
-        UPDATE the_full_order.tb_supplier SET supplier_code=#{supplier_code},supplier_name=#{supplier_name},
+        UPDATE tb_supplier SET supplier_code=#{supplier_code},supplier_name=#{supplier_name},
         supplier_type=COALESCE(#{supplier_type},supplier_type),active_yn=COALESCE(#{active_yn},active_yn),user_id=#{user_id},mod_at=NOW()
         WHERE supplier_id=#{supplier_id}
     </update>
-    <delete id="deleteSupplier" parameterType="map">DELETE FROM the_full_order.tb_supplier WHERE supplier_id=#{supplier_id}</delete>
+    <delete id="deleteSupplier" parameterType="map">DELETE FROM tb_supplier WHERE supplier_id=#{supplier_id}</delete>
 
     <select id="products" parameterType="map" resultType="hashmap">
         SELECT p.*,s.supplier_code,s.supplier_name,i.ingredient_name_std,
                (SELECT ph.purchase_price
-                  FROM the_full_order.tb_supplier_ingredient_price_history ph
+                  FROM tb_supplier_ingredient_price_history ph
                  WHERE ph.supplier_product_id=p.supplier_product_id
                    AND ph.effective_from&lt;=NOW()
                    AND (ph.effective_to IS NULL OR ph.effective_to&gt;NOW())
                  ORDER BY ph.effective_from DESC LIMIT 1) current_price
-        FROM the_full_order.tb_supplier_ingredient_product p
-        JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
-        LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
+        FROM tb_supplier_ingredient_product p
+        JOIN tb_supplier s ON s.supplier_id=p.supplier_id
+        LEFT JOIN tb_ingredient_master i ON i.ingredient_id=p.ingredient_id
         WHERE s.supplier_type&lt;&gt;'DIRECT'
         <if test="supplier_product_id != null and supplier_product_id != ''">AND p.supplier_product_id=#{supplier_product_id}</if>
         <if test="supplier_id != null and supplier_id != ''">AND p.supplier_id=#{supplier_id}</if>
@@ -39,7 +39,7 @@
         ORDER BY s.supplier_name,p.product_name
     </select>
     <insert id="insertProduct" parameterType="map" useGeneratedKeys="true" keyProperty="supplier_product_id">
-        INSERT INTO the_full_order.tb_supplier_ingredient_product
+        INSERT INTO tb_supplier_ingredient_product
         (supplier_id,ingredient_id,supplier_item_code,product_name,order_unit,package_qty,package_unit,base_qty,base_unit,
          minimum_order_qty,order_multiple_qty,tax_type,active_yn,user_id)
         VALUES (#{supplier_id},#{ingredient_id},#{supplier_item_code},#{product_name},#{order_unit},#{package_qty},#{package_unit},
@@ -61,14 +61,14 @@
         mod_at=NOW()
     </insert>
     <select id="productForUpdate" parameterType="map" resultType="hashmap">
-        SELECT * FROM the_full_order.tb_supplier_ingredient_product
+        SELECT * FROM tb_supplier_ingredient_product
         WHERE supplier_product_id=#{supplier_product_id} FOR UPDATE
     </select>
     <select id="ingredientBaseUnit" parameterType="map" resultType="string">
-        SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}
+        SELECT base_unit FROM tb_ingredient_master WHERE ingredient_id=#{ingredient_id}
     </select>
     <update id="updateProduct" parameterType="map">
-        UPDATE the_full_order.tb_supplier_ingredient_product
+        UPDATE tb_supplier_ingredient_product
         <set>
             <if test="supplier_id != null">supplier_id=#{supplier_id},</if><if test="ingredient_id != null">ingredient_id=#{ingredient_id},</if>
             <if test="supplier_item_code != null">supplier_item_code=#{supplier_item_code},</if><if test="product_name != null">product_name=#{product_name},</if>
@@ -79,20 +79,20 @@
             <if test="active_yn != null">active_yn=#{active_yn},</if>user_id=#{user_id},mod_at=NOW()
         </set> WHERE supplier_product_id=#{supplier_product_id}
     </update>
-    <delete id="deleteProduct" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id}</delete>
+    <delete id="deleteProduct" parameterType="map">DELETE FROM tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id}</delete>
 
     <select id="prices" parameterType="map" resultType="hashmap">
-        SELECT * FROM the_full_order.tb_supplier_ingredient_price_history WHERE 1=1
+        SELECT * FROM tb_supplier_ingredient_price_history WHERE 1=1
         <if test="price_history_id != null and price_history_id != ''">AND price_history_id=#{price_history_id}</if>
         <if test="supplier_product_id != null and supplier_product_id != ''">AND supplier_product_id=#{supplier_product_id}</if>
         ORDER BY effective_from DESC
     </select>
     <update id="closeCurrentPrice" parameterType="map">
-        UPDATE the_full_order.tb_supplier_ingredient_price_history SET effective_to=DATE_SUB(#{effective_from},INTERVAL 1 SECOND)
+        UPDATE tb_supplier_ingredient_price_history SET effective_to=DATE_SUB(#{effective_from},INTERVAL 1 SECOND)
         WHERE supplier_product_id=#{supplier_product_id} AND effective_to IS NULL AND effective_from &lt; #{effective_from}
     </update>
     <insert id="insertPrice" parameterType="map" useGeneratedKeys="true" keyProperty="price_history_id">
-        INSERT INTO the_full_order.tb_supplier_ingredient_price_history
+        INSERT INTO tb_supplier_ingredient_price_history
         (supplier_product_id,purchase_price,effective_from,effective_to,user_id)
         VALUES (#{supplier_product_id},#{purchase_price},#{effective_from},#{effective_to},#{user_id})
         ON DUPLICATE KEY UPDATE
@@ -102,9 +102,9 @@
         user_id=VALUES(user_id)
     </insert>
     <update id="updatePrice" parameterType="map">
-        UPDATE the_full_order.tb_supplier_ingredient_price_history SET purchase_price=#{purchase_price},
+        UPDATE tb_supplier_ingredient_price_history SET purchase_price=#{purchase_price},
         effective_from=#{effective_from},effective_to=#{effective_to},user_id=#{user_id} WHERE price_history_id=#{price_history_id}
     </update>
-    <delete id="deletePrice" parameterType="map">DELETE FROM the_full_order.tb_supplier_ingredient_price_history WHERE price_history_id=#{price_history_id}</delete>
+    <delete id="deletePrice" parameterType="map">DELETE FROM tb_supplier_ingredient_price_history WHERE price_history_id=#{price_history_id}</delete>
 
 </mapper>

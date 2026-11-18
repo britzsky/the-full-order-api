@@ -29,10 +29,10 @@ class LocalOurhomeLookupTimingTest {
         }
         // 2) 상품코드 조회(이 거래처가 발주했던 아워홈 상품을 코드별로 갱신할 경우)
         List<String> codes=jdbc.queryForList("""
-                SELECT DISTINCT p.supplier_item_code FROM the_full_order.tb_account_purchase_order_item i
-                JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
-                JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
-                JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id AND s.supplier_code='OURHOME'
+                SELECT DISTINCT p.supplier_item_code FROM tb_account_purchase_order_item i
+                JOIN tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
+                JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
+                JOIN tb_supplier s ON s.supplier_id=p.supplier_id AND s.supplier_code='OURHOME'
                 WHERE po.account_id=? LIMIT 20""",String.class,account);
         long all=System.nanoTime(); int found=0;
         for(String code:codes) {

@@ -35,7 +35,7 @@ class LocalMixedProcurementDatabaseTest {
         var source=new UnpooledDataSource("com.mysql.cj.jdbc.Driver",url,props.getProperty("spring.datasource.username"),props.getProperty("spring.datasource.password"));
         if("true".equals(System.getenv("APPLY_LOCAL_MIXED_SCHEMA"))){
             String ddl=Files.readString(Path.of("ddl-source/order_ddl_local.txt"));
-            int start=ddl.indexOf("CREATE TABLE IF NOT EXISTS the_full_order.tb_procurement_batch (");
+            int start=ddl.indexOf("CREATE TABLE IF NOT EXISTS tb_procurement_batch (");
             assertThat(start).isGreaterThan(0);
             String create=ddl.substring(start,ddl.indexOf(';',start)+1);
             try(var c=source.getConnection();var statement=c.createStatement()){statement.execute(create);}

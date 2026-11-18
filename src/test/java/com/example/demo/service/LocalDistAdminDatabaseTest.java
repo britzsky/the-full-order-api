@@ -67,16 +67,16 @@ class LocalDistAdminDatabaseTest {
 		// 판매 시작 → 판매가 변경은 이전 가격을 닫는다(현재가 1개)
 		service.changeStatus(new HashMap<>(Map.of("product_id", id, "sale_status", "ON_SALE", "user_id", "TEST")));
 		service.addSalePrice(new HashMap<>(Map.of("product_id", id, "price_type", "ACCOUNT", "unit_price", "43000")), "TEST");
-		var prices = jdbc.queryForList("SELECT unit_price,end_at FROM the_full_order.tb_dist_sale_price_history WHERE product_id=? AND price_type='ACCOUNT' ORDER BY sale_price_id", id);
+		var prices = jdbc.queryForList("SELECT unit_price,end_at FROM tb_dist_sale_price_history WHERE product_id=? AND price_type='ACCOUNT' ORDER BY sale_price_id", id);
 		assertThat(prices).hasSize(2);
 		assertThat(prices.get(0).get("end_at")).isNotNull();
 		assertThat(prices.get(1).get("end_at")).isNull();
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_sale_price_history WHERE product_id=? AND price_type='ACCOUNT' AND start_at<=NOW() AND (end_at IS NULL OR end_at>NOW())", Integer.class, id)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_sale_price_history WHERE product_id=? AND price_type='ACCOUNT' AND start_at<=NOW() AND (end_at IS NULL OR end_at>NOW())", Integer.class, id)).isEqualTo(1);
 
 		// 매입가 변경: 내일부터 → 오늘 행은 오늘로 닫힘
 		String tomorrow = jdbc.queryForObject("SELECT DATE_FORMAT(CURDATE()+INTERVAL 1 DAY,'%Y-%m-%d')", String.class);
 		service.addCostPrice(new HashMap<>(Map.of("product_id", id, "unit_cost", "39000", "start_date", tomorrow)), "TEST");
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_cost_price_history WHERE product_id=? AND end_date=CURDATE()", Integer.class, id)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_cost_price_history WHERE product_id=? AND end_date=CURDATE()", Integer.class, id)).isEqualTo(1);
 	}
 
 	@Test void availabilityPeriodsDoNotOverlap() {
@@ -85,14 +85,14 @@ class LocalDistAdminDatabaseTest {
 		assertThatThrownBy(() -> service.saveAvailability(new HashMap<>(Map.of("product_id", id, "available_from", "2026-11-15", "user_id", "TEST"))))
 				.hasMessageContaining("겹치는");
 		service.saveAvailability(new HashMap<>(Map.of("product_id", id, "available_from", "2026-12-01", "status", "LIMITED", "user_id", "TEST")));
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_product_availability WHERE product_id=?", Integer.class, id)).isEqualTo(2);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_product_availability WHERE product_id=?", Integer.class, id)).isEqualTo(2);
 	}
 
 	@Test void imagesAndDuplicateCodes() {
 		long id = setUpProduct();
 		service.addImage(new HashMap<>(Map.of("product_id", id, "image_url", "https://example.com/a.jpg", "user_id", "TEST")));
 		service.addImage(new HashMap<>(Map.of("product_id", id, "image_url", "https://example.com/b.jpg", "image_type", "DETAIL", "user_id", "TEST")));
-		var images = jdbc.queryForList("SELECT product_image_id,sort_order FROM the_full_order.tb_dist_product_image WHERE product_id=? ORDER BY sort_order", id);
+		var images = jdbc.queryForList("SELECT product_image_id,sort_order FROM tb_dist_product_image WHERE product_id=? ORDER BY sort_order", id);
 		assertThat(images).extracting(r -> ((Number) r.get("sort_order")).intValue()).containsExactly(0, 1);
 		service.deleteImage(id, images.get(0).get("product_image_id"), "TEST");
 		assertThatThrownBy(() -> service.savePartner(new HashMap<>(Map.of("partner_code", "ZZ_TEST_WANDO", "partner_name", "중복", "user_id", "TEST"))))

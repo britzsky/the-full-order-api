@@ -22,10 +22,10 @@ class LocalMealWeekPreviewDatabaseTest {
     @SuppressWarnings("unchecked")
     @Test void previewCalculatesDeductionsAndLeavesDatabaseUnchanged() {
         var target=jdbc.queryForList("""
-                SELECT ms.account_id,ms.table_id FROM the_full_order.tb_account_meal_service ms
-                JOIN the_full_order.tb_account_table_meals t ON t.table_id=ms.table_id AND t.account_id=ms.account_id AND t.status<>'CANCELED'
+                SELECT ms.account_id,ms.table_id FROM tb_account_meal_service ms
+                JOIN tb_account_table_meals t ON t.table_id=ms.table_id AND t.account_id=ms.account_id AND t.status<>'CANCELED'
                 WHERE ms.status NOT IN ('COMPLETED','CANCELED') AND ms.meal_date<=CURRENT_DATE
-                  AND EXISTS(SELECT 1 FROM the_full_order.tb_account_meal_ingredient_requirement r WHERE r.meal_service_id=ms.meal_service_id)
+                  AND EXISTS(SELECT 1 FROM tb_account_meal_ingredient_requirement r WHERE r.meal_service_id=ms.meal_service_id)
                 ORDER BY ms.meal_date DESC LIMIT 1""");
         assertThat(target).as("지난 날짜의 미확정 식단 필요").isNotEmpty();
         String account=target.get(0).get("account_id").toString(), table=target.get(0).get("table_id").toString();
@@ -56,11 +56,11 @@ class LocalMealWeekPreviewDatabaseTest {
     private String fingerprint(String account,String table) {
         return jdbc.queryForObject("""
                 SELECT CONCAT_WS('|',
-                  (SELECT COALESCE(SUM(current_base_qty),0) FROM the_full_order.tb_account_inventory_balance WHERE account_id=?),
-                  (SELECT COALESCE(SUM(remaining_base_qty),0) FROM the_full_order.tb_account_inventory_lot WHERE account_id=?),
-                  (SELECT COUNT(*) FROM the_full_order.tb_account_meal_stock_usage WHERE account_id=?),
-                  (SELECT COUNT(*) FROM the_full_order.tb_account_inventory_movement WHERE account_id=?),
-                  (SELECT GROUP_CONCAT(status ORDER BY meal_service_id) FROM the_full_order.tb_account_meal_service WHERE account_id=? AND table_id=?))""",
+                  (SELECT COALESCE(SUM(current_base_qty),0) FROM tb_account_inventory_balance WHERE account_id=?),
+                  (SELECT COALESCE(SUM(remaining_base_qty),0) FROM tb_account_inventory_lot WHERE account_id=?),
+                  (SELECT COUNT(*) FROM tb_account_meal_stock_usage WHERE account_id=?),
+                  (SELECT COUNT(*) FROM tb_account_inventory_movement WHERE account_id=?),
+                  (SELECT GROUP_CONCAT(status ORDER BY meal_service_id) FROM tb_account_meal_service WHERE account_id=? AND table_id=?))""",
                 String.class,account,account,account,account,account,table);
     }
 }

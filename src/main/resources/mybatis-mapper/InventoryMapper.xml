@@ -12,8 +12,8 @@
            AVG(r.quantity) average_required_qty,
            COUNT(*) menu_usage_count,
            MAX(ms.meal_date) last_used_at
-      FROM the_full_order.tb_account_meal_stock_usage r
-      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+      FROM tb_account_meal_stock_usage r
+      JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
      WHERE ms.account_id=#{account_id} AND ms.status='COMPLETED' AND r.reversed_at IS NULL
        AND ms.meal_date&gt;=DATE_SUB(CURRENT_DATE,INTERVAL COALESCE(#{average_days},30) DAY)
        AND ms.meal_date&lt;=CURRENT_DATE
@@ -32,37 +32,37 @@
          lot.product_name_snapshot recent_product_name,lot.received_date recent_received_date,
          p.image_url,p.thumbnail_url,s.supplier_name recent_supplier_name,
          <!-- 기초재고를 추정 단가로 등록했는지 (InventoryService.opening, reference_type=OPENING_ESTIMATED) -->
-         CASE WHEN EXISTS(SELECT 1 FROM the_full_order.tb_account_inventory_movement mv WHERE mv.account_id=ai.account_id AND mv.ingredient_id=ai.ingredient_id AND mv.movement_type='OPENING' AND mv.reference_type='OPENING_ESTIMATED') THEN 'Y' ELSE 'N' END opening_cost_estimated,
+         CASE WHEN EXISTS(SELECT 1 FROM tb_account_inventory_movement mv WHERE mv.account_id=ai.account_id AND mv.ingredient_id=ai.ingredient_id AND mv.movement_type='OPENING' AND mv.reference_type='OPENING_ESTIMATED') THEN 'Y' ELSE 'N' END opening_cost_estimated,
          <!-- 기초재고 등록 가능 여부: 조정(ADJUST) 말고 입고·사용·기초재고 이력이 없을 때만 -->
-         CASE WHEN EXISTS(SELECT 1 FROM the_full_order.tb_account_inventory_movement mv WHERE mv.account_id=ai.account_id AND mv.ingredient_id=ai.ingredient_id AND mv.movement_type&lt;&gt;'ADJUST') THEN 'N' ELSE 'Y' END opening_available,
+         CASE WHEN EXISTS(SELECT 1 FROM tb_account_inventory_movement mv WHERE mv.account_id=ai.account_id AND mv.ingredient_id=ai.ingredient_id AND mv.movement_type&lt;&gt;'ADJUST') THEN 'N' ELSE 'Y' END opening_available,
          COALESCE(rh.average_required_qty,0) average_usage_qty,rh.last_used_at,
          COALESCE(rh.menu_usage_count,0) menu_usage_count,
          ai.max_stock_base_qty total_capacity_qty,ROUND(COALESCE(rh.average_required_qty,0),3) required_qty,
          ROUND(GREATEST(COALESCE(rh.average_required_qty,0)*1.10,COALESCE(ai.safe_stock_base_qty,0)),3) safe_stock_base_qty,
          ROUND(GREATEST(COALESCE(rh.average_required_qty,0)-COALESCE(b.current_base_qty,0),0),3) shortage_qty,
          ROUND(GREATEST(GREATEST(COALESCE(rh.average_required_qty,0)*1.10,COALESCE(ai.safe_stock_base_qty,0))-COALESCE(b.current_base_qty,0),0),3) order_needed_qty,
-         (SELECT rd.menu_id FROM the_full_order.tb_account_recipe_detail rd WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id ORDER BY rd.menu_id LIMIT 1) menu_id,
-         (SELECT am.menu_name FROM the_full_order.tb_account_recipe_detail rd JOIN the_full_order.tb_account_menu_master am ON am.account_id=rd.account_id AND am.menu_id=rd.menu_id WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id AND am.del_yn='N' ORDER BY rd.menu_id LIMIT 1) menu_name,
+         (SELECT rd.menu_id FROM tb_account_recipe_detail rd WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id ORDER BY rd.menu_id LIMIT 1) menu_id,
+         (SELECT am.menu_name FROM tb_account_recipe_detail rd JOIN tb_account_menu_master am ON am.account_id=rd.account_id AND am.menu_id=rd.menu_id WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id AND am.del_yn='N' ORDER BY rd.menu_id LIMIT 1) menu_name,
          CASE WHEN COALESCE(b.current_base_qty,0)&lt;=0 AND COALESCE(rh.average_required_qty,0)&gt;0 THEN 'RED'
               WHEN COALESCE(b.current_base_qty,0)&lt;=0 THEN 'EMPTY'
               WHEN b.current_base_qty&lt;COALESCE(rh.average_required_qty,0) THEN 'ORANGE'
               WHEN rh.last_used_at IS NULL AND ai.max_stock_base_qty&gt;0 AND b.current_base_qty/ai.max_stock_base_qty&lt;=0.30 THEN 'YELLOW'
               WHEN COALESCE(rh.average_required_qty,0)&lt;=0 THEN 'UNKNOWN'
               ELSE 'GREEN' END stock_status
-    FROM the_full_order.tb_account_ingredient_master ai
-    LEFT JOIN the_full_order.tb_account_inventory_balance b ON b.account_id=ai.account_id AND b.ingredient_id=ai.ingredient_id
-    LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=ai.ingredient_id
-    LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
-      SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+    FROM tb_account_ingredient_master ai
+    LEFT JOIN tb_account_inventory_balance b ON b.account_id=ai.account_id AND b.ingredient_id=ai.ingredient_id
+    LEFT JOIN tb_ingredient_master im ON im.ingredient_id=ai.ingredient_id
+    LEFT JOIN tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+      SELECT l.inventory_lot_id FROM tb_account_inventory_lot l
        WHERE l.account_id=ai.account_id AND l.ingredient_id=ai.ingredient_id
        ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
-    LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=lot.supplier_product_id
-    LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
+    LEFT JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=lot.supplier_product_id
+    LEFT JOIN tb_supplier s ON s.supplier_id=p.supplier_id
     LEFT JOIN requirement_history rh ON rh.account_id=ai.account_id AND rh.ingredient_id=ai.ingredient_id
    WHERE ai.account_id=#{account_id} AND ai.active_yn='Y'
      <!-- 재고가 없는 식재료는 레시피·재고 이력·발주 중 하나라도 쓰는 것만 -->
      AND (b.inventory_balance_id IS NOT NULL
-          OR EXISTS(SELECT 1 FROM the_full_order.tb_account_recipe_detail rd WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id))
+          OR EXISTS(SELECT 1 FROM tb_account_recipe_detail rd WHERE rd.account_id=ai.account_id AND rd.ingredient_id=ai.ingredient_id))
    <if test="inventory_balance_id!=null and inventory_balance_id!=''"> AND b.inventory_balance_id=#{inventory_balance_id}</if>
    <if test="ingredient_id!=null and ingredient_id!=''"> AND ai.ingredient_id=#{ingredient_id}</if>
    ORDER BY FIELD(stock_status,'RED','EMPTY','ORANGE','YELLOW','UNKNOWN','GREEN'),ingredient_name
@@ -73,7 +73,7 @@
   SELECT i.ingredient_id,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
          i.ingredient_name_raw,i.ingredient_name_std,i.category_name,i.base_unit,i.storage_type,
          i.menu_usage_count,i.needs_review,i.note,i.standard_unit_cost,i.standard_cost_mod_at
-    FROM the_full_order.tb_ingredient_master i
+    FROM tb_ingredient_master i
    WHERE 1=1
    <if test="ingredient_id!=null and ingredient_id!=''">AND i.ingredient_id=#{ingredient_id}</if>
    ORDER BY i.category_name,ingredient_name
@@ -81,7 +81,7 @@
 
  <!-- 신규 본사 식자재 마스터를 등록한다. -->
  <insert id="insertIngredientMaster" parameterType="map">
-  INSERT INTO the_full_order.tb_ingredient_master
+  INSERT INTO tb_ingredient_master
    (ingredient_id,ingredient_name_raw,ingredient_name_std,category_name,base_unit,order_unit,convert_value,
     standard_unit_cost,standard_cost_mod_at,storage_type,menu_usage_count,needs_review,note,created_at,safe_stock_qty)
   VALUES
@@ -92,7 +92,7 @@
 
  <!-- 메뉴/재고 원가 산정에 사용되는 본사 식자재 속성을 수정한다. 표준 단가가 바뀔 때만 수정일시를 남긴다. -->
  <update id="updateIngredientMaster" parameterType="map">
-  UPDATE the_full_order.tb_ingredient_master
+  UPDATE tb_ingredient_master
      SET ingredient_name_raw=#{ingredient_name},ingredient_name_std=#{ingredient_name},category_name=#{category_name},
          base_unit=#{base_unit},storage_type=NULLIF(#{storage_type},''),note=#{note},
          standard_cost_mod_at=CASE WHEN NOT (standard_unit_cost &lt;=&gt; #{standard_unit_cost}) THEN NOW() ELSE standard_cost_mod_at END,
@@ -104,16 +104,16 @@
  <select id="accountIngredient" parameterType="map" resultType="hashmap">
   SELECT account_id,ingredient_id,base_unit,default_location_id,
          COALESCE(ingredient_name_std,ingredient_name_raw) ingredient_name
-    FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
+    FROM tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
  </select>
  <!-- 식재료 재고 행을 없으면 만든다(수량 0). 같은 거래처·식재료·위치는 한 행 -->
  <insert id="ensureBalance" parameterType="map">
-  INSERT INTO the_full_order.tb_account_inventory_balance(account_id,ingredient_id,location_id,current_base_qty,base_unit,current_unit,user_id)
+  INSERT INTO tb_account_inventory_balance(account_id,ingredient_id,location_id,current_base_qty,base_unit,current_unit,user_id)
   VALUES(#{account_id},#{ingredient_id},COALESCE(NULLIF(#{location_id},''),'L999'),0,#{base_unit},#{base_unit},#{user_id})
   ON DUPLICATE KEY UPDATE inventory_balance_id=LAST_INSERT_ID(inventory_balance_id)
  </insert>
  <select id="balanceId" parameterType="map" resultType="long">
-  SELECT inventory_balance_id FROM the_full_order.tb_account_inventory_balance
+  SELECT inventory_balance_id FROM tb_account_inventory_balance
    WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id} AND location_id=COALESCE(NULLIF(#{location_id},''),'L999')
  </select>
  <!--
@@ -131,9 +131,9 @@
               WHEN pp.site_cost&gt;0 THEN pp.site_date WHEN pp.common_cost&gt;0 THEN pp.common_date ELSE pp.standard_date END cost_date
     FROM (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
     <!-- 재고 행이 아직 없는 식재료도 추정한다(기초재고 등록 때 재고 행을 만든다) -->
-    LEFT JOIN the_full_order.tb_account_inventory_balance b ON b.account_id=pp.account_id AND b.ingredient_id=pp.ingredient_id
-    LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
-      SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+    LEFT JOIN tb_account_inventory_balance b ON b.account_id=pp.account_id AND b.ingredient_id=pp.ingredient_id
+    LEFT JOIN tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+      SELECT l.inventory_lot_id FROM tb_account_inventory_lot l
        WHERE l.account_id=pp.account_id AND l.ingredient_id=pp.ingredient_id AND l.receipt_unit_cost&gt;0
        ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
    WHERE pp.account_id=#{account_id}
@@ -141,23 +141,23 @@
    <if test="ingredient_id!=null and ingredient_id!=''"> AND pp.ingredient_id=#{ingredient_id}</if>
  </select>
  <!-- 기초재고 등록 가능 여부 (ADJUST 이외 이력이 있으면 불가) -->
- <select id="hasNonAdjustMovement" parameterType="map" resultType="int">SELECT COUNT(*) FROM the_full_order.tb_account_inventory_movement WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id} AND movement_type&lt;&gt;'ADJUST'</select>
+ <select id="hasNonAdjustMovement" parameterType="map" resultType="int">SELECT COUNT(*) FROM tb_account_inventory_movement WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id} AND movement_type&lt;&gt;'ADJUST'</select>
  <!-- 수량·평균단가·재고금액을 함께 갱신 (기초재고 등록, 금액 반영 조정) -->
- <update id="updateInventoryValue" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance SET current_base_qty=#{current_base_qty},current_unit=#{current_unit},average_unit_cost=#{average_unit_cost},inventory_amount=#{inventory_amount},last_movement_at=NOW(),<if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW() WHERE inventory_balance_id=#{inventory_balance_id}</update>
+ <update id="updateInventoryValue" parameterType="map">UPDATE tb_account_inventory_balance SET current_base_qty=#{current_base_qty},current_unit=#{current_unit},average_unit_cost=#{average_unit_cost},inventory_amount=#{inventory_amount},last_movement_at=NOW(),<if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW() WHERE inventory_balance_id=#{inventory_balance_id}</update>
  <!-- 금액이 있는 재고 이력. 기초재고는 reference_type=OPENING, reference_id=재고행 → 유니크 키로 중복 등록 차단 -->
- <insert id="insertValuedMovement" parameterType="map">INSERT INTO the_full_order.tb_account_inventory_movement(movement_id,account_id,ingredient_id,supplier_product_id,product_name_snapshot,location_id,movement_type,quantity_delta,quantity_before,quantity_after,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{ingredient_id},#{supplier_product_id},#{product_name_snapshot},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{unit_cost_snapshot},#{amount_delta},#{average_unit_cost_before},#{average_unit_cost_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>
- <select id="inventoryForUpdate" parameterType="map" resultType="hashmap">SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} FOR UPDATE</select>
- <update id="updateInventory" parameterType="map">UPDATE the_full_order.tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="current_unit!=null and current_unit!=''">current_unit=#{current_unit},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>
+ <insert id="insertValuedMovement" parameterType="map">INSERT INTO tb_account_inventory_movement(movement_id,account_id,ingredient_id,supplier_product_id,product_name_snapshot,location_id,movement_type,quantity_delta,quantity_before,quantity_after,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{ingredient_id},#{supplier_product_id},#{product_name_snapshot},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{unit_cost_snapshot},#{amount_delta},#{average_unit_cost_before},#{average_unit_cost_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>
+ <select id="inventoryForUpdate" parameterType="map" resultType="hashmap">SELECT * FROM tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} FOR UPDATE</select>
+ <update id="updateInventory" parameterType="map">UPDATE tb_account_inventory_balance <set><if test="current_base_qty!=null">current_base_qty=#{current_base_qty},last_movement_at=NOW(),</if><if test="current_unit!=null and current_unit!=''">current_unit=#{current_unit},</if><if test="note!=null">note=#{note},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE inventory_balance_id=#{inventory_balance_id}</update>
  <!-- 식재료 재고 기준(안전재고·적정 보유량·리드타임·기본 위치). 공급사 상품이 아니라 거래처 식재료에 둔다 -->
- <update id="updateIngredientStockSettings" parameterType="map">UPDATE the_full_order.tb_account_ingredient_master <set><if test="safe_stock_base_qty!=null">safe_stock_base_qty=#{safe_stock_base_qty},</if><if test="max_stock_base_qty!=null">max_stock_base_qty=NULLIF(#{max_stock_base_qty},''),</if><if test="lead_time_days!=null">lead_time_days=#{lead_time_days},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}</update>
- <delete id="deleteInventory" parameterType="map">DELETE FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} AND current_base_qty=0 AND NOT EXISTS(SELECT 1 FROM (SELECT inventory_balance_id FROM the_full_order.tb_account_meal_stock_usage) u WHERE u.inventory_balance_id=#{inventory_balance_id})</delete>
+ <update id="updateIngredientStockSettings" parameterType="map">UPDATE tb_account_ingredient_master <set><if test="safe_stock_base_qty!=null">safe_stock_base_qty=#{safe_stock_base_qty},</if><if test="max_stock_base_qty!=null">max_stock_base_qty=NULLIF(#{max_stock_base_qty},''),</if><if test="lead_time_days!=null">lead_time_days=#{lead_time_days},</if>user_id=#{user_id},mod_at=NOW()</set>WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}</update>
+ <delete id="deleteInventory" parameterType="map">DELETE FROM tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} AND current_base_qty=0 AND NOT EXISTS(SELECT 1 FROM (SELECT inventory_balance_id FROM tb_account_meal_stock_usage) u WHERE u.inventory_balance_id=#{inventory_balance_id})</delete>
  <!-- 재고 변동 이력 공통 조건. keyword는 상품명·거래처/표준 식재료명·공급사 품목코드, movement_types는 서비스에서 허용값만 남긴 목록 -->
  <sql id="movementSource">
-  FROM the_full_order.tb_account_inventory_movement m
-  LEFT JOIN the_full_order.tb_supplier_ingredient_product p ON p.supplier_product_id=m.supplier_product_id
-  LEFT JOIN the_full_order.tb_supplier s ON s.supplier_id=p.supplier_id
-  LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=m.account_id AND ai.ingredient_id=m.ingredient_id
-  LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=m.ingredient_id
+  FROM tb_account_inventory_movement m
+  LEFT JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=m.supplier_product_id
+  LEFT JOIN tb_supplier s ON s.supplier_id=p.supplier_id
+  LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=m.account_id AND ai.ingredient_id=m.ingredient_id
+  LEFT JOIN tb_ingredient_master im ON im.ingredient_id=m.ingredient_id
   WHERE m.account_id=#{account_id}
   <if test="ingredient_id!=null and ingredient_id!=''">AND m.ingredient_id=#{ingredient_id}</if>
   <if test="keyword!=null and keyword!=''">
@@ -183,13 +183,13 @@
       <include refid="movementSource"/>
       ORDER BY m.movement_at DESC,m.movement_id DESC LIMIT #{limit} OFFSET #{offset}
     ) pg
-    LEFT JOIN the_full_order.tb_account_meal_stock_usage u ON pg.reference_type='MEAL_SERVICE' AND u.usage_id=pg.reference_id
-    LEFT JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=u.meal_service_id
-    LEFT JOIN the_full_order.tb_meal_slot_master sm ON sm.meal_slot_code=COALESCE(ms.meal_slot_code,CAST(ms.meal_slot AS UNSIGNED))
-    LEFT JOIN the_full_order.tb_account_menu_master mm ON mm.account_id=u.account_id AND mm.menu_id=u.menu_id
-    LEFT JOIN the_full_order.tb_goods_receipt_item gri ON pg.reference_type='GOODS_RECEIPT' AND gri.inventory_movement_id=pg.movement_id
-    LEFT JOIN the_full_order.tb_goods_receipt gr ON gr.goods_receipt_id=gri.goods_receipt_id
-    LEFT JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=gr.purchase_order_id
+    LEFT JOIN tb_account_meal_stock_usage u ON pg.reference_type='MEAL_SERVICE' AND u.usage_id=pg.reference_id
+    LEFT JOIN tb_account_meal_service ms ON ms.meal_service_id=u.meal_service_id
+    LEFT JOIN tb_meal_slot_master sm ON sm.meal_slot_code=COALESCE(ms.meal_slot_code,CAST(ms.meal_slot AS UNSIGNED))
+    LEFT JOIN tb_account_menu_master mm ON mm.account_id=u.account_id AND mm.menu_id=u.menu_id
+    LEFT JOIN tb_goods_receipt_item gri ON pg.reference_type='GOODS_RECEIPT' AND gri.inventory_movement_id=pg.movement_id
+    LEFT JOIN tb_goods_receipt gr ON gr.goods_receipt_id=gri.goods_receipt_id
+    LEFT JOIN tb_account_purchase_order po ON po.purchase_order_id=gr.purchase_order_id
    ORDER BY pg.movement_at DESC,pg.movement_id DESC
  </select>
  <!-- 같은 조건의 구분별 건수·수량·금액 합계. 수량 합은 단위가 하나일 때만 의미가 있어 단위 수를 같이 준다 -->
@@ -199,5 +199,5 @@
   <include refid="movementSource"/>
   GROUP BY m.movement_type
  </select>
- <insert id="insertMovement" parameterType="map">INSERT INTO the_full_order.tb_account_inventory_movement(movement_id,account_id,ingredient_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{ingredient_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>
+ <insert id="insertMovement" parameterType="map">INSERT INTO tb_account_inventory_movement(movement_id,account_id,ingredient_id,location_id,movement_type,quantity_delta,quantity_before,quantity_after,base_unit,reference_type,reference_id,movement_at,user_id)VALUES(#{movement_id},#{account_id},#{ingredient_id},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},#{base_unit},#{reference_type},#{reference_id},COALESCE(#{movement_at},NOW()),#{user_id})</insert>
 </mapper>

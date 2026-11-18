@@ -58,7 +58,7 @@ public class HqOverviewService {
         return jdbc.queryForList("""
             SELECT a.account_id, a.account_name FROM the_full.tb_account a
             WHERE a.del_yn='N'
-              AND NOT EXISTS (SELECT 1 FROM the_full_order.tb_account_meal_service m WHERE m.account_id=a.account_id
+              AND NOT EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                      AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')
             """ + scope(account) + " ORDER BY a.account_name LIMIT 500", args.toArray());
     }
@@ -79,8 +79,8 @@ public class HqOverviewService {
         var accounts = jdbc.queryForList("""
             SELECT a.account_id, a.account_name FROM the_full.tb_account a
             WHERE a.del_yn='N' AND EXISTS (
-              SELECT 1 FROM the_full_order.tb_account_meal_service m
-              JOIN the_full_order.tb_account_table_meals t ON t.table_id=m.table_id AND t.account_id=m.account_id
+              SELECT 1 FROM tb_account_meal_service m
+              JOIN tb_account_table_meals t ON t.table_id=m.table_id AND t.account_id=m.account_id
               WHERE m.account_id=a.account_id AND m.meal_date BETWEEN ? AND ?
                 AND m.status NOT IN ('CANCELED','COMPLETED') AND t.status<>'CANCELED')
             """ + scope(account) + " ORDER BY a.account_name LIMIT 500",

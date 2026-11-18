@@ -62,7 +62,7 @@ class LocalDistShopDatabaseTest {
 	}
 
 	BigDecimal reserved() {
-		return jdbc.queryForObject("SELECT reserved_qty FROM the_full_order.tb_dist_product_availability WHERE product_id=?", BigDecimal.class, product);
+		return jdbc.queryForObject("SELECT reserved_qty FROM tb_dist_product_availability WHERE product_id=?", BigDecimal.class, product);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -86,7 +86,7 @@ class LocalDistShopDatabaseTest {
 		assertThat(reserved()).isEqualByComparingTo("2");
 
 		// 개인정보는 암호문으로 저장, 본인 조회에서만 풀림
-		String stored = jdbc.queryForObject("SELECT orderer_name_enc FROM the_full_order.tb_dist_order WHERE order_id=?", String.class, orderId);
+		String stored = jdbc.queryForObject("SELECT orderer_name_enc FROM tb_dist_order WHERE order_id=?", String.class, orderId);
 		assertThat(stored).startsWith("v1:").doesNotContain("홍길동");
 		var detail = shop.myOrder(site, orderId);
 		assertThat(((Map<String, Object>) detail.get("order")).get("orderer_name")).isEqualTo("홍길동");
@@ -105,9 +105,9 @@ class LocalDistShopDatabaseTest {
 
 		shop.cancel(site, orderId, Map.of("reason_code", "CHANGE_MIND", "reason", "수량 착오"));
 		assertThat(reserved()).isEqualByComparingTo("0");
-		assertThat(jdbc.queryForObject("SELECT order_status FROM the_full_order.tb_dist_order WHERE order_id=?", String.class, orderId)).isEqualTo("CANCELED");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_claim WHERE order_id=?", String.class, orderId)).isEqualTo("COMPLETED");
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_claim_item c JOIN the_full_order.tb_dist_claim m ON m.claim_id=c.claim_id WHERE m.order_id=?", Integer.class, orderId)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT order_status FROM tb_dist_order WHERE order_id=?", String.class, orderId)).isEqualTo("CANCELED");
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_claim WHERE order_id=?", String.class, orderId)).isEqualTo("COMPLETED");
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_claim_item c JOIN tb_dist_claim m ON m.claim_id=c.claim_id WHERE m.order_id=?", Integer.class, orderId)).isEqualTo(1);
 		assertThatThrownBy(() -> shop.cancel(site, orderId, Map.of())).hasMessageContaining("이미 취소");
 	}
 
@@ -131,14 +131,14 @@ class LocalDistShopDatabaseTest {
 		assertThat(payment.get("depositor_name")).isEqualTo("홍길동");
 		assertThat(payment.get("deposit_due_at").toString()).endsWith("23:59");
 		assertThat(new BigDecimal(payment.get("amount").toString())).isEqualByComparingTo("56000"); // 52000 + 4000
-		assertThat(jdbc.queryForObject("SELECT phone_masked FROM the_full_order.tb_dist_customer WHERE login_user_id='zz_hq_buyer'", String.class)).isEqualTo("010-****-5678");
+		assertThat(jdbc.queryForObject("SELECT phone_masked FROM tb_dist_customer WHERE login_user_id='zz_hq_buyer'", String.class)).isEqualTo("010-****-5678");
 		assertThat(((Map<String, Object>) detail.get("order")).get("order_status")).isEqualTo("PENDING_PAYMENT");
 
 		// 입금 확인된 주문(3단계 본사 처리 흉내) → 취소는 요청으로
-		jdbc.update("UPDATE the_full_order.tb_dist_order SET order_status='PAID',payment_status='PAID',paid_amount=total_amount WHERE order_id=?", orderId);
+		jdbc.update("UPDATE tb_dist_order SET order_status='PAID',payment_status='PAID',paid_amount=total_amount WHERE order_id=?", orderId);
 		var result = shop.cancel(hq, orderId, Map.of("reason", "필요 없어짐"));
 		assertThat(result.get("mode")).isEqualTo("REQUEST");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_claim WHERE order_id=?", String.class, orderId)).isEqualTo("REQUESTED");
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_claim WHERE order_id=?", String.class, orderId)).isEqualTo("REQUESTED");
 		assertThat(((Map<String, Object>) shop.myOrder(hq, orderId).get("cancel")).get("mode")).isEqualTo("NONE");
 	}
 }

@@ -2,92 +2,92 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.MealUsageMapper">
  <select id="lockService" resultType="map">
-  SELECT * FROM the_full_order.tb_account_meal_service WHERE meal_service_id=#{meal_service_id}
+  SELECT * FROM tb_account_meal_service WHERE meal_service_id=#{meal_service_id}
   <if test="account_id!=null">AND account_id=#{account_id}</if> FOR UPDATE
  </select>
  <select id="requirements" resultType="map">
   SELECT r.*,COALESCE(i.ingredient_name_std,i.ingredient_name_raw) ingredient_name
-    FROM the_full_order.tb_account_meal_ingredient_requirement r
-    JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
-    LEFT JOIN the_full_order.tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+    FROM tb_account_meal_ingredient_requirement r
+    JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    LEFT JOIN tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
    WHERE r.meal_service_id=#{meal_service_id} ORDER BY r.ingredient_id,r.menu_id
  </select>
  <!-- 주(식단표) 식사 목록. 수정 저장으로 확정이 풀린(복원 이력이 있는) 미확정 식사는 재확정 필요로 표시한다. -->
  <select id="weekMeals" resultType="map">
   SELECT s.meal_service_id,s.table_id,DATE_FORMAT(s.meal_date,'%Y-%m-%d') meal_date,s.meal_slot,s.status,s.planned_servings,s.actual_servings,
          CASE WHEN s.status NOT IN ('COMPLETED','CANCELED') AND EXISTS(
-           SELECT 1 FROM the_full_order.tb_account_meal_stock_usage u
-             JOIN the_full_order.tb_account_meal_service o ON o.meal_service_id=u.meal_service_id
+           SELECT 1 FROM tb_account_meal_stock_usage u
+             JOIN tb_account_meal_service o ON o.meal_service_id=u.meal_service_id
             WHERE o.account_id=s.account_id AND o.table_id=s.table_id AND o.meal_date=s.meal_date AND o.meal_slot=s.meal_slot
               AND u.reversed_at IS NOT NULL) THEN 1 ELSE 0 END needs_reconfirm
-    FROM the_full_order.tb_account_meal_service s
-    JOIN the_full_order.tb_account_table_meals t ON t.table_id=s.table_id AND t.account_id=s.account_id
+    FROM tb_account_meal_service s
+    JOIN tb_account_table_meals t ON t.table_id=s.table_id AND t.account_id=s.account_id
    WHERE s.account_id=#{account_id} AND s.table_id=#{table_id} AND t.status&lt;&gt;'CANCELED'
-   ORDER BY s.meal_date,COALESCE((SELECT sm0.display_order FROM the_full_order.tb_meal_slot_master sm0 WHERE sm0.meal_slot_code=s.meal_slot_code),s.meal_slot_code),s.meal_service_id
+   ORDER BY s.meal_date,COALESCE((SELECT sm0.display_order FROM tb_meal_slot_master sm0 WHERE sm0.meal_slot_code=s.meal_slot_code),s.meal_slot_code),s.meal_service_id
  </select>
  <!-- 사용 확정 전에 입고 확정이 필요한 발주(납품일이 확정 대상 마지막 날 이전인 미입고·부분입고). -->
  <select id="unreceivedOrders" resultType="map">
   SELECT po.purchase_order_id,s.supplier_name,DATE_FORMAT(po.requested_delivery_date,'%Y-%m-%d') delivery_date,po.status
-    FROM the_full_order.tb_account_purchase_order po
-    JOIN the_full_order.tb_supplier s ON s.supplier_id=po.supplier_id
+    FROM tb_account_purchase_order po
+    JOIN tb_supplier s ON s.supplier_id=po.supplier_id
    WHERE po.account_id=#{account_id} AND po.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')
      AND po.requested_delivery_date&lt;=#{date_to}
    ORDER BY po.requested_delivery_date,po.purchase_order_id LIMIT 50
  </select>
  <!-- 식재료 재고 행(보관 위치별). 어느 공급사 상품으로 들어왔든 같은 식재료 재고에서 차감한다 -->
  <select id="balances" resultType="map">
-  SELECT b.* FROM the_full_order.tb_account_inventory_balance b
+  SELECT b.* FROM tb_account_inventory_balance b
   WHERE b.account_id=#{account_id} AND b.ingredient_id=#{ingredient_id}
   ORDER BY b.created_at,b.inventory_balance_id FOR UPDATE
  </select>
  <select id="lots" resultType="map">
-  SELECT * FROM the_full_order.tb_account_inventory_lot WHERE account_id=#{account_id}
+  SELECT * FROM tb_account_inventory_lot WHERE account_id=#{account_id}
    AND ingredient_id=#{ingredient_id} AND location_id=#{location_id}
    AND remaining_base_qty&gt;0 ORDER BY received_date,inventory_lot_id FOR UPDATE
  </select>
  <select id="lockBalance" resultType="map">
-  SELECT * FROM the_full_order.tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} AND account_id=#{account_id} FOR UPDATE
+  SELECT * FROM tb_account_inventory_balance WHERE inventory_balance_id=#{inventory_balance_id} AND account_id=#{account_id} FOR UPDATE
  </select>
  <update id="changeBalance">
-  UPDATE the_full_order.tb_account_inventory_balance SET
+  UPDATE tb_account_inventory_balance SET
    average_unit_cost=CASE WHEN current_base_qty+#{quantity_delta}=0 THEN 0 ELSE GREATEST(inventory_amount+#{amount_delta},0)/(current_base_qty+#{quantity_delta}) END,
    inventory_amount=CASE WHEN current_base_qty+#{quantity_delta}=0 THEN 0 ELSE GREATEST(inventory_amount+#{amount_delta},0) END,
    current_base_qty=current_base_qty+#{quantity_delta},last_movement_at=NOW(),user_id=#{user_id}
   WHERE inventory_balance_id=#{inventory_balance_id} AND account_id=#{account_id} AND current_base_qty+#{quantity_delta}&gt;=0
  </update>
  <update id="changeLot">
-  UPDATE the_full_order.tb_account_inventory_lot SET remaining_base_qty=remaining_base_qty+#{quantity_delta},
+  UPDATE tb_account_inventory_lot SET remaining_base_qty=remaining_base_qty+#{quantity_delta},
    status=CASE WHEN status NOT IN ('AVAILABLE','CONSUMED') THEN status WHEN remaining_base_qty=0 THEN 'CONSUMED' ELSE 'AVAILABLE' END
   WHERE inventory_lot_id=#{inventory_lot_id} AND account_id=#{account_id} AND remaining_base_qty+#{quantity_delta} BETWEEN 0 AND received_base_qty
  </update>
  <insert id="insertUsage">
-  INSERT INTO the_full_order.tb_account_meal_stock_usage
+  INSERT INTO tb_account_meal_stock_usage
    (usage_id,meal_service_id,account_id,menu_id,ingredient_id,inventory_balance_id,location_id,inventory_lot_id,
     quantity,base_unit,unit_cost_snapshot,product_name_snapshot,origin_name_snapshot,user_id)
   VALUES(#{usage_id},#{meal_service_id},#{account_id},#{menu_id},#{ingredient_id},#{inventory_balance_id},#{location_id},#{inventory_lot_id},
     #{quantity},#{base_unit},#{unit_cost_snapshot},#{product_name_snapshot},#{origin_name_snapshot},#{user_id})
  </insert>
  <select id="activeUsage" resultType="map">
-  SELECT * FROM the_full_order.tb_account_meal_stock_usage WHERE meal_service_id=#{meal_service_id} AND reversed_at IS NULL ORDER BY inventory_balance_id,usage_id FOR UPDATE
+  SELECT * FROM tb_account_meal_stock_usage WHERE meal_service_id=#{meal_service_id} AND reversed_at IS NULL ORDER BY inventory_balance_id,usage_id FOR UPDATE
  </select>
- <update id="reverseUsage">UPDATE the_full_order.tb_account_meal_stock_usage SET reversed_at=NOW() WHERE usage_id=#{usage_id} AND reversed_at IS NULL</update>
+ <update id="reverseUsage">UPDATE tb_account_meal_stock_usage SET reversed_at=NOW() WHERE usage_id=#{usage_id} AND reversed_at IS NULL</update>
  <insert id="movement">
-  INSERT INTO the_full_order.tb_account_inventory_movement
+  INSERT INTO tb_account_inventory_movement
    (movement_id,account_id,ingredient_id,product_name_snapshot,location_id,movement_type,quantity_delta,quantity_before,quantity_after,
     base_unit,reference_type,reference_id,movement_at,user_id,unit_cost_snapshot,amount_delta,average_unit_cost_before,average_unit_cost_after)
   VALUES(#{movement_id},#{account_id},#{ingredient_id},#{product_name_snapshot},#{location_id},#{movement_type},#{quantity_delta},#{quantity_before},#{quantity_after},
    #{base_unit},'MEAL_SERVICE',#{usage_id},NOW(),#{user_id},#{unit_cost_snapshot},#{amount_delta},#{average_unit_cost_before},#{average_unit_cost_after})
  </insert>
  <update id="status">
-  UPDATE the_full_order.tb_account_meal_service SET status=#{status},actual_servings=#{actual_servings},user_id=#{user_id},mod_at=NOW() WHERE meal_service_id=#{meal_service_id}
+  UPDATE tb_account_meal_service SET status=#{status},actual_servings=#{actual_servings},user_id=#{user_id},mod_at=NOW() WHERE meal_service_id=#{meal_service_id}
  </update>
  <!-- 저장 당시 원산지: 그 식재료로 가장 최근에 들어온 LOT(상품·원산지). 입고 기록이 없으면 식재료 이름·'원산지 미확인' -->
  <update id="snapshotOrigins">
-  UPDATE the_full_order.tb_account_meal_ingredient_requirement r
-  JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
-  LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=ms.account_id AND ai.ingredient_id=r.ingredient_id
-  LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
-   SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+  UPDATE tb_account_meal_ingredient_requirement r
+  JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+  LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=ms.account_id AND ai.ingredient_id=r.ingredient_id
+  LEFT JOIN tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+   SELECT l.inventory_lot_id FROM tb_account_inventory_lot l
     WHERE l.account_id=ms.account_id AND l.ingredient_id=r.ingredient_id
     ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
   SET r.product_name_snapshot=COALESCE(lot.product_name_snapshot,ai.ingredient_name_std,ai.ingredient_name_raw),
@@ -97,13 +97,13 @@
  <select id="origins" resultType="map">
   SELECT r.menu_id,r.ingredient_id,COALESCE(r.product_name_snapshot,i.ingredient_name_std,i.ingredient_name_raw) ingredient_name,
     COALESCE(r.origin_name_snapshot,'원산지 미확인 (보존 기록 없음)') origin_name,'SAVED' origin_source,ms.meal_service_id
-  FROM the_full_order.tb_account_meal_ingredient_requirement r
-  JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
-  LEFT JOIN the_full_order.tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
+  FROM tb_account_meal_ingredient_requirement r
+  JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+  LEFT JOIN tb_ingredient_master i ON i.ingredient_id=r.ingredient_id
   WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND ms.status&lt;&gt;'COMPLETED'
   UNION ALL
   SELECT u.menu_id,u.ingredient_id,u.product_name_snapshot,u.origin_name_snapshot,'ACTUAL',ms.meal_service_id
-  FROM the_full_order.tb_account_meal_stock_usage u JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=u.meal_service_id
+  FROM tb_account_meal_stock_usage u JOIN tb_account_meal_service ms ON ms.meal_service_id=u.meal_service_id
   WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND u.reversed_at IS NULL AND ms.status='COMPLETED'
  </select>
 </mapper>

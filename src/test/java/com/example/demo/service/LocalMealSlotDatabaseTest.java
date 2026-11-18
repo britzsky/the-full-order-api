@@ -28,7 +28,7 @@ class LocalMealSlotDatabaseTest {
 	@Autowired org.mybatis.spring.SqlSessionTemplate sql;
 
 	List<Integer> selected() {
-		return jdbc.queryForList("SELECT meal_slot_code FROM the_full_order.tb_account_meal_slot_setting WHERE account_id=? ORDER BY display_order", Integer.class, ACCOUNT);
+		return jdbc.queryForList("SELECT meal_slot_code FROM tb_account_meal_slot_setting WHERE account_id=? ORDER BY display_order", Integer.class, ACCOUNT);
 	}
 
 	void select(List<Integer> codes) {

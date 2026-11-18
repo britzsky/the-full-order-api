@@ -78,7 +78,7 @@ class WelstoryCycleSyncServiceTest {
     /** 같은 웰스토리 사업장을 쓰는 거래처가 둘이어도 새벽 배치는 그 사업장 판가를 한 번만 받는다(상품·판가는 사업장 단위 저장). */
     @Test void nightlyBatchFetchesSharedSiteOnce() {
         var jdbc = emptyDb();
-        when(jdbc.queryForList(contains("FROM the_full_order.tb_supplier_account_site ss"))).thenReturn(List.of(
+        when(jdbc.queryForList(contains("FROM tb_supplier_account_site ss"))).thenReturn(List.of(
                 Map.of("supplier_account_site_id", 3L, "supplier_site_id", 7L, "supplier_id", 1L, "account_id", "A", "external_site_code", "A0199240"),
                 Map.of("supplier_account_site_id", 4L, "supplier_site_id", 7L, "supplier_id", 1L, "account_id", "B", "external_site_code", "A0199240")));
         var sync = mock(WelstoryCatalogSyncService.class);

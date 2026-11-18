@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.mapper.AnalyticsMapper">
     <insert id="upsertSearchSession" parameterType="map">
-        INSERT INTO the_full_order.tb_search_session
+        INSERT INTO tb_search_session
             (search_session_id, account_id, user_id_hash, channel, started_at, last_activity_at)
         VALUES
             (#{search_session_id}, NULLIF(#{account_id}, ''), NULLIF(#{user_id_hash}, ''), #{channel}, NOW(), NOW())
@@ -13,7 +13,7 @@
     </insert>
 
     <insert id="insertSearchEvent" parameterType="map" useGeneratedKeys="true" keyProperty="search_event_id">
-        INSERT INTO the_full_order.tb_search_event
+        INSERT INTO tb_search_event
             (search_session_id, account_id, query_raw, query_normalized, intent_type, result_count, filters_json, searched_at)
         VALUES
             (#{search_session_id}, NULLIF(#{account_id}, ''), #{query_raw}, #{query_normalized},
@@ -21,7 +21,7 @@
     </insert>
 
     <insert id="insertSearchAction" parameterType="map">
-        INSERT INTO the_full_order.tb_search_action
+        INSERT INTO tb_search_action
             (search_event_id, search_session_id, account_id, entity_type, entity_id,
              action_type, screen, position_no, context_json, occurred_at)
         VALUES
@@ -34,7 +34,7 @@
         SELECT query_normalized AS query, COUNT(*) AS search_count,
                COUNT(DISTINCT search_session_id) AS session_count,
                MAX(searched_at) AS last_searched_at
-          FROM the_full_order.tb_search_event
+          FROM tb_search_event
          WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
            AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
          GROUP BY query_normalized
@@ -46,14 +46,14 @@
         SELECT COUNT(*) AS total_searches, COUNT(DISTINCT search_session_id) AS total_sessions,
                SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) AS no_result_searches,
                ROUND(100 * SUM(CASE WHEN result_count &gt; 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS result_rate
-          FROM the_full_order.tb_search_event
+          FROM tb_search_event
          WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
            AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
     </select>
 
     <select id="noResultSearches" parameterType="map" resultType="hashmap">
         SELECT query_normalized AS query, COUNT(*) AS search_count, MAX(searched_at) AS last_searched_at
-          FROM the_full_order.tb_search_event
+          FROM tb_search_event
          WHERE result_count = 0 AND searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
            AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
          GROUP BY query_normalized ORDER BY search_count DESC, last_searched_at DESC LIMIT #{limit}
@@ -61,14 +61,14 @@
 
     <select id="intentSummary" parameterType="map" resultType="hashmap">
         SELECT intent_type, COUNT(*) AS search_count
-          FROM the_full_order.tb_search_event
+          FROM tb_search_event
          WHERE searched_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
            AND (NULLIF(#{account_id}, '') IS NULL OR account_id = #{account_id})
          GROUP BY intent_type ORDER BY search_count DESC
     </select>
 
     <insert id="insertRecommendationEvent" parameterType="map">
-        INSERT INTO the_full_order.tb_recommendation_event
+        INSERT INTO tb_recommendation_event
             (recommendation_id, search_session_id, account_id, user_id_hash,
              recommendation_type, request_context_json, model_version, generated_at)
         VALUES
@@ -78,7 +78,7 @@
     </insert>
 
     <insert id="insertRecommendationItem" parameterType="map">
-        INSERT INTO the_full_order.tb_recommendation_item
+        INSERT INTO tb_recommendation_item
             (recommendation_id, entity_type, entity_id, rank_no, score, reason_json)
         VALUES
             (#{recommendation_id}, #{entity_type}, #{entity_id}, #{rank_no}, #{score},
@@ -86,7 +86,7 @@
     </insert>
 
     <update id="updateRecommendationFeedback" parameterType="map">
-        UPDATE the_full_order.tb_recommendation_item
+        UPDATE tb_recommendation_item
            SET accepted_yn = #{accepted_yn}, feedback_code = NULLIF(#{feedback_code}, ''),
                feedback_text = NULLIF(#{feedback_text}, ''), feedback_at = NOW()
          WHERE recommendation_id = #{recommendation_id} AND entity_type = #{entity_type} AND entity_id = #{entity_id}
@@ -95,7 +95,7 @@
     <select id="hygieneGuides" parameterType="map" resultType="hashmap">
         SELECT guide_id, category, situation_code, title, risk_level, guidance_text,
                source_name, source_url, effective_from, effective_to
-          FROM the_full_order.tb_hygiene_guide
+          FROM tb_hygiene_guide
          WHERE approved_yn = 'Y'
            AND effective_from &lt;= CURRENT_DATE
            AND (effective_to IS NULL OR effective_to &gt;= CURRENT_DATE)
@@ -105,7 +105,7 @@
     </select>
 
     <insert id="insertHygieneIncident" parameterType="map">
-        INSERT INTO the_full_order.tb_hygiene_incident
+        INSERT INTO tb_hygiene_incident
             (incident_id, account_id, location_id, incident_type, measured_value,
              measurement_unit, situation_text, risk_level, status, occurred_at, user_id)
         VALUES
@@ -115,7 +115,7 @@
     </insert>
 
     <insert id="insertHygieneAction" parameterType="map" useGeneratedKeys="true" keyProperty="hygiene_action_id">
-        INSERT INTO the_full_order.tb_hygiene_action
+        INSERT INTO tb_hygiene_action
             (incident_id, guide_id, recommended_action, actual_action, completed_yn, confirmed_by, completed_at, user_id)
         VALUES
             (#{incident_id}, #{guide_id}, #{recommended_action}, NULLIF(#{actual_action}, ''),
@@ -124,7 +124,7 @@
     </insert>
 
     <update id="completeHygieneAction" parameterType="map">
-        UPDATE the_full_order.tb_hygiene_action
+        UPDATE tb_hygiene_action
            SET actual_action = NULLIF(#{actual_action}, ''), completed_yn = #{completed_yn},
                confirmed_by = NULLIF(#{confirmed_by}, ''),
                completed_at = CASE WHEN #{completed_yn} = 'Y' THEN NOW() ELSE NULL END

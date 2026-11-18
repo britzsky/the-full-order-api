@@ -31,7 +31,9 @@ public class OurhomeSiteService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Seoul");
     private final WebClient client;
     private final ObjectMapper json;
-    private final String baseUrl, serviceId, token, seed, taxNo, headCode;
+    private final String baseUrl, serviceId, token, seed, headCode;
+    /** 사업자번호들. 법인·개인처럼 둘 이상이면 쉼표로 나눠 적는다(사업장 목록만 사업자번호별로 받아 합친다). */
+    private final List<String> taxNos;
     private final AtomicLong guidCounter = new AtomicLong();
     private final Clock clock = Clock.systemUTC();
 
@@ -48,8 +50,15 @@ public class OurhomeSiteService {
         this.serviceId = serviceId;
         this.token = token;
         this.seed = seed;
-        this.taxNo = taxNo;
+        this.taxNos = taxNos(taxNo);
         this.headCode = headCode;
+    }
+
+    static List<String> taxNos(String value) {
+        List<String> list = new ArrayList<>();
+        for (String part : value.split("[,\\s]+"))
+            if (!part.isBlank()) list.add(part.strip());
+        return List.copyOf(list);
     }
 
     public record Site(String siteCode, String siteName, String headCode, String headName,
@@ -57,10 +66,24 @@ public class OurhomeSiteService {
             List<String> deliveryDates) {}
     public record SiteResult(String checkedAt, List<Site> sites) {}
 
+    /** 사업자번호마다 사업장 목록을 받아 합친다. 한 번호만 실패하면 경고를 남기고 나머지로 계속, 모두 실패하면 오류. */
     public SiteResult sites() {
-        JsonNode response = call("/api/chaeum/v3/getBusiInfo",
-                Map.of("taxNo", taxNo, "headGrpCd", headCode, "busiplcd", ""));
-        return mapSites(response);
+        Map<String, Site> merged = new LinkedHashMap<>();
+        RuntimeException firstFailure = null;
+        for (String taxNo : taxNos) {
+            try {
+                JsonNode response = call("/api/chaeum/v3/getBusiInfo",
+                        Map.of("taxNo", taxNo, "headGrpCd", headCode, "busiplcd", ""));
+                for (Site site : mapSites(response).sites()) merged.putIfAbsent(site.siteCode(), site);
+            } catch (RuntimeException exception) {
+                if (taxNos.size() == 1) throw exception;
+                log.warn("Ourhome 사업장 조회 실패(사업자번호 끝자리 {}): {}", taxNo.substring(taxNo.length() - 4),
+                        exception.getMessage());
+                if (firstFailure == null) firstFailure = exception;
+            }
+        }
+        if (merged.isEmpty() && firstFailure != null) throw firstFailure;
+        return new SiteResult(checkedAt(), List.copyOf(merged.values()));
     }
 
     private JsonNode call(String path, Map<String, Object> params) {
@@ -80,14 +103,17 @@ public class OurhomeSiteService {
     private String providerMessage(JsonNode response) {
         String message = response.path("rtnMsg").asText("").strip();
         if (message.length() > 200) return "";
-        for (String secret : List.of(token, seed, serviceId, taxNo))
+        List<String> secrets = new ArrayList<>(List.of(token, seed, serviceId));
+        secrets.addAll(taxNos);
+        for (String secret : secrets)
             if (!secret.isBlank() && message.contains(secret)) return "";
         return message;
     }
 
     private JsonNode exchange(String path, Map<String, Object> params, boolean readErrorBody) {
         if (token.isBlank() || !serviceId.matches("\\d+") || !seed.matches("-?\\d+")
-                || !taxNo.matches("\\d{10}") || !baseUrl.startsWith("https://")) {
+                || taxNos.isEmpty() || !taxNos.stream().allMatch(no -> no.matches("\\d{10}"))
+                || !baseUrl.startsWith("https://")) {
             throw new IllegalStateException("아워홈 사업장 조회 설정이 없습니다. 서버 연동 설정을 확인해 주세요.");
         }
         var now = clock.instant().atZone(ZONE);

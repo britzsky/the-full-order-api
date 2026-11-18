@@ -28,7 +28,7 @@ class LocalDistSeedDataTest {
 
 	@SuppressWarnings("unchecked")
 	@Test void seedProductsShowExpectedPricesPerBuyer() {
-		assumeTrue(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_product WHERE user_id='SEED'", Integer.class) > 0, "유통 seed 없음");
+		assumeTrue(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_product WHERE user_id='SEED'", Integer.class) > 0, "유통 seed 없음");
 		WorkspaceUser site = new WorkspaceUser("zz_seed_site", "3", ACCOUNT);
 		WorkspaceUser hq = new WorkspaceUser("zz_seed_hq", "2", "");
 		var account = (List<Map<String, Object>>) shop.products(site, Map.of()).get("products");

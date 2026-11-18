@@ -69,7 +69,7 @@ class LocalDistOrderAdminDatabaseTest {
 	}
 
 	String status(long orderId) {
-		return jdbc.queryForObject("SELECT order_status FROM the_full_order.tb_dist_order WHERE order_id=?", String.class, orderId);
+		return jdbc.queryForObject("SELECT order_status FROM tb_dist_order WHERE order_id=?", String.class, orderId);
 	}
 
 	Map<String, Object> body(Object... pairs) {
@@ -83,7 +83,7 @@ class LocalDistOrderAdminDatabaseTest {
 	@Test void depositPurchaseOrderShipmentsAndDelivery() {
 		setUp();
 		long id = order(hq, "zz-oa-key-0001", "PERSONAL", "BANK_TRANSFER", 3, 2);
-		BigDecimal total = jdbc.queryForObject("SELECT total_amount FROM the_full_order.tb_dist_order WHERE order_id=?", BigDecimal.class, id);
+		BigDecimal total = jdbc.queryForObject("SELECT total_amount FROM tb_dist_order WHERE order_id=?", BigDecimal.class, id);
 
 		var detail = orders.order(id);
 		assertThat(((Map<String, Object>) detail.get("order")).get("orderer_name")).isEqualTo("홍길동");
@@ -95,18 +95,18 @@ class LocalDistOrderAdminDatabaseTest {
 		assertThatThrownBy(() -> orders.confirmDeposit(id, body("amount", "1000"))).hasMessageContaining("다릅니다");
 		orders.confirmDeposit(id, body("amount", total.toPlainString(), "depositor_name", "홍길동"));
 		assertThat(status(id)).isEqualTo("PAID");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_payment WHERE order_id=?", String.class, id)).isEqualTo("PAID");
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_payment_transaction t JOIN the_full_order.tb_dist_payment p ON p.payment_id=t.payment_id WHERE p.order_id=? AND t.tx_type='DEPOSIT'", Integer.class, id)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_payment WHERE order_id=?", String.class, id)).isEqualTo("PAID");
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_payment_transaction t JOIN tb_dist_payment p ON p.payment_id=t.payment_id WHERE p.order_id=? AND t.tx_type='DEPOSIT'", Integer.class, id)).isEqualTo(1);
 
 		long poId = ((Number) orders.createPurchaseOrder(id, body("partner_id", wando, "expected_date", "2026-11-04")).get("purchase_order_id")).longValue();
 		assertThat(status(id)).isEqualTo("PREPARING");
-		assertThat(jdbc.queryForObject("SELECT total_amount FROM the_full_order.tb_dist_purchase_order WHERE purchase_order_id=?", BigDecimal.class, poId)).isEqualByComparingTo("114000");
+		assertThat(jdbc.queryForObject("SELECT total_amount FROM tb_dist_purchase_order WHERE purchase_order_id=?", BigDecimal.class, poId)).isEqualByComparingTo("114000");
 		assertThatThrownBy(() -> orders.createPurchaseOrder(id, body("partner_id", wando))).hasMessageContaining("발주할 직송 상품이 없습니다");
 		orders.confirmPurchaseOrder(poId, body());
 		orders.prepareOwnStock(id, body());
 
-		long abaloneItem = jdbc.queryForObject("SELECT order_item_id FROM the_full_order.tb_dist_order_item WHERE order_id=? AND product_id=?", Long.class, id, abalone);
-		long snackItem = jdbc.queryForObject("SELECT order_item_id FROM the_full_order.tb_dist_order_item WHERE order_id=? AND product_id=?", Long.class, id, snack);
+		long abaloneItem = jdbc.queryForObject("SELECT order_item_id FROM tb_dist_order_item WHERE order_id=? AND product_id=?", Long.class, id, abalone);
+		long snackItem = jdbc.queryForObject("SELECT order_item_id FROM tb_dist_order_item WHERE order_id=? AND product_id=?", Long.class, id, snack);
 		assertThatThrownBy(() -> orders.addShipment(id, body("carrier_code", "CJ", "tracking_no", "900000000001",
 				"items", List.of(Map.of("order_item_id", abaloneItem, "qty", 1), Map.of("order_item_id", snackItem, "qty", 1))))).hasMessageContaining("같은 출고지");
 		assertThatThrownBy(() -> orders.addShipment(id, body("carrier_code", "CJ", "tracking_no", "900000000001", "items", List.of(Map.of("order_item_id", abaloneItem, "qty", 4)))))
@@ -119,7 +119,7 @@ class LocalDistOrderAdminDatabaseTest {
 		orders.addShipment(id, body("carrier_code", "CJ", "tracking_no", "900000000002", "items", List.of(Map.of("order_item_id", abaloneItem, "qty", 1))));
 		orders.addShipment(id, body("carrier_code", "EPOST", "tracking_no", "900000000003", "items", List.of(Map.of("order_item_id", snackItem, "qty", 2))));
 		assertThat(status(id)).isEqualTo("SHIPPED");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_purchase_order WHERE purchase_order_id=?", String.class, poId)).isEqualTo("COMPLETED");
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_purchase_order WHERE purchase_order_id=?", String.class, poId)).isEqualTo("COMPLETED");
 
 		// 본인 화면에서도 송장·조회 링크가 보인다
 		var mine = shop.myOrder(hq, id);
@@ -127,7 +127,7 @@ class LocalDistOrderAdminDatabaseTest {
 		assertThat(shipments).hasSize(3);
 		assertThat(shipments.get(0).get("tracking_url").toString()).contains("900000000001");
 
-		List<Long> shipmentIds = jdbc.queryForList("SELECT shipment_id FROM the_full_order.tb_dist_shipment WHERE order_id=? ORDER BY shipment_id", Long.class, id);
+		List<Long> shipmentIds = jdbc.queryForList("SELECT shipment_id FROM tb_dist_shipment WHERE order_id=? ORDER BY shipment_id", Long.class, id);
 		orders.markDelivered(shipmentIds.get(0), body());
 		orders.markDelivered(shipmentIds.get(1), body());
 		assertThat(status(id)).isEqualTo("SHIPPED");
@@ -141,26 +141,26 @@ class LocalDistOrderAdminDatabaseTest {
 		setUp();
 		// 입금 후 고객 취소 요청 → 환불 정보 없으면 거절, 있으면 환불 기록 + 취소
 		long paidOrder = order(hq, "zz-oa-key-0002", "PERSONAL", "BANK_TRANSFER", 2, 0);
-		BigDecimal total = jdbc.queryForObject("SELECT total_amount FROM the_full_order.tb_dist_order WHERE order_id=?", BigDecimal.class, paidOrder);
+		BigDecimal total = jdbc.queryForObject("SELECT total_amount FROM tb_dist_order WHERE order_id=?", BigDecimal.class, paidOrder);
 		orders.confirmDeposit(paidOrder, body());
 		assertThat(shop.cancel(hq, paidOrder, Map.of("reason", "필요 없어짐")).get("mode")).isEqualTo("REQUEST");
-		long claim = jdbc.queryForObject("SELECT claim_id FROM the_full_order.tb_dist_claim WHERE order_id=?", Long.class, paidOrder);
+		long claim = jdbc.queryForObject("SELECT claim_id FROM tb_dist_claim WHERE order_id=?", Long.class, paidOrder);
 		assertThat(((Map<String, Object>) orders.order(paidOrder).get("actions")).get("cancel")).isEqualTo(false);
 		assertThatThrownBy(() -> orders.approveClaim(claim, body())).hasMessageContaining("환불한 은행");
 		orders.approveClaim(claim, body("refund", Map.of("bank_name", "신한은행", "account_no", "110-123-456789", "holder", "홍길동")));
 		assertThat(status(paidOrder)).isEqualTo("CANCELED");
-		assertThat(jdbc.queryForObject("SELECT payment_status FROM the_full_order.tb_dist_order WHERE order_id=?", String.class, paidOrder)).isEqualTo("REFUNDED");
-		assertThat(jdbc.queryForObject("SELECT refunded_amount FROM the_full_order.tb_dist_order WHERE order_id=?", BigDecimal.class, paidOrder)).isEqualByComparingTo(total);
-		String refundAccount = jdbc.queryForObject("SELECT t.refund_account_no_enc FROM the_full_order.tb_dist_payment_transaction t JOIN the_full_order.tb_dist_payment p ON p.payment_id=t.payment_id WHERE p.order_id=? AND t.tx_type='REFUND'", String.class, paidOrder);
+		assertThat(jdbc.queryForObject("SELECT payment_status FROM tb_dist_order WHERE order_id=?", String.class, paidOrder)).isEqualTo("REFUNDED");
+		assertThat(jdbc.queryForObject("SELECT refunded_amount FROM tb_dist_order WHERE order_id=?", BigDecimal.class, paidOrder)).isEqualByComparingTo(total);
+		String refundAccount = jdbc.queryForObject("SELECT t.refund_account_no_enc FROM tb_dist_payment_transaction t JOIN tb_dist_payment p ON p.payment_id=t.payment_id WHERE p.order_id=? AND t.tx_type='REFUND'", String.class, paidOrder);
 		assertThat(refundAccount).startsWith("v1:").doesNotContain("110-123");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_claim WHERE claim_id=?", String.class, claim)).isEqualTo("COMPLETED");
-		assertThat(jdbc.queryForObject("SELECT reserved_qty FROM the_full_order.tb_dist_product_availability WHERE product_id=?", BigDecimal.class, abalone)).isEqualByComparingTo("0");
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_claim WHERE claim_id=?", String.class, claim)).isEqualTo("COMPLETED");
+		assertThat(jdbc.queryForObject("SELECT reserved_qty FROM tb_dist_product_availability WHERE product_id=?", BigDecimal.class, abalone)).isEqualByComparingTo("0");
 
 		// 취소 요청 거절 → 주문은 그대로, 주문자 화면에 거절 사유
 		long second = order(hq, "zz-oa-key-0003", "PERSONAL", "BANK_TRANSFER", 1, 0);
 		orders.confirmDeposit(second, body());
 		shop.cancel(hq, second, Map.of());
-		long claim2 = jdbc.queryForObject("SELECT claim_id FROM the_full_order.tb_dist_claim WHERE order_id=?", Long.class, second);
+		long claim2 = jdbc.queryForObject("SELECT claim_id FROM tb_dist_claim WHERE order_id=?", Long.class, second);
 		assertThatThrownBy(() -> orders.rejectClaim(claim2, body())).hasMessageContaining("거절 사유");
 		orders.rejectClaim(claim2, body("reason", "이미 산지에서 출발했습니다"));
 		assertThat(status(second)).isEqualTo("PAID");
@@ -172,9 +172,9 @@ class LocalDistOrderAdminDatabaseTest {
 		orders.createPurchaseOrder(credit, body("partner_id", wando));
 		orders.cancelByHq(credit, body("reason_code", "OUT_OF_STOCK", "reason", "산지 출하 중단"));
 		assertThat(status(credit)).isEqualTo("CANCELED");
-		assertThat(jdbc.queryForObject("SELECT payment_status FROM the_full_order.tb_dist_order WHERE order_id=?", String.class, credit)).isEqualTo("NONE");
-		assertThat(jdbc.queryForObject("SELECT status FROM the_full_order.tb_dist_purchase_order WHERE order_id=?", String.class, credit)).isEqualTo("CANCELED");
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM the_full_order.tb_dist_order_item WHERE order_id=? AND item_status<>'CANCELED'", Integer.class, credit)).isZero();
+		assertThat(jdbc.queryForObject("SELECT payment_status FROM tb_dist_order WHERE order_id=?", String.class, credit)).isEqualTo("NONE");
+		assertThat(jdbc.queryForObject("SELECT status FROM tb_dist_purchase_order WHERE order_id=?", String.class, credit)).isEqualTo("CANCELED");
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_dist_order_item WHERE order_id=? AND item_status<>'CANCELED'", Integer.class, credit)).isZero();
 	}
 
 	@SuppressWarnings("unchecked")

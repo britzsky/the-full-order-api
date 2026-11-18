@@ -24,9 +24,9 @@ class LocalHqMenuDetailDatabaseTest {
 	void showsHqRecipeForMenuTheAccountDoesNotHaveYet() {
 		List<Map<String, Object>> rows = jdbc.queryForList("""
 				SELECT a.account_id,r.menu_id,COUNT(*) cnt
-				  FROM (SELECT DISTINCT account_id FROM the_full_order.tb_account_menu_master) a
-				  JOIN the_full_order.tb_recipe_detail r ON r.qty_num IS NOT NULL
-				 WHERE NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master m WHERE m.account_id=a.account_id AND m.menu_id=r.menu_id AND m.del_yn='N')
+				  FROM (SELECT DISTINCT account_id FROM tb_account_menu_master) a
+				  JOIN tb_recipe_detail r ON r.qty_num IS NOT NULL
+				 WHERE NOT EXISTS(SELECT 1 FROM tb_account_menu_master m WHERE m.account_id=a.account_id AND m.menu_id=r.menu_id AND m.del_yn='N')
 				 GROUP BY a.account_id,r.menu_id LIMIT 1""");
 		if (rows.isEmpty()) return;
 		Map<String, Object> row = rows.get(0);
@@ -38,7 +38,7 @@ class LocalHqMenuDetailDatabaseTest {
 		System.out.println("[본사 메뉴 상세] " + row.get("account_id") + "/" + row.get("menu_id") + " " + detail.size() + "줄, 첫 줄 " + detail.get(0).get("ingredient_name") + " " + detail.get(0).get("required_qty") + detail.get(0).get("base_unit"));
 
 		// 거래처 메뉴는 기존대로 거래처 레시피(표시 없음)
-		List<Map<String, Object>> own = jdbc.queryForList("SELECT account_id,menu_id FROM the_full_order.tb_account_recipe_detail WHERE qty_num IS NOT NULL LIMIT 1");
+		List<Map<String, Object>> own = jdbc.queryForList("SELECT account_id,menu_id FROM tb_account_recipe_detail WHERE qty_num IS NOT NULL LIMIT 1");
 		if (!own.isEmpty()) {
 			List<Map<String, Object>> accountDetail = menus.AccountDetailList(new HashMap<>(own.get(0)));
 			assertFalse(accountDetail.isEmpty());

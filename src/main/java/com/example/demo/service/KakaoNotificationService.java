@@ -73,7 +73,7 @@ public class KakaoNotificationService {
 		if (!active() || deadlineTemplate.isEmpty() || deadlines == null)
 			return Map.of("accounts", 0, "sent", 0, "failed", 0);
 		for (var row : jdbc.queryForList("""
-				SELECT DISTINCT account_id FROM the_full_order.tb_account_kakao_recipient
+				SELECT DISTINCT account_id FROM tb_account_kakao_recipient
 				WHERE active_yn='Y' AND notify_deadline='Y'
 				""")) {
 			String account = row.get("account_id").toString();
@@ -113,18 +113,18 @@ public class KakaoNotificationService {
 		int sent = 0;
 		String variables = toJson(vars);
 		// column은 위 두 상수 중 하나만 들어온다(사용자 입력 아님).
-		for (var recipient : jdbc.queryForList("SELECT kakao_recipient_id,phone FROM the_full_order.tb_account_kakao_recipient WHERE account_id=? AND active_yn='Y' AND "
+		for (var recipient : jdbc.queryForList("SELECT kakao_recipient_id,phone FROM tb_account_kakao_recipient WHERE account_id=? AND active_yn='Y' AND "
 				+ column + "='Y'", account)) {
 			Object id = recipient.get("kakao_recipient_id");
 			int claimed = jdbc.update("""
-					INSERT IGNORE INTO the_full_order.tb_kakao_message_log(account_id,event_key,fingerprint,kakao_recipient_id,template_code,variables_json)
+					INSERT IGNORE INTO tb_kakao_message_log(account_id,event_key,fingerprint,kakao_recipient_id,template_code,variables_json)
 					VALUES(?,?,?,?,?,?)
 					""", account, eventKey, fingerprint, id, templateCode, variables);
 			if (claimed == 0)
 				continue; // 같은 내용은 이미 보냈다
 			var result = client.send(recipient.get("phone").toString(), templateId, vars);
 			jdbc.update("""
-					UPDATE the_full_order.tb_kakao_message_log SET status=?,provider_message_id=?,result_code=?,result_message=?,
+					UPDATE tb_kakao_message_log SET status=?,provider_message_id=?,result_code=?,result_message=?,
 					  sent_at=IF(?='SENT',NOW(),NULL)
 					WHERE account_id=? AND event_key=? AND fingerprint=? AND kakao_recipient_id=?
 					""", result.accepted() ? "SENT" : "FAILED", result.messageId(), result.code(), result.message(),
@@ -140,7 +140,7 @@ public class KakaoNotificationService {
 	public List<Map<String, Object>> recipients(String account) {
 		return jdbc.queryForList("""
 				SELECT kakao_recipient_id,account_id,recipient_name,phone,notify_supplier_status,notify_deadline,active_yn,updated_at
-				FROM the_full_order.tb_account_kakao_recipient WHERE account_id=? ORDER BY active_yn DESC,recipient_name
+				FROM tb_account_kakao_recipient WHERE account_id=? ORDER BY active_yn DESC,recipient_name
 				""", account);
 	}
 
@@ -155,13 +155,13 @@ public class KakaoNotificationService {
 		Object id = input.get("kakao_recipient_id");
 		if (id != null && !id.toString().isBlank()) {
 			if (jdbc.update("""
-					UPDATE the_full_order.tb_account_kakao_recipient SET recipient_name=?,phone=?,notify_supplier_status=?,notify_deadline=?,active_yn=?,user_id=?
+					UPDATE tb_account_kakao_recipient SET recipient_name=?,phone=?,notify_supplier_status=?,notify_deadline=?,active_yn=?,user_id=?
 					WHERE kakao_recipient_id=? AND account_id=?
 					""", name, phone, supplier, deadline, active, actor, id, account) == 0)
 				throw new IllegalArgumentException("수신자를 찾을 수 없습니다.");
 		} else
 			jdbc.update("""
-					INSERT INTO the_full_order.tb_account_kakao_recipient(account_id,recipient_name,phone,notify_supplier_status,notify_deadline,active_yn,user_id)
+					INSERT INTO tb_account_kakao_recipient(account_id,recipient_name,phone,notify_supplier_status,notify_deadline,active_yn,user_id)
 					VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE recipient_name=VALUES(recipient_name),notify_supplier_status=VALUES(notify_supplier_status),
 					  notify_deadline=VALUES(notify_deadline),active_yn=VALUES(active_yn),user_id=VALUES(user_id)
 					""", account, name, phone, supplier, deadline, active, actor);
@@ -170,7 +170,7 @@ public class KakaoNotificationService {
 
 	/** 발송 이력이 남아야 하므로 지우지 않고 끈다. */
 	public List<Map<String, Object>> deactivateRecipient(String account, Object id, String actor) {
-		if (jdbc.update("UPDATE the_full_order.tb_account_kakao_recipient SET active_yn='N',user_id=? WHERE kakao_recipient_id=? AND account_id=?",
+		if (jdbc.update("UPDATE tb_account_kakao_recipient SET active_yn='N',user_id=? WHERE kakao_recipient_id=? AND account_id=?",
 				actor, id, account) == 0)
 			throw new IllegalArgumentException("수신자를 찾을 수 없습니다.");
 		return recipients(account);
@@ -184,7 +184,7 @@ public class KakaoNotificationService {
 			throw new IllegalArgumentException("알림톡 발송 설정(API 키·채널·발신번호)이 없습니다.");
 		if (supplierTemplate.isEmpty())
 			throw new IllegalArgumentException("공급사 상태 알림 템플릿 ID가 없습니다(kakao.alimtalk.template.supplier-status).");
-		var rows = jdbc.queryForList("SELECT phone FROM the_full_order.tb_account_kakao_recipient WHERE kakao_recipient_id=? AND account_id=? AND active_yn='Y'", id, account);
+		var rows = jdbc.queryForList("SELECT phone FROM tb_account_kakao_recipient WHERE kakao_recipient_id=? AND account_id=? AND active_yn='Y'", id, account);
 		if (rows.isEmpty())
 			throw new IllegalArgumentException("사용 중인 수신자를 찾을 수 없습니다.");
 		Map<String, String> vars = new LinkedHashMap<>();
@@ -194,11 +194,11 @@ public class KakaoNotificationService {
 		vars.put("상태", "알림톡 수신 확인용 시험 메시지입니다.");
 		String key = "TEST:" + UUID.randomUUID();
 		jdbc.update("""
-				INSERT INTO the_full_order.tb_kakao_message_log(account_id,event_key,fingerprint,kakao_recipient_id,template_code,variables_json)
+				INSERT INTO tb_kakao_message_log(account_id,event_key,fingerprint,kakao_recipient_id,template_code,variables_json)
 				VALUES(?,?,?,?,'TEST',?)
 				""", account, key, hash(key), id, toJson(vars));
 		var result = client.send(rows.get(0).get("phone").toString(), supplierTemplate, vars);
-		jdbc.update("UPDATE the_full_order.tb_kakao_message_log SET status=?,provider_message_id=?,result_code=?,result_message=?,sent_at=IF(?,NOW(),NULL) WHERE account_id=? AND event_key=?",
+		jdbc.update("UPDATE tb_kakao_message_log SET status=?,provider_message_id=?,result_code=?,result_message=?,sent_at=IF(?,NOW(),NULL) WHERE account_id=? AND event_key=?",
 				result.accepted() ? "SENT" : "FAILED", result.messageId(), result.code(), result.message(), result.accepted(), account, key);
 		log.info("알림톡 시험 발송 account={} by={} accepted={}", account, actor, result.accepted());
 		return Map.of("accepted", result.accepted(), "code", Objects.toString(result.code(), ""), "message", Objects.toString(result.message(), ""));

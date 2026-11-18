@@ -4,11 +4,11 @@
 
 <mapper namespace="com.example.demo.mapper.MenuMapper">
 	
-	<select id="ingredientBaseUnit" parameterType="map" resultType="string">SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}</select>
+	<select id="ingredientBaseUnit" parameterType="map" resultType="string">SELECT base_unit FROM tb_ingredient_master WHERE ingredient_id=#{ingredient_id}</select>
 	<!-- 거래처 레시피 기준단위: 거래처 식재료 우선, 없으면 본사 식자재 -->
 	<select id="accountIngredientBaseUnit" parameterType="map" resultType="string">
-		SELECT COALESCE((SELECT base_unit FROM the_full_order.tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}),
-		                (SELECT base_unit FROM the_full_order.tb_ingredient_master WHERE ingredient_id=#{ingredient_id}))
+		SELECT COALESCE((SELECT base_unit FROM tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}),
+		                (SELECT base_unit FROM tb_ingredient_master WHERE ingredient_id=#{ingredient_id}))
 	</select>
 	<select id="NowDateKey" resultType="String">
 		SELECT DATE_FORMAT(NOW(6), '%Y%m%d%H%i%s%f')
@@ -19,12 +19,12 @@
 			   T.menu_id,
 			   T.menu_name,
 			   (SELECT JSON_ARRAYAGG(CONCAT_WS(' ',rd.ingredient_name_raw,im.ingredient_name_std,im.ingredient_name_raw))
-                 FROM the_full_order.tb_recipe_detail rd
-                 LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+                 FROM tb_recipe_detail rd
+                 LEFT JOIN tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
                  WHERE rd.menu_id=T.menu_id) AS recipe_ingredient_names,
 			   (SELECT JSON_ARRAYAGG(COALESCE(NULLIF(rd.ingredient_name_raw,''),NULLIF(im.ingredient_name_std,''),im.ingredient_name_raw))
-                 FROM the_full_order.tb_recipe_detail rd
-                 LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+                 FROM tb_recipe_detail rd
+                 LEFT JOIN tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
                  WHERE rd.menu_id=T.menu_id) AS recipe_ingredient_list,
 			   T.del_yn,
 			   T.food_type,
@@ -35,7 +35,7 @@
 		       T.meal_plan_type,
 		       T.calories_per_serving,
 		       NULL AS menu_cost_per_person
-		FROM the_full_order.tb_menu_master T
+		FROM tb_menu_master T
 		WHERE 1 = 1
 		<if test="meal_plan_type != null and meal_plan_type != ''">
 		   AND T.meal_plan_type = #{meal_plan_type}
@@ -51,9 +51,9 @@
  CASE WHEN rd.review_flag=0 THEN GREATEST(rd.qty_per_person*COALESCE(#{servingQty},1)-COALESCE(ib.current_qty,0),0) END shortage_qty,
  CASE WHEN rd.review_flag=0 THEN GREATEST(rd.qty_per_person*COALESCE(#{servingQty},1)+COALESCE(im.safe_stock_qty,0)-COALESCE(ib.current_qty,0),0) END order_needed_qty,
  im.order_unit,im.convert_value,im.safe_stock_qty
- FROM the_full_order.tb_recipe_detail rd
- LEFT JOIN the_full_order.tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
- LEFT JOIN (SELECT ingredient_id,unit,SUM(current_qty) current_qty,MIN(location_id) location_id FROM the_full_order.tb_inventory_balance GROUP BY ingredient_id,unit) ib
+ FROM tb_recipe_detail rd
+ LEFT JOIN tb_ingredient_master im ON im.ingredient_id=rd.ingredient_id
+ LEFT JOIN (SELECT ingredient_id,unit,SUM(current_qty) current_qty,MIN(location_id) location_id FROM tb_inventory_balance GROUP BY ingredient_id,unit) ib
  ON ib.ingredient_id=rd.ingredient_id AND LOWER(ib.unit)=LOWER(rd.base_unit)
  WHERE rd.menu_id=#{menu_id} ORDER BY rd.ingredient_seq
  </select>
@@ -75,13 +75,13 @@
 		       rd.ingredient_seq,
 		       cost.unit_cost AS cost_unit_cost, cost.base_unit AS cost_base_unit,
 		       cost.cost_per_person, cost.missing_reason AS cost_reason, cost.cost_source, cost.cost_source_date
-		FROM the_full_order.tb_account_recipe_detail rd
-		LEFT JOIN the_full_order.tb_account_ingredient_master im
+		FROM tb_account_recipe_detail rd
+		LEFT JOIN tb_account_ingredient_master im
 		  ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
 		LEFT JOIN (<include refid="accountRecipeCosts"/>) cost ON cost.account_recipe_detail_id=rd.account_recipe_detail_id
 		LEFT JOIN (
 		  SELECT b.account_id,b.ingredient_id,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
-		  FROM the_full_order.tb_account_inventory_balance b
+		  FROM tb_account_inventory_balance b
 		  <if test="account_id != null and account_id != ''">WHERE b.account_id=#{account_id}</if>
 		  GROUP BY b.account_id,b.ingredient_id
 		) ib ON ib.account_id=rd.account_id AND ib.ingredient_id=rd.ingredient_id
@@ -109,21 +109,21 @@
 		       pp.unit_cost AS cost_unit_cost, pp.base_unit AS cost_base_unit,
 		       CASE WHEN hr.review_flag=0 THEN ROUND(hr.qty_per_person*pp.unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pp.base_unit"/><property name="toUnit" value="hr.base_unit"/></include>, 4) END AS cost_per_person,
 		       CASE WHEN pp.unit_cost IS NULL THEN '단가 미등록' END AS cost_reason, pp.cost_source
-		FROM the_full_order.tb_recipe_detail hr
-		LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
-		LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=hr.ingredient_id
+		FROM tb_recipe_detail hr
+		LEFT JOIN tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+		LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=hr.ingredient_id
 		LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
 		  ON pp.account_id=#{account_id} AND pp.ingredient_id=hr.ingredient_id
 		<!-- 재고는 거래처 식재료 기준단위로 쌓이므로 본사 레시피 단위와 같을 때만 비교한다 -->
 		LEFT JOIN (
 		  SELECT b.ingredient_id,SUM(b.current_base_qty) current_base_qty,MIN(b.location_id) location_id
-		  FROM the_full_order.tb_account_inventory_balance b
+		  FROM tb_account_inventory_balance b
 		  WHERE b.account_id=#{account_id}
 		  GROUP BY b.ingredient_id
 		) ib ON ib.ingredient_id=hr.ingredient_id AND LOWER(COALESCE(ai.base_unit, hr.base_unit))=LOWER(hr.base_unit)
 		WHERE hr.menu_id = #{menu_id}
 		  AND hr.qty_num IS NOT NULL
-		  AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=hr.menu_id AND am.del_yn='N')
+		  AND NOT EXISTS(SELECT 1 FROM tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=hr.menu_id AND am.del_yn='N')
 		ORDER BY hr.ingredient_seq
 	</select>
 
@@ -133,11 +133,11 @@
 			   category_name,
 			   base_unit,
 			   menu_usage_count
-		FROM the_full_order.tb_ingredient_master
+		FROM tb_ingredient_master
 	</select>
 	
 	<insert id="MenuSave" parameterType="map">
-		INSERT INTO the_full_order.tb_menu_master
+		INSERT INTO tb_menu_master
 		(menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, menu_img, menu_type, menu_gubun, meal_plan_type, calories_per_serving, user_id)
 		VALUES
 		(#{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
@@ -168,7 +168,7 @@
 	
 	<!-- 추후 식자재 관리를 위해 필요함 -->
 	<insert id="IngredientsMasterSave" parameterType="map">
-		INSERT INTO the_full_order.tb_ingredient_master
+		INSERT INTO tb_ingredient_master
 		(ingredient_id, ingredient_name_raw, ingredient_name_std, category_name, base_unit, order_unit, convert_value, storage_type, menu_usage_count, needs_review, note, created_at, safe_stock_qty, lead_time_days)
 		VALUES
 		(#{ingredient_id}, #{ingredient_name_raw}, #{ingredient_name_std}, #{category_name}, #{base_unit}, #{order_unit}, #{convert_value}, NULLIF(#{storage_type},''), #{menu_usage_count}, #{needs_review}, #{note}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{safe_stock_qty}, #{lead_time_days})
@@ -192,12 +192,12 @@
 	
 	<select id="RecipeId" parameterType="map" resultType="long">
 		SELECT MIN(recipe_id)
-		FROM the_full_order.tb_recipe_detail
+		FROM tb_recipe_detail
 		WHERE menu_id = #{menu_id}
 	</select>
 
 	<insert id="IngredientsSave" parameterType="map">
-		INSERT INTO the_full_order.tb_recipe_detail
+		INSERT INTO tb_recipe_detail
 		(recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw, qty_raw, qty_num, qty_unit,
 		 recipe_yield_servings, qty_base, base_unit, qty_per_person, review_flag, created_at, user_id)
 		VALUES
@@ -226,7 +226,7 @@
 	</insert>
 	
 	<insert id="AccountMenuSave" parameterType="map">
-		INSERT INTO the_full_order.tb_account_menu_master
+		INSERT INTO tb_account_menu_master
 		(account_id, menu_id, menu_name_raw, menu_name, food_type, created_at, del_yn, food_type_reason, user_id, menu_type, menu_gubun, meal_plan_type, calories_per_serving)
 		VALUES
 		(#{account_id}, #{menu_id}, #{menu_name}, #{menu_name}, #{food_type}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), 'N', CONCAT( 
@@ -256,7 +256,7 @@
 	
 	<!-- 추후 식자재 관리를 위해 필요함 -->
 	<insert id="AccountIngredientsMasterSave" parameterType="map">
-		INSERT INTO the_full_order.tb_ingredient_master
+		INSERT INTO tb_ingredient_master
 		(account_id, ingredient_id, ingredient_name_raw, ingredient_name_std, category_name, base_unit, order_unit, convert_value, storage_type, menu_usage_count, needs_review, note, created_at, safe_stock_qty, lead_time_days)
 		VALUES
 		(#{ingredient_id}, #{ingredient_name_raw}, #{ingredient_name_std}, #{category_name}, #{base_unit}, #{order_unit}, #{convert_value}, NULLIF(#{storage_type},''), #{menu_usage_count}, #{needs_review}, #{note}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{safe_stock_qty}, #{lead_time_days})
@@ -279,7 +279,7 @@
 	</insert>
 	
 	<insert id="AccountIngredientsSave" parameterType="map">
-		INSERT INTO the_full_order.tb_account_recipe_detail
+		INSERT INTO tb_account_recipe_detail
 		(account_id, recipe_id, menu_id, ingredient_id, ingredient_seq, ingredient_name_raw,
 		 qty_raw, qty_num, qty_unit, recipe_yield_servings, qty_base, base_unit,
 		 qty_per_person, review_flag, created_at, user_id)
@@ -318,7 +318,7 @@
 	</insert>
 	
 	<insert id="AccountInventorySave" parameterType="map">
-		INSERT INTO the_full_order.tb_account_inventory_balance
+		INSERT INTO tb_account_inventory_balance
 		(account_id, ingredient_id, location_id, unit, created_at, user_id, note)
 		VALUES
 		(#{account_id}, #{ingredient_id}, #{location_id}, #{qty_unit}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id}, #{note})
@@ -360,38 +360,38 @@
               WHEN c.receipt_cost IS NOT NULL THEN c.receipt_date WHEN c.standard_cost IS NOT NULL THEN c.standard_date END auto_source_date
     FROM (
       SELECT q.*,pr.product_name price_product_name,
-             (SELECT h.purchase_price FROM the_full_order.tb_supplier_site_product_price h
-                JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+             (SELECT h.purchase_price FROM tb_supplier_site_product_price h
+                JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
+                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                WHERE a.account_id=q.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
                /NULLIF(pr.base_qty,0)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pr.base_unit"/><property name="toUnit" value="q.base_unit"/></include> site_cost,
-             (SELECT DATE(h.effective_from) FROM the_full_order.tb_supplier_site_product_price h
-                JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+             (SELECT DATE(h.effective_from) FROM tb_supplier_site_product_price h
+                JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
+                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                WHERE a.account_id=q.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1) site_date,
-             (SELECT h.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history h
+             (SELECT h.purchase_price FROM tb_supplier_ingredient_price_history h
                WHERE h.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.price_history_id DESC LIMIT 1)
                /NULLIF(pr.base_qty,0)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pr.base_unit"/><property name="toUnit" value="q.base_unit"/></include> common_cost,
-             (SELECT DATE(h.effective_from) FROM the_full_order.tb_supplier_ingredient_price_history h
+             (SELECT DATE(h.effective_from) FROM tb_supplier_ingredient_price_history h
                WHERE h.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.price_history_id DESC LIMIT 1) common_date
         FROM (
       SELECT ai.account_id,ai.ingredient_id,ai.base_unit,
              COALESCE(
-               (SELECT l.supplier_product_id FROM the_full_order.tb_account_inventory_lot l
+               (SELECT l.supplier_product_id FROM tb_account_inventory_lot l
                  WHERE l.account_id=ai.account_id AND l.ingredient_id=ai.ingredient_id AND l.supplier_product_id IS NOT NULL
                  ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1),
-               (SELECT i.supplier_product_id FROM the_full_order.tb_account_purchase_order_item i
-                  JOIN the_full_order.tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
+               (SELECT i.supplier_product_id FROM tb_account_purchase_order_item i
+                  JOIN tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
                  WHERE po.account_id=ai.account_id AND i.source_ingredient_id=ai.ingredient_id AND i.supplier_product_id IS NOT NULL
                  ORDER BY po.ordered_at DESC,po.purchase_order_id DESC LIMIT 1),
-               (SELECT sp.supplier_product_id FROM the_full_order.tb_supplier_ingredient_product sp
+               (SELECT sp.supplier_product_id FROM tb_supplier_ingredient_product sp
                  WHERE sp.ingredient_id=ai.ingredient_id AND sp.active_yn='Y'
-                   AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
-                                JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                   AND EXISTS(SELECT 1 FROM tb_supplier_site_product_offer o
+                                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                                WHERE a.account_id=ai.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
                  ORDER BY sp.supplier_product_id LIMIT 1)) price_product_id,
              CASE WHEN pc.source_type='MANUAL' AND pc.unit_cost&gt;0
@@ -400,33 +400,33 @@
              CASE WHEN stock.average_cost&gt;0 THEN stock.average_cost WHEN lot.receipt_unit_cost&gt;0 THEN lot.receipt_unit_cost END receipt_cost,
              CASE WHEN stock.average_cost&gt;0 THEN DATE(stock.last_movement_at) WHEN lot.receipt_unit_cost&gt;0 THEN lot.received_date END receipt_date,
              (SELECT CASE WHEN im.standard_unit_cost&gt;0 THEN im.standard_unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="im.base_unit"/><property name="toUnit" value="ai.base_unit"/></include> END
-                FROM the_full_order.tb_ingredient_master im
+                FROM tb_ingredient_master im
                WHERE im.ingredient_id=ai.ingredient_id OR (im.ingredient_name_std=COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) AND im.standard_unit_cost&gt;0)
                ORDER BY im.ingredient_id=ai.ingredient_id DESC,im.ingredient_id LIMIT 1) standard_cost,
              (SELECT DATE(COALESCE(im.standard_cost_mod_at,im.mod_at,im.created_at))
-                FROM the_full_order.tb_ingredient_master im
+                FROM tb_ingredient_master im
                WHERE im.ingredient_id=ai.ingredient_id OR (im.ingredient_name_std=COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) AND im.standard_unit_cost&gt;0)
                ORDER BY im.ingredient_id=ai.ingredient_id DESC,im.ingredient_id LIMIT 1) standard_date
-        FROM the_full_order.tb_account_ingredient_master ai
-        LEFT JOIN the_full_order.tb_account_planning_cost pc ON pc.planning_cost_id=(
-          SELECT h.planning_cost_id FROM the_full_order.tb_account_planning_cost h
+        FROM tb_account_ingredient_master ai
+        LEFT JOIN tb_account_planning_cost pc ON pc.planning_cost_id=(
+          SELECT h.planning_cost_id FROM tb_account_planning_cost h
            WHERE h.account_id=ai.account_id AND h.ingredient_id=ai.ingredient_id
            ORDER BY h.planning_cost_id DESC LIMIT 1)
         LEFT JOIN (
           SELECT b.account_id,b.ingredient_id,SUM(b.inventory_amount)/NULLIF(SUM(b.current_base_qty),0) average_cost,MAX(b.last_movement_at) last_movement_at
-            FROM the_full_order.tb_account_inventory_balance b
+            FROM tb_account_inventory_balance b
            WHERE b.current_base_qty&gt;0 AND b.average_unit_cost&gt;0
            <if test="account_id != null and account_id != ''">AND b.account_id=#{account_id}</if>
            GROUP BY b.account_id,b.ingredient_id
         ) stock ON stock.account_id=ai.account_id AND stock.ingredient_id=ai.ingredient_id
-        LEFT JOIN the_full_order.tb_account_inventory_lot lot ON lot.inventory_lot_id=(
-          SELECT l.inventory_lot_id FROM the_full_order.tb_account_inventory_lot l
+        LEFT JOIN tb_account_inventory_lot lot ON lot.inventory_lot_id=(
+          SELECT l.inventory_lot_id FROM tb_account_inventory_lot l
            WHERE l.account_id=ai.account_id AND l.ingredient_id=ai.ingredient_id AND l.receipt_unit_cost&gt;0
            ORDER BY l.received_date DESC,l.inventory_lot_id DESC LIMIT 1)
        WHERE ai.active_yn='Y'
        <if test="account_id != null and account_id != ''">AND ai.account_id=#{account_id}</if>
         ) q
-        LEFT JOIN the_full_order.tb_supplier_ingredient_product pr ON pr.supplier_product_id=q.price_product_id
+        LEFT JOIN tb_supplier_ingredient_product pr ON pr.supplier_product_id=q.price_product_id
     ) c
  </sql>
 
@@ -446,7 +446,7 @@
          CASE WHEN COUNT(r.ingredient_id)&gt;0 AND COUNT(r.cost)=COUNT(r.ingredient_id) THEN 1 ELSE 0 END menu_cost_complete,
          CASE WHEN COUNT(r.ingredient_id)=0 THEN '레시피 없음'
               ELSE GROUP_CONCAT(CASE WHEN r.cost IS NULL THEN CONCAT(r.ingredient_name,': 단가 미등록') END SEPARATOR ', ') END menu_cost_reason
-    FROM the_full_order.tb_menu_master m
+    FROM tb_menu_master m
     LEFT JOIN (
       SELECT hr.menu_id,hr.ingredient_id,COALESCE(hi.ingredient_name_std,hr.ingredient_name_raw,hr.ingredient_id) ingredient_name,
              CASE WHEN hr.review_flag=0 THEN hr.qty_per_person*COALESCE(
@@ -454,38 +454,38 @@
                <!-- 거래처 식재료가 아직 없으면: 공급사 상품 마스터에 이 식재료로 지정되고 이 거래처 사업장에서 파는 상품의 사업장 판가 → 공통 판가 -->
                COALESCE(ip.site_cost,ip.common_cost)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="ip.price_unit"/><property name="toUnit" value="hr.base_unit"/></include>,
                CASE WHEN hi.standard_unit_cost&gt;0 THEN hi.standard_unit_cost*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="hi.base_unit"/><property name="toUnit" value="hr.base_unit"/></include> END) END cost
-        FROM the_full_order.tb_recipe_detail hr
-        LEFT JOIN the_full_order.tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
+        FROM tb_recipe_detail hr
+        LEFT JOIN tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
         LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
           ON pp.account_id=#{account_id} AND pp.ingredient_id=hr.ingredient_id
         <!-- 판가는 레시피 줄(3만여 줄)마다가 아니라 본사 식재료마다 한 번만 찾는다 -->
         LEFT JOIN (
           SELECT q.ingredient_id,pr.base_unit price_unit,
-                 (SELECT h.purchase_price FROM the_full_order.tb_supplier_site_product_price h
-                    JOIN the_full_order.tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                    JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                 (SELECT h.purchase_price FROM tb_supplier_site_product_price h
+                    JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
+                    JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                    WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                    ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
                    /NULLIF(pr.base_qty,0) site_cost,
-                 (SELECT h.purchase_price FROM the_full_order.tb_supplier_ingredient_price_history h
+                 (SELECT h.purchase_price FROM tb_supplier_ingredient_price_history h
                    WHERE h.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                    ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.price_history_id DESC LIMIT 1)
                    /NULLIF(pr.base_qty,0) common_cost
             FROM (
               SELECT im.ingredient_id,
-                     (SELECT sp.supplier_product_id FROM the_full_order.tb_supplier_ingredient_product sp
+                     (SELECT sp.supplier_product_id FROM tb_supplier_ingredient_product sp
                        WHERE sp.ingredient_id=im.ingredient_id AND sp.active_yn='Y'
-                         AND EXISTS(SELECT 1 FROM the_full_order.tb_supplier_site_product_offer o
-                                      JOIN the_full_order.tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                         AND EXISTS(SELECT 1 FROM tb_supplier_site_product_offer o
+                                      JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
                                      WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
                        ORDER BY sp.supplier_product_id LIMIT 1) price_product_id
-                FROM the_full_order.tb_ingredient_master im
+                FROM tb_ingredient_master im
             ) q
-            LEFT JOIN the_full_order.tb_supplier_ingredient_product pr ON pr.supplier_product_id=q.price_product_id
+            LEFT JOIN tb_supplier_ingredient_product pr ON pr.supplier_product_id=q.price_product_id
         ) ip ON ip.ingredient_id=hr.ingredient_id
     ) r ON r.menu_id=m.menu_id
    WHERE m.del_yn='N'
-     AND NOT EXISTS(SELECT 1 FROM the_full_order.tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=m.menu_id AND am.del_yn='N')
+     AND NOT EXISTS(SELECT 1 FROM tb_account_menu_master am WHERE am.account_id=#{account_id} AND am.menu_id=m.menu_id AND am.del_yn='N')
    GROUP BY m.menu_id
  </select>
 
@@ -513,7 +513,7 @@
              CASE WHEN pp.base_unit IS NULL OR LOWER(rd.base_unit)=LOWER(pp.base_unit) THEN rd.qty_per_person
                   WHEN (LOWER(rd.base_unit)='kg' AND LOWER(pp.base_unit)='g') OR (LOWER(rd.base_unit)='l' AND LOWER(pp.base_unit)='ml') THEN rd.qty_per_person*1000
                   WHEN (LOWER(rd.base_unit)='g' AND LOWER(pp.base_unit)='kg') OR (LOWER(rd.base_unit)='ml' AND LOWER(pp.base_unit)='l') THEN rd.qty_per_person/1000 END qty_per_person
-        FROM the_full_order.tb_account_recipe_detail rd
+        FROM tb_account_recipe_detail rd
         LEFT JOIN (<include refid="com.example.demo.mapper.MenuMapper.accountIngredientPlanningPrices"/>) pp
           ON pp.account_id=rd.account_id AND pp.ingredient_id=rd.ingredient_id
        <if test="account_id != null and account_id != ''">WHERE rd.account_id=#{account_id}</if>
@@ -523,12 +523,12 @@
 	<select id="AccountMenuList" parameterType="map" resultType="hashmap">
 		SELECT T.account_id,
 			   (SELECT JSON_ARRAYAGG(CONCAT_WS(' ',rd.ingredient_name_raw,im.ingredient_name_std,im.ingredient_name_raw))
-                 FROM the_full_order.tb_account_recipe_detail rd
-                 LEFT JOIN the_full_order.tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
+                 FROM tb_account_recipe_detail rd
+                 LEFT JOIN tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
                  WHERE rd.account_id=T.account_id AND rd.menu_id=T.menu_id) AS recipe_ingredient_names,
 			   (SELECT JSON_ARRAYAGG(COALESCE(NULLIF(rd.ingredient_name_raw,''),NULLIF(im.ingredient_name_std,''),im.ingredient_name_raw))
-                 FROM the_full_order.tb_account_recipe_detail rd
-                 LEFT JOIN the_full_order.tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
+                 FROM tb_account_recipe_detail rd
+                 LEFT JOIN tb_account_ingredient_master im ON im.account_id=rd.account_id AND im.ingredient_id=rd.ingredient_id
                  WHERE rd.account_id=T.account_id AND rd.menu_id=T.menu_id) AS recipe_ingredient_list,
 			   T2.menu_img,
 			   CASE WHEN T2.menu_id IS NULL THEN 'N' ELSE 'Y' END AS standard_yn,
@@ -549,11 +549,11 @@
                  FROM (<include refid="accountRecipeCosts"/>) c WHERE c.account_id=T.account_id AND c.menu_id=T.menu_id) AS menu_cost_complete,
                (SELECT GROUP_CONCAT(CONCAT(COALESCE(c.ingredient_name,c.ingredient_id), ': ',c.missing_reason) SEPARATOR ', ')
                  FROM (<include refid="accountRecipeCosts"/>) c WHERE c.account_id=T.account_id AND c.menu_id=T.menu_id AND c.cost_per_person IS NULL) AS menu_cost_reason
-		FROM the_full_order.tb_account_menu_master T
+		FROM tb_account_menu_master T
 		<!-- 거래처 전용 메뉴(AM-…)는 본사 메뉴가 없으므로 LEFT JOIN -->
-		LEFT JOIN the_full_order.tb_menu_master T2
+		LEFT JOIN tb_menu_master T2
 		ON T2.menu_id = T.menu_id
-		LEFT JOIN the_full_order.tb_favorite_menu T3
+		LEFT JOIN tb_favorite_menu T3
 		ON T3.owner_type = #{favorite_owner_type}
 		AND T3.owner_id = #{favorite_owner_id}
 		AND T3.menu_id = T.menu_id
@@ -578,8 +578,8 @@
 		       T2.food_type_reason,
 		       T2.meal_plan_type,
 		       T2.calories_per_serving
-		  FROM the_full_order.tb_favorite_menu T
-		  JOIN the_full_order.tb_menu_master T2
+		  FROM tb_favorite_menu T
+		  JOIN tb_menu_master T2
 		    ON T2.menu_id = T.menu_id AND T2.del_yn = 'N'
 		 WHERE T.owner_type = #{favorite_owner_type}
 		   AND T.owner_id = #{favorite_owner_id}
@@ -590,12 +590,12 @@
 	</select>
 
 	<insert id="LikeMenuSave" parameterType="map">
-		INSERT IGNORE INTO the_full_order.tb_favorite_menu (owner_type, owner_id, menu_id, user_id)
+		INSERT IGNORE INTO tb_favorite_menu (owner_type, owner_id, menu_id, user_id)
 		VALUES (#{favorite_owner_type}, #{favorite_owner_id}, #{menu_id}, #{user_id})
 	</insert>
 
 	<delete id="LikeMenuDelete" parameterType="map">
-		DELETE FROM the_full_order.tb_favorite_menu
+		DELETE FROM tb_favorite_menu
 		 WHERE owner_type = #{favorite_owner_type} AND owner_id = #{favorite_owner_id} AND menu_id = #{menu_id}
 	</delete>
 
@@ -604,27 +604,27 @@
 			   ingredient_name_raw,
 			   category_name,
 			   base_unit
-		FROM the_full_order.tb_account_ingredient_master
+		FROM tb_account_ingredient_master
 		WHERE account_id = #{account_id}
 	</select>
 
 	<delete id="RecipeInfoDelete" parameterType="map">
-		DELETE FROM the_full_order.tb_recipe_info
+		DELETE FROM tb_recipe_info
 		WHERE recipe_id = #{recipe_id}
 	</delete>
 	
 	<delete id="RecipeImageDelete" parameterType="map">
-		DELETE FROM the_full_order.tb_recipe_image
+		DELETE FROM tb_recipe_image
 		WHERE recipe_id = #{recipe_id}
 	</delete>
 	
 	<delete id="RecipeVideoDelete" parameterType="map">
-		DELETE FROM the_full_order.tb_recipe_video
+		DELETE FROM tb_recipe_video
 		WHERE recipe_id = #{recipe_id}
 	</delete>
 	
 	<insert id="RecipeInfoSave" parameterType="map">
-		INSERT INTO the_full_order.tb_recipe_info
+		INSERT INTO tb_recipe_info
 		(recipe_id, menu_id, menu_name, title, summary, servings_note, ingredients_json, steps_json, tips_json, storage_json, allergens_json, recipe_json, created_at, user_id, mod_at)
 		VALUES
 		(#{recipe_id}, #{menu_id}, #{menu_name}, #{title}, #{summary}, #{servings_note}, #{ingredients_json}, #{steps_json}, #{tips_json}, #{storage_json}, #{allergens_json}, #{recipe_json}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id}, NULL)
@@ -645,7 +645,7 @@
 	</insert>
 	
 	<insert id="RecipeImageSave" parameterType="map">
-		INSERT INTO the_full_order.tb_recipe_image
+		INSERT INTO tb_recipe_image
 		(recipe_id, menu_id, file_id, file_name, file_url, file_path, file_size, is_primary, sort_order, created_at)
 		VALUES
 		(#{recipe_id}, #{menu_id}, #{file_id}, #{file_name}, #{file_url}, #{file_path}, #{file_size}, #{is_primary}, #{sort_order}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'))
@@ -662,7 +662,7 @@
 	</insert>
 	
 	<insert id="RecipeVideoSave" parameterType="map">
-		INSERT INTO the_full_order.tb_recipe_video
+		INSERT INTO tb_recipe_video
 		(recipe_id, menu_id, title, url, description, sort_order, created_at, user_id)
 		VALUES
 		(#{recipe_id}, #{menu_id}, #{title}, #{url}, #{description}, #{sort_order}, DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'), #{user_id})
@@ -691,7 +691,7 @@
 				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at,
 				user_id,
 				DATE_FORMAT(mod_at, '%Y-%m-%d') as mod_at
-		FROM the_full_order.tb_recipe_info
+		FROM tb_recipe_info
 		WHERE menu_id = #{menu_id}
 	</select>
 	
@@ -707,7 +707,7 @@
 				is_primary,
 				sort_order,
 				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at
-		FROM the_full_order.tb_recipe_image
+		FROM tb_recipe_image
 		WHERE menu_id = #{menu_id}
 	</select>
 	
@@ -721,7 +721,7 @@
 				sort_order,
 				DATE_FORMAT(created_at, '%Y-%m-%d') as created_at,
 				user_id
-		FROM the_full_order.tb_recipe_video 
+		FROM tb_recipe_video 
 		WHERE menu_id = #{menu_id}
 	</select>
 	

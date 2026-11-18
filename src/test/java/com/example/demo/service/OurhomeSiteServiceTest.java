@@ -53,6 +53,30 @@ class OurhomeSiteServiceTest {
         assertThrows(IllegalStateException.class, () -> service(HttpStatus.INTERNAL_SERVER_ERROR, "{}").sites());
     }
 
+    /** 사업자번호 둘(법인·개인): 번호마다 사업장 목록을 받아 합친다(같은 사업장은 한 번). 한쪽만 실패하면 나머지로 계속. */
+    private OurhomeSiteService twoTaxNos(String... bodies) {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        return new OurhomeSiteService(WebClient.builder().exchangeFunction(request -> Mono.just(ClientResponse
+                .create(HttpStatus.OK).header("Content-Type", "application/json").body(bodies[calls.getAndIncrement()])
+                .build())), new ObjectMapper(), "https://devtosapi.ourhome.co.kr", "2007", "test-secret", "10",
+                "1234567890, 9876543210", "TEST");
+    }
+
+    @Test void mergesSitesOfEveryBusinessNumber() {
+        var result = twoTaxNos(
+                "{\"rtnCd\":0,\"result\":{\"data\":[{\"busiplCd\":\"CORP\"},{\"busiplCd\":\"SHARED\"}]}}",
+                "{\"rtnCd\":0,\"result\":{\"data\":[{\"busiplCd\":\"PERSONAL\"},{\"busiplCd\":\"SHARED\"}]}}").sites();
+        assertEquals(java.util.List.of("CORP", "SHARED", "PERSONAL"),
+                result.sites().stream().map(OurhomeSiteService.Site::siteCode).toList());
+
+        var partial = twoTaxNos("{\"rtnCd\":-810,\"rtnMsg\":\"권한 없음\"}",
+                "{\"rtnCd\":0,\"result\":{\"data\":[{\"busiplCd\":\"PERSONAL\"}]}}").sites();
+        assertEquals("PERSONAL", partial.sites().get(0).siteCode());
+
+        assertThrows(IllegalStateException.class, () -> twoTaxNos("{\"rtnCd\":-810}", "{\"rtnCd\":-810}").sites());
+        assertEquals(java.util.List.of("1234567890", "9876543210"), OurhomeSiteService.taxNos("1234567890,9876543210"));
+    }
+
     @Test void rejectsInvalidDatesAndSupportsEmptyList() {
         assertThrows(IllegalStateException.class, () -> service(HttpStatus.OK,
                 "{\"rtnCd\":0,\"result\":{\"data\":[{\"busiplCd\":\"A\",\"depositDt\":\"20260230\"}]}}").sites());

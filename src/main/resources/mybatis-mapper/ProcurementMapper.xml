@@ -6,13 +6,13 @@
     WITH planned AS (
       SELECT ms.account_id,r.ingredient_id,r.base_unit,
         SUM(r.total_required_qty) planned_qty,SUM(r.calculated_cost) planned_cost
-      FROM the_full_order.tb_account_meal_ingredient_requirement r
-      JOIN the_full_order.tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+      FROM tb_account_meal_ingredient_requirement r
+      JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
       WHERE ms.account_id=#{account_id} AND ms.table_id=#{table_id} AND ms.status!='CANCELED'
       GROUP BY ms.account_id,r.ingredient_id,r.base_unit
     ), stock AS (
       SELECT account_id,ingredient_id,SUM(current_base_qty) current_qty
-      FROM the_full_order.tb_account_inventory_balance WHERE account_id=#{account_id}
+      FROM tb_account_inventory_balance WHERE account_id=#{account_id}
       GROUP BY account_id,ingredient_id
     )
     SELECT r.*,COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,COALESCE(s.current_qty,0) current_qty,
@@ -21,13 +21,13 @@
       CASE WHEN COALESCE(s.current_qty,0)&lt;r.planned_qty THEN 'RED'
         WHEN COALESCE(s.current_qty,0)&lt;r.planned_qty+COALESCE(ai.safe_stock_base_qty,0) THEN 'ORANGE' ELSE 'GREEN' END stock_status
     FROM planned r
-    LEFT JOIN the_full_order.tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=r.ingredient_id
+    LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=r.ingredient_id
     LEFT JOIN stock s ON s.account_id=r.account_id AND s.ingredient_id=r.ingredient_id
     ORDER BY r.ingredient_id
   </select>
   <select id="mealPlanSummary" resultType="map">
     SELECT COALESCE(SUM(planned_servings),0) total_servings,
       COALESCE(SUM(meal_budget_per_person*planned_servings)/NULLIF(SUM(planned_servings),0),0) meal_budget_per_person
-    FROM the_full_order.tb_account_meal_service WHERE account_id=#{account_id} AND table_id=#{table_id} AND status!='CANCELED'
+    FROM tb_account_meal_service WHERE account_id=#{account_id} AND table_id=#{table_id} AND status!='CANCELED'
   </select>
 </mapper>

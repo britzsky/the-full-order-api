@@ -39,15 +39,15 @@ public class CatalogPreparationService {
         if(account==null||account.isBlank()) throw new IllegalArgumentException("거래처를 선택해주세요.");
         int[] counts=new int[3]; // 준비 완료, 실패, 건너뜀(이미 준비됨·진행 중)
         for(var site:jdbc.queryForList("""
-            SELECT ss.*,s.supplier_code FROM the_full_order.tb_supplier_account_site ss
-            JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
+            SELECT ss.*,s.supplier_code FROM tb_supplier_account_site ss
+            JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
             WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
             """,account)) {
             // 준비 기록은 사업장 마스터 단위: 같은 사업장을 쓰는 다른 거래처가 이미 준비했으면 건너뛴다(공급사 재조회 없음)
             String type="PREPARE_"+date; Object supplier=site.get("supplier_id"), id=site.get("supplier_site_id");
-            jdbc.update("INSERT IGNORE INTO the_full_order.tb_supplier_sync_checkpoint(supplier_id,supplier_site_id,sync_type) VALUES(?,?,?)",supplier,id,type);
+            jdbc.update("INSERT IGNORE INTO tb_supplier_sync_checkpoint(supplier_id,supplier_site_id,sync_type) VALUES(?,?,?)",supplier,id,type);
             int claimed=jdbc.update("""
-                UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_started_at=NOW(),last_result_code='PREPARING',last_result_message='납품일 상품 준비 중'
+                UPDATE tb_supplier_sync_checkpoint SET last_started_at=NOW(),last_result_code='PREPARING',last_result_message='납품일 상품 준비 중'
                 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
                   AND (last_started_at IS NULL OR last_result_code<>'PREPARING' OR last_started_at<DATE_SUB(NOW(),INTERVAL 30 MINUTE))
                   AND (last_succeeded_at IS NULL OR last_succeeded_at<DATE_SUB(NOW(),INTERVAL 12 HOUR))
@@ -72,7 +72,7 @@ public class CatalogPreparationService {
                 cycles.ensureCycle(site,date,actor);
             }
             jdbc.update("""
-                UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_succeeded_at=NOW(),last_result_code='READY',last_result_message='납품일 상품 준비 완료',consecutive_failures=0
+                UPDATE tb_supplier_sync_checkpoint SET last_succeeded_at=NOW(),last_result_code='READY',last_result_message='납품일 상품 준비 완료',consecutive_failures=0
                 WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
                 """,supplier,id,type);
             return true;
@@ -80,7 +80,7 @@ public class CatalogPreparationService {
     }
     private void failed(Object supplier,Object id,String type,String message) {
         jdbc.update("""
-            UPDATE the_full_order.tb_supplier_sync_checkpoint SET last_failed_at=NOW(),last_result_code='REVIEW_REQUIRED',last_result_message=?,consecutive_failures=consecutive_failures+1
+            UPDATE tb_supplier_sync_checkpoint SET last_failed_at=NOW(),last_result_code='REVIEW_REQUIRED',last_result_message=?,consecutive_failures=consecutive_failures+1
             WHERE supplier_id=? AND supplier_site_id=? AND sync_type=?
             """,message,supplier,id,type);
     }
@@ -89,8 +89,8 @@ public class CatalogPreparationService {
         var rows=jdbc.queryForList("""
             SELECT s.supplier_code,s.supplier_name,ss.external_site_name,c.last_succeeded_at,c.last_failed_at,
               COALESCE(c.last_result_code,'NOT_PREPARED') status,c.last_result_message message
-            FROM the_full_order.tb_supplier_account_site ss JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
-            LEFT JOIN the_full_order.tb_supplier_sync_checkpoint c ON c.supplier_id=ss.supplier_id AND c.supplier_site_id=ss.supplier_site_id AND c.sync_type=?
+            FROM tb_supplier_account_site ss JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
+            LEFT JOIN tb_supplier_sync_checkpoint c ON c.supplier_id=ss.supplier_id AND c.supplier_site_id=ss.supplier_site_id AND c.sync_type=?
             WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
             ""","PREPARE_"+date,account);
         return Map.of("delivery_date",date.toString(),"suppliers",rows);
@@ -104,7 +104,7 @@ public class CatalogPreparationService {
     public Map<String,Object> scheduled() {
         var targets=new LinkedHashMap<String,TreeSet<LocalDate>>();
         for(var row:jdbc.queryForList("""
-            SELECT DISTINCT m.account_id,m.meal_date FROM the_full_order.tb_account_meal_service m
+            SELECT DISTINCT m.account_id,m.meal_date FROM tb_account_meal_service m
             WHERE m.status='DRAFT' AND m.meal_date BETWEEN CURRENT_DATE AND DATE_ADD(CURRENT_DATE,INTERVAL 7 DAY)
             ORDER BY m.meal_date,m.account_id LIMIT 200
             """)) targets.computeIfAbsent(row.get("account_id").toString(),k->new TreeSet<>()).add(LocalDate.parse(row.get("meal_date").toString()));
@@ -126,8 +126,8 @@ public class CatalogPreparationService {
     /** 아워홈 사업장 목록은 한 번만 조회해 거래처별 가까운 발주 가능일(내일 이후)을 고른다. */
     private Map<String,List<LocalDate>> ourhomeDates() {
         var links=jdbc.queryForList("""
-            SELECT ss.account_id,ss.external_site_code FROM the_full_order.tb_supplier_account_site ss
-            JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id
+            SELECT ss.account_id,ss.external_site_code FROM tb_supplier_account_site ss
+            JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
             WHERE ss.active_yn='Y' AND s.supplier_code='OURHOME'
             """);
         Map<String,List<LocalDate>> result=new LinkedHashMap<>();
@@ -145,7 +145,7 @@ public class CatalogPreparationService {
     /** 지난 납품일의 준비 체크포인트 정리(7일 보관). 판가·판매상태 데이터는 원가 추정에 쓰므로 지우지 않는다. */
     public int cleanup() {
         return jdbc.update("""
-            DELETE FROM the_full_order.tb_supplier_sync_checkpoint
+            DELETE FROM tb_supplier_sync_checkpoint
             WHERE sync_type LIKE 'PREPARE\\_%' AND sync_type<CONCAT('PREPARE_',DATE_FORMAT(DATE_SUB(CURRENT_DATE,INTERVAL 7 DAY),'%Y-%m-%d'))
             """);
     }
@@ -154,7 +154,7 @@ public class CatalogPreparationService {
             try {
                 var today=LocalDate.now(ZoneId.of("Asia/Seoul"));
                 var dates=new TreeSet<LocalDate>();
-                for(var site:jdbc.queryForList("SELECT ss.external_site_code FROM the_full_order.tb_supplier_account_site ss JOIN the_full_order.tb_supplier s ON s.supplier_id=ss.supplier_id WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code='OURHOME'",account))
+                for(var site:jdbc.queryForList("SELECT ss.external_site_code FROM tb_supplier_account_site ss JOIN tb_supplier s ON s.supplier_id=ss.supplier_id WHERE ss.account_id=? AND ss.active_yn='Y' AND s.supplier_code='OURHOME'",account))
                     sites.requireSite(site.get("external_site_code").toString()).deliveryDates().stream().map(LocalDate::parse)
                         .filter(d->!d.isBefore(today)&&!d.isAfter(today.plusDays(31))).min(LocalDate::compareTo).ifPresent(dates::add);
                 if(dates.isEmpty()) dates.add(today.plusDays(1));

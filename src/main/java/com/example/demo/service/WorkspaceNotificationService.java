@@ -14,7 +14,7 @@ public class WorkspaceNotificationService {
     private final ShortageProcurementService shortages;
     public WorkspaceNotificationService(JdbcTemplate jdbc,ShortageProcurementService shortages) { this.jdbc=jdbc;this.shortages=shortages; }
     public List<Map<String,Object>> list(String account) {
-        return jdbc.queryForList("SELECT * FROM the_full_order.tb_workspace_notification WHERE account_id=? AND status<>'RESOLVED' ORDER BY updated_at DESC LIMIT 100",account);
+        return jdbc.queryForList("SELECT * FROM tb_workspace_notification WHERE account_id=? AND status<>'RESOLVED' ORDER BY updated_at DESC LIMIT 100",account);
     }
     @Transactional
     public List<Map<String,Object>> refresh(String account) {
@@ -23,7 +23,7 @@ public class WorkspaceNotificationService {
         lock(account);
         Set<String> active=new HashSet<>();
         for(var order:jdbc.queryForList("""
-            SELECT purchase_order_id,status,requested_delivery_date FROM the_full_order.tb_account_purchase_order
+            SELECT purchase_order_id,status,requested_delivery_date FROM tb_account_purchase_order
             WHERE account_id=? AND (status IN ('SENDING','UNKNOWN','PARTIAL_FAILED')
               OR (requested_delivery_date<=CURRENT_DATE AND status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')))
             """,account)) {
@@ -32,7 +32,7 @@ public class WorkspaceNotificationService {
             String key="ORDER:"+id;active.add(key);
             put(account,key,"TASK",(unknown?"주문 접수 확인 요망 · ":"입고 확인 요망 · ")+order.get("requested_delivery_date"),"/order_manager/orders",status+"|"+order.get("requested_delivery_date"));
         }
-        for(var meal:jdbc.queryForList("SELECT meal_service_id,meal_slot,meal_date FROM the_full_order.tb_account_meal_service WHERE account_id=? AND meal_date=CURRENT_DATE AND status='DRAFT'",account)) {
+        for(var meal:jdbc.queryForList("SELECT meal_service_id,meal_slot,meal_date FROM tb_account_meal_service WHERE account_id=? AND meal_date=CURRENT_DATE AND status='DRAFT'",account)) {
             String key="MEAL:"+meal.get("meal_service_id");active.add(key);
             put(account,key,"TASK","오늘 실제 사용 확인 · "+meal.get("meal_slot"),"/operations/table-meals",meal.get("meal_date").toString());
         }
@@ -44,12 +44,12 @@ public class WorkspaceNotificationService {
             String title=Objects.toString(row.get("ingredient_name"))+" · "+row.get("needed_by")+" 부족·확인 필요 "+row.get("shortage_qty")+" "+row.get("base_unit");
             put(account,key,"TASK",title,"/order_manager/recommended",row.get("shortage_qty")+"|"+row.get("issues"));
         }
-        for(var row:jdbc.queryForList("SELECT event_key FROM the_full_order.tb_workspace_notification WHERE account_id=? AND event_type='TASK' AND status<>'RESOLVED'",account))
-            if(!active.contains(row.get("event_key"))) jdbc.update("UPDATE the_full_order.tb_workspace_notification SET status='RESOLVED',actor_id='SYSTEM',updated_at=NOW() WHERE account_id=? AND event_key=?",account,row.get("event_key"));
+        for(var row:jdbc.queryForList("SELECT event_key FROM tb_workspace_notification WHERE account_id=? AND event_type='TASK' AND status<>'RESOLVED'",account))
+            if(!active.contains(row.get("event_key"))) jdbc.update("UPDATE tb_workspace_notification SET status='RESOLVED',actor_id='SYSTEM',updated_at=NOW() WHERE account_id=? AND event_key=?",account,row.get("event_key"));
         // 공급사 출고·주문 상태 알림은 해당 발주가 입고·미입고·취소로 끝나면 닫는다.
         jdbc.update("""
-            UPDATE the_full_order.tb_workspace_notification n
-            LEFT JOIN the_full_order.tb_account_purchase_order po ON po.account_id=n.account_id AND po.purchase_order_id=SUBSTRING(n.event_key,10)
+            UPDATE tb_workspace_notification n
+            LEFT JOIN tb_account_purchase_order po ON po.account_id=n.account_id AND po.purchase_order_id=SUBSTRING(n.event_key,10)
             SET n.status='RESOLVED',n.actor_id='SYSTEM',n.updated_at=NOW()
             WHERE n.account_id=? AND n.event_type='SUPPLIER_STATUS' AND n.status<>'RESOLVED'
               AND (po.purchase_order_id IS NULL OR po.status NOT IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED'))
@@ -62,7 +62,7 @@ public class WorkspaceNotificationService {
     }
     private void put(String account,String key,String type,String title,String path,String facts) {
         jdbc.update("""
-            INSERT INTO the_full_order.tb_workspace_notification(account_id,event_key,event_type,fingerprint,title,action_path)
+            INSERT INTO tb_workspace_notification(account_id,event_key,event_type,fingerprint,title,action_path)
             VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE
               updated_at=IF(fingerprint<>VALUES(fingerprint) OR status='RESOLVED',NOW(),updated_at),
               actor_id=IF(fingerprint<>VALUES(fingerprint) OR status='RESOLVED',NULL,actor_id),
@@ -74,7 +74,7 @@ public class WorkspaceNotificationService {
     public void state(String account,String key,String fingerprint,String state,String actor) {
         if(!Set.of("IN_PROGRESS","OPEN","RESOLVED").contains(state)) throw new IllegalArgumentException("알림 처리 상태를 확인해주세요.");
         lock(account);
-        if(jdbc.update("UPDATE the_full_order.tb_workspace_notification SET status=?,actor_id=?,updated_at=NOW() WHERE account_id=? AND event_key=? AND fingerprint=? AND (event_type<>'TASK' OR ?<>'RESOLVED')",state,actor,account,key,fingerprint,state)==0)
+        if(jdbc.update("UPDATE tb_workspace_notification SET status=?,actor_id=?,updated_at=NOW() WHERE account_id=? AND event_key=? AND fingerprint=? AND (event_type<>'TASK' OR ?<>'RESOLVED')",state,actor,account,key,fingerprint,state)==0)
             throw new IllegalArgumentException("알림이 변경되었거나 아직 업무가 해결되지 않았습니다. 다시 조회해주세요.");
     }
     /**
@@ -86,7 +86,7 @@ public class WorkspaceNotificationService {
         lock(account);
         String fingerprint=hash(title+"|"+facts);
         jdbc.update("""
-            INSERT INTO the_full_order.tb_workspace_notification(account_id,event_key,event_type,fingerprint,title,action_path)
+            INSERT INTO tb_workspace_notification(account_id,event_key,event_type,fingerprint,title,action_path)
             VALUES(?,?,'SUPPLIER_STATUS',?,?,'/order_manager/orders') ON DUPLICATE KEY UPDATE
               updated_at=IF(fingerprint<>VALUES(fingerprint),NOW(),updated_at),
               actor_id=IF(fingerprint<>VALUES(fingerprint),NULL,actor_id),
@@ -98,7 +98,7 @@ public class WorkspaceNotificationService {
     /** 더 확인할 것이 없어진 공급사 상태 알림(예: 반영 지연으로 안 보이던 주문이 조회됨)을 닫는다. */
     @Transactional
     public void resolveSupplierStatus(String account,String orderId) {
-        jdbc.update("UPDATE the_full_order.tb_workspace_notification SET status='RESOLVED',actor_id='SYSTEM',updated_at=NOW() WHERE account_id=? AND event_key=? AND status<>'RESOLVED'",account,"SUPPLIER:"+orderId);
+        jdbc.update("UPDATE tb_workspace_notification SET status='RESOLVED',actor_id='SYSTEM',updated_at=NOW() WHERE account_id=? AND event_key=? AND status<>'RESOLVED'",account,"SUPPLIER:"+orderId);
     }
     @Transactional
     public void mealChanged(String account,String table,String actor) {

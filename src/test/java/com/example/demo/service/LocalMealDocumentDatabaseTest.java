@@ -25,9 +25,9 @@ class LocalMealDocumentDatabaseTest {
 	@Test
 	void buildsDocumentsFromSavedPlan() throws Exception {
 		List<Map<String, Object>> plans = jdbc.queryForList("""
-				SELECT t.account_id,t.table_id FROM the_full_order.tb_account_table_meals t
-				 WHERE EXISTS(SELECT 1 FROM the_full_order.tb_account_meal_service s WHERE s.table_id=t.table_id)
-				 ORDER BY (SELECT COUNT(*) FROM the_full_order.tb_account_table_meals_detail d WHERE d.table_id=t.table_id) DESC LIMIT 1""");
+				SELECT t.account_id,t.table_id FROM tb_account_table_meals t
+				 WHERE EXISTS(SELECT 1 FROM tb_account_meal_service s WHERE s.table_id=t.table_id)
+				 ORDER BY (SELECT COUNT(*) FROM tb_account_table_meals_detail d WHERE d.table_id=t.table_id) DESC LIMIT 1""");
 		if (plans.isEmpty()) return;
 		String account = plans.get(0).get("account_id").toString(), table = plans.get(0).get("table_id").toString();
 		Path dir = Path.of("build", "meal-documents");
@@ -42,7 +42,7 @@ class LocalMealDocumentDatabaseTest {
 
 	@Test
 	void printsErpMealTimes() {
-		for (String account : jdbc.queryForList("SELECT DISTINCT account_id FROM the_full_order.tb_account_meal_slot_setting ORDER BY account_id LIMIT 40", String.class))
+		for (String account : jdbc.queryForList("SELECT DISTINCT account_id FROM tb_account_meal_slot_setting ORDER BY account_id LIMIT 40", String.class))
 			System.out.println("[ERP 끼니 시간] " + account + " " + erp.mealTimes(account));
 	}
 }

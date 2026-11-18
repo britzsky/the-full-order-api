@@ -43,9 +43,18 @@ public class WelstoryCatalogSyncService {
 		this.siteService = siteService;
 	}
 
-	/** 웰스토리 전체 사업장을 사업장 마스터에만 저장한다. 거래처 연결은 사업장 매핑에서 따로 지정한다. */
+	/**
+	 * 웰스토리 전체 사업장을 사업장 마스터에만 저장한다. 거래처 연결은 사업장 매핑에서 따로 지정한다.
+	 * 웰스토리 계정이 둘(법인·개인)이면 계정마다 목록을 받아 합치고, 각 사업장이 어느 계정 소속인지 api에 알려 준다.
+	 */
 	public Map<String, Object> syncSites(Map<String, Object> command) {
-		List<JsonNode> rows = fetchPaged("/fdapi/service/payer-rep-soldto", objectMapper.createObjectNode());
+		List<JsonNode> rows = new ArrayList<>();
+		for (String clientKey : api.clientKeys()) {
+			List<JsonNode> clientRows = fetchPaged(clientKey, "/fdapi/service/payer-rep-soldto",
+					objectMapper.createObjectNode());
+			api.rememberSoldTos(clientKey, clientRows.stream().map(row -> first(row, "soldTo", "solTo")).toList());
+			rows.addAll(clientRows);
+		}
 		List<Map<String, Object>> sites = new ArrayList<>();
 		for (JsonNode row : rows) {
 			String soldTo = first(row, "soldTo", "solTo");
@@ -358,7 +367,13 @@ public class WelstoryCatalogSyncService {
 		return true;
 	}
 
+	/** 사업장 코드(body.soldTo)로 계정을 골라 페이지 끝까지 받는다. */
 	private List<JsonNode> fetchPaged(String path, ObjectNode body) {
+		return fetchPaged(null, path, body);
+	}
+
+	/** clientKey가 있으면 그 계정으로, null이면 사업장 코드로 계정을 골라 페이지 끝까지 받는다. */
+	private List<JsonNode> fetchPaged(String clientKey, String path, ObjectNode body) {
 		List<JsonNode> rows = new ArrayList<>();
 		String contYn = "Y", nextKey = "";
 		int pages = 0;
@@ -368,7 +383,7 @@ public class WelstoryCatalogSyncService {
 			ObjectNode request = objectMapper.createObjectNode();
 			request.putObject("dataHeader").put("pageRow", PAGE_SIZE).put("contYn", contYn).put("nextKey", nextKey);
 			request.set("dataBody", body.deepCopy());
-			JsonNode response = api.call(path, request);
+			JsonNode response = clientKey == null ? api.call(path, request) : api.callWith(clientKey, path, request);
 			JsonNode responseBody = response.path("dataBody");
 			String code = responseBody.path("resCd").asText("");
 			if (!code.isBlank() && !"S0000".equals(code)) {
