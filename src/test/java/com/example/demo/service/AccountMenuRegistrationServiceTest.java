@@ -93,10 +93,19 @@ class AccountMenuRegistrationServiceTest {
         verify(recipeMapper).upsertIngredient(argThat(r -> "궁채".equals(r.get("ingredient_name_std")) && "g".equals(r.get("base_unit"))));
     }
 
-    @Test void importStandardRefusesMenuWithoutRecipe() {
-        when(mapper.standardMenu(anyMap())).thenReturn(Map.of("menu_id", "TMENU1", "menu_name", "잡곡밥", "del_yn", "N"));
-        assertThatThrownBy(() -> service.importStandard(Map.of("account_id", "A", "menu_id", "TMENU1"))).hasMessageContaining("식재료가 없어");
-        verify(recipeMapper, never()).upsertMenu(anyMap());
+    /** 2026-11-23: 본사 레시피가 없는 메뉴(완제품·소스 등)도 거래처 메뉴로는 만든다(레시피 줄은 없음). 식단 저장 검사가 이름을 알려 준다 */
+    @Test void importStandardCreatesMenuEvenWithoutRecipe() {
+        when(mapper.standardMenu(anyMap())).thenReturn(Map.of("menu_id", "TMENU1", "menu_name", "요구르트", "del_yn", "N"));
+        service.importStandard(Map.of("account_id", "A", "menu_id", "TMENU1"));
+        verify(recipeMapper).upsertMenu(argThat(m -> "요구르트".equals(m.get("menu_name"))));
+        verify(recipeMapper, never()).insertRecipeDetail(anyMap());
+    }
+
+    @Test void noRecipeFlagImportsStandardMenuFirstWhenMissing() {
+        when(mapper.standardMenu(anyMap())).thenReturn(Map.of("menu_id", "TMENU1", "menu_name", "물", "del_yn", "N"));
+        service.setNoRecipe(Map.of("account_id", "A", "menu_id", "TMENU1", "no_recipe_yn", "Y"));
+        verify(recipeMapper).upsertMenu(anyMap());
+        verify(mapper).updateAccountMenuNoRecipe(argThat(m -> "Y".equals(m.get("no_recipe_yn")) && "TMENU1".equals(m.get("menu_id"))));
     }
 
     @Test void resetToStandardReplacesAccountRecipeWithStandard() {

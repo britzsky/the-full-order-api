@@ -32,11 +32,12 @@ public class MealPlanImpactService {
         var orders=jdbc.queryForList("""
             SELECT p.purchase_order_id,p.requested_delivery_date,p.status,
               NULLIF(i.source_ingredient_id,'') ingredient_id,
-              i.product_name_snapshot product_name,GREATEST(i.order_qty-COALESCE(i.received_order_qty,0),0) remaining_order_qty,
+              i.product_name_snapshot product_name,GREATEST(i.order_qty-COALESCE(i.received_order_qty,0)-COALESCE(i.shortage_order_qty,0),0) remaining_order_qty,
               i.base_qty_per_order_unit,i.base_unit
             FROM tb_account_purchase_order p
             JOIN tb_account_purchase_order_item i ON i.purchase_order_id=p.purchase_order_id
             WHERE p.account_id=? AND p.status NOT IN ('CANCELED','FAILED','RECEIVED') AND i.item_status NOT IN ('CANCELED','FAILED','RECEIVED')
+              AND (i.shortage_order_qty=0 OR i.order_qty>i.received_order_qty+i.shortage_order_qty)
             ORDER BY p.requested_delivery_date,p.purchase_order_id LIMIT 1000
             """,p.get("account_id"));
         var ids=new HashSet<String>();for(var c:changes) ids.add(c.get("ingredient_id").toString());

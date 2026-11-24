@@ -17,10 +17,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class ReceiptPostingService {
 	private final SupplierIntegrationMapper mapper;
 	private final OrderWorkflowMapper orders;
+	private final PurchasePriceBasis priceBasis;
 
 	public ReceiptPostingService(SupplierIntegrationMapper mapper, OrderWorkflowMapper orders) {
+		this(mapper, orders, PurchasePriceBasis.excludingVat());
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired
+	public ReceiptPostingService(SupplierIntegrationMapper mapper, OrderWorkflowMapper orders, PurchasePriceBasis priceBasis) {
 		this.mapper = mapper;
 		this.orders = orders;
+		this.priceBasis = priceBasis;
 	}
 
 	@Transactional
@@ -66,9 +73,16 @@ public class ReceiptPostingService {
 			row.put("user_id", payload.path("user_id").asText(""));
 			row.put("location_id", item.path("location_id").asText(text(row.get("default_location_id"))));
 			row.put("unit_price", row.get("unit_price_snapshot"));
-			row.put("supply_amount", qty.multiply(number(row.get("unit_price_snapshot"))));
-			row.put("vat_amount", BigDecimal.ZERO);
-			row.put("total_amount", row.get("supply_amount"));
+			// ASP(2026-11-23): 발주 단가·과세 구분으로 공급가·부가세를 추정해 두고, 공급사 청구 내역이 오면 공급사 금액으로 바꾼다.
+			String taxType = taxType(row);
+			var amounts = PurchaseAmounts.estimate(qty, number(row.get("unit_price_snapshot")), taxType,
+					priceBasis.includesVat(row.get("supplier_code")));
+			row.put("tax_type", taxType);
+			row.put("supply_amount", amounts.supply());
+			row.put("vat_amount", amounts.vat());
+			row.put("total_amount", amounts.total());
+			row.put("amount_source", "ORDER_ESTIMATE");
+			row.put("amount_check_status", "UNCHECKED");
 			row.put("provider_attributes", item.toString());
 			// 상품만 발주한 줄: 입고할 때 재고에 넣을 식재료(와 필요하면 1포장당 식재료 수량)를 고른다.
 			if (item.hasNonNull("ingredient_id") && !item.path("ingredient_id").asText().isBlank())
@@ -88,8 +102,11 @@ public class ReceiptPostingService {
 		row.put("lock_rows", true);
 		Map<String, Object> prior = orders.receiptItem(row);
 		if (prior != null) {
+			// 공급사 청구로 금액을 바꾼 줄(SUPPLIER)은 수량만 비교한다(같은 입고 재요청이 금액 차이로 막히지 않게)
+			boolean supplierAmount = "SUPPLIER".equals(text(prior.get("amount_source")))
+					&& prior.get("amount_check_status") != null;
 			if (number(prior.get("received_qty")).compareTo(number(row.get("received_qty"))) != 0
-					|| number(prior.get("supply_amount")).compareTo(number(row.get("supply_amount"))) != 0)
+					|| (!supplierAmount && number(prior.get("supply_amount")).compareTo(number(row.get("supply_amount"))) != 0))
 				throw new IllegalArgumentException("기존 입고와 수량·금액이 다릅니다. 입고 정정 대사가 필요합니다.");
 			return false;
 		}
@@ -99,9 +116,13 @@ public class ReceiptPostingService {
 				.filter(l -> text(l.get("purchase_order_item_id")).equals(text(row.get("purchase_order_item_id"))))
 				.findFirst().orElseThrow(() -> new IllegalArgumentException("입고 품목 연결이 없습니다."));
 		BigDecimal qty = number(row.get("received_qty"));
+		// 결품으로 닫은 수량은 더 들어올 수 없다(결품이 없으면 shortage_order_qty=0이라 기존과 같다)
+		BigDecimal shortage = current.get("shortage_order_qty") == null ? BigDecimal.ZERO : number(current.get("shortage_order_qty"));
 		if (qty.signum() <= 0
-				|| qty.add(number(current.get("received_order_qty"))).compareTo(number(current.get("order_qty"))) > 0)
-			throw new IllegalArgumentException("입고량이 주문 잔량을 초과합니다. 초과입고 대사가 필요합니다.");
+				|| qty.add(number(current.get("received_order_qty"))).add(shortage).compareTo(number(current.get("order_qty"))) > 0)
+			throw new IllegalArgumentException(shortage.signum() > 0
+					? "입고량이 결품 처리분을 뺀 주문 잔량을 초과합니다. 결품 취소 후 입고하세요: " + text(current.get("product_name"))
+					: "입고량이 주문 잔량을 초과합니다. 초과입고 대사가 필요합니다.");
 		BigDecimal conversion = number(current.get("base_qty_per_order_unit"));
 		// 재고 식재료와 환산값은 저장된 발주 품목에서만 가져온다(공급사 응답 값은 쓰지 않음). 식재료가 없으면 입고할 수 없다.
 		if (text(current.get("ingredient_id")).isBlank())
@@ -154,7 +175,22 @@ public class ReceiptPostingService {
 		mapper.addReceivedOrderQty(row);
 		mapper.refreshPurchaseOrderReceiptStatus(row);
 		orders.refreshReceipt(row);
+		// 입고 머리 합계는 첫 줄 금액으로만 만들어지므로(INSERT IGNORE) 줄을 넣을 때마다 다시 합친다
+		mapper.refreshReceiptTotals(row);
 		return true;
+	}
+
+	/** 발주 당시 상품 조건(스냅샷)의 과세 구분, 없으면 상품 마스터 값 */
+	static String taxType(Map<String, Object> line) {
+		try {
+			var snapshot = new com.fasterxml.jackson.databind.ObjectMapper().readTree(text(line.get("product_snapshot")));
+			String fromSnapshot = PurchaseAmounts.taxType(snapshot.path("tax_type").asText(""));
+			if (fromSnapshot != null)
+				return fromSnapshot;
+		} catch (Exception ignored) {
+			// 스냅샷이 없는 옛 발주
+		}
+		return PurchaseAmounts.taxType(line.get("product_tax_type"));
 	}
 
 	/**

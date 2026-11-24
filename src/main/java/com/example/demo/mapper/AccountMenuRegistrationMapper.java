@@ -17,6 +17,8 @@ public interface AccountMenuRegistrationMapper {
 
 	Map<String, Object> standardMenu(Map<String, Object> p);
 
+	int updateAccountMenuNoRecipe(Map<String, Object> p);
+
 	List<Map<String, Object>> standardRecipe(Map<String, Object> p);
 
 	List<Map<String, Object>> activeStandardMenus(Map<String, Object> p);

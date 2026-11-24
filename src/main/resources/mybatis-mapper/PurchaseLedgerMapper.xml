@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  매입 관리(ASP, 2026-11-23, 본사 전용).
+  매입 줄 = tb_goods_receipt_item. 출처(source): ORDER = 우리 발주 입고(purchase_order_id 있음), DIRECT = 발주서 없이 산 것(UNMATCHED),
+  HISTORY = 재고 시작일 전 구매 이력. 금액 출처(amount_source): ORDER_ESTIMATE = 발주 단가로 추정, SUPPLIER = 공급사 금액.
+  공급사 청구 줄(tb_supplier_bill_line)은 발주 입고 대조용이라 합계에 더하지 않는다.
+-->
+<mapper namespace="com.example.demo.mapper.PurchaseLedgerMapper">
+  <sql id="sourceExpr">CASE WHEN r.purchase_order_id IS NOT NULL THEN 'ORDER' WHEN r.status='HISTORY' THEN 'HISTORY' ELSE 'DIRECT' END</sql>
+  <sql id="ledgerFrom">
+      FROM tb_goods_receipt_item i
+      JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+      JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+  </sql>
+  <sql id="ledgerWhere">
+     WHERE r.receipt_date&gt;=#{from_date} AND r.receipt_date&lt;=#{to_date}
+     <if test="account_id!=null and account_id!=''">AND r.account_id=#{account_id}</if>
+     <if test="supplier_id!=null and supplier_id!=''">AND r.supplier_id=#{supplier_id}</if>
+     <if test="source=='ORDER'">AND r.purchase_order_id IS NOT NULL</if>
+     <if test="source=='DIRECT'">AND r.purchase_order_id IS NULL AND r.status&lt;&gt;'HISTORY'</if>
+     <if test="source=='HISTORY'">AND r.purchase_order_id IS NULL AND r.status='HISTORY'</if>
+     <if test="tax_type=='TAXABLE' or tax_type=='TAX_FREE'">AND i.tax_type=#{tax_type}</if>
+     <if test="tax_type=='UNKNOWN'">AND i.tax_type IS NULL</if>
+     <if test="check_status=='ESTIMATE'">AND i.amount_source='ORDER_ESTIMATE'</if>
+     <if test="check_status=='UNCHECKED' or check_status=='MATCHED' or check_status=='PRICE_DIFF' or check_status=='QTY_DIFF'">AND i.amount_check_status=#{check_status}</if>
+     <if test="check_status=='DIFF'">AND i.amount_check_status IN ('PRICE_DIFF','QTY_DIFF')</if>
+     <if test="keyword!=null and keyword!=''">
+       AND EXISTS (SELECT 1 FROM tb_supplier_ingredient_product kp WHERE kp.supplier_product_id=i.supplier_product_id
+                   AND (kp.product_name LIKE CONCAT('%',#{keyword},'%') OR kp.supplier_item_code=#{keyword}))
+     </if>
+  </sql>
+  <sql id="amountColumns">
+           COUNT(*) line_count,
+           COALESCE(SUM(i.supply_amount),0) supply_amount,COALESCE(SUM(i.vat_amount),0) vat_amount,COALESCE(SUM(i.total_amount),0) total_amount,
+           COALESCE(SUM(CASE WHEN i.tax_type='TAXABLE' THEN i.supply_amount END),0) taxable_supply_amount,
+           COALESCE(SUM(CASE WHEN i.tax_type='TAXABLE' THEN i.vat_amount END),0) taxable_vat_amount,
+           COALESCE(SUM(CASE WHEN i.tax_type='TAX_FREE' THEN i.supply_amount END),0) tax_free_supply_amount,
+           COALESCE(SUM(CASE WHEN i.tax_type IS NULL THEN i.supply_amount END),0) unknown_tax_supply_amount,
+           COALESCE(SUM(CASE WHEN r.purchase_order_id IS NOT NULL THEN i.total_amount END),0) order_total_amount,
+           COALESCE(SUM(CASE WHEN r.purchase_order_id IS NULL AND r.status&lt;&gt;'HISTORY' THEN i.total_amount END),0) direct_total_amount,
+           COALESCE(SUM(CASE WHEN r.purchase_order_id IS NULL AND r.status='HISTORY' THEN i.total_amount END),0) history_total_amount,
+           COALESCE(SUM(CASE WHEN i.amount_source='ORDER_ESTIMATE' THEN 1 ELSE 0 END),0) estimate_line_count,
+           COALESCE(SUM(CASE WHEN i.amount_check_status='UNCHECKED' THEN 1 ELSE 0 END),0) unchecked_line_count,
+           COALESCE(SUM(CASE WHEN i.amount_check_status='PRICE_DIFF' THEN 1 ELSE 0 END),0) price_diff_line_count,
+           COALESCE(SUM(CASE WHEN i.amount_check_status='QTY_DIFF' THEN 1 ELSE 0 END),0) qty_diff_line_count
+  </sql>
+
+  <select id="summary" parameterType="map" resultType="hashmap">
+    SELECT g.*,
+           <choose>
+             <when test="group_by=='account'">(SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=g.group_key LIMIT 1)</when>
+             <when test="group_by=='supplier'">(SELECT su.supplier_name FROM tb_supplier su WHERE su.supplier_id=g.group_key)</when>
+             <otherwise>g.group_key</otherwise>
+           </choose> group_name
+      FROM (
+    SELECT <choose>
+             <when test="group_by=='account'">r.account_id</when>
+             <when test="group_by=='month'">DATE_FORMAT(r.receipt_date,'%Y-%m')</when>
+             <when test="group_by=='day'">DATE_FORMAT(r.receipt_date,'%Y-%m-%d')</when>
+             <otherwise>CAST(r.supplier_id AS CHAR)</otherwise>
+           </choose> group_key,
+           <include refid="amountColumns"/>
+      <include refid="ledgerFrom"/>
+      <include refid="ledgerWhere"/>
+     GROUP BY group_key
+      ) g
+     ORDER BY <choose><when test="group_by=='month' or group_by=='day'">g.group_key</when><otherwise>g.total_amount DESC,g.group_key</otherwise></choose>
+  </select>
+
+  <select id="totals" parameterType="map" resultType="hashmap">
+    SELECT <include refid="amountColumns"/>
+      <include refid="ledgerFrom"/>
+      <include refid="ledgerWhere"/>
+  </select>
+
+  <select id="lines" parameterType="map" resultType="hashmap">
+    SELECT i.goods_receipt_item_id,i.goods_receipt_id,DATE_FORMAT(r.receipt_date,'%Y-%m-%d') receipt_date,r.status receipt_status,
+           <include refid="sourceExpr"/> source,
+           r.account_id,(SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=r.account_id LIMIT 1) account_name,
+           s.supplier_id,s.supplier_code,s.supplier_name,ss.external_site_code site_code,ss.external_site_name site_name,
+           r.purchase_order_id,po.client_ord,oi.client_ord_item,
+           p.supplier_item_code,COALESCE(oi.product_name_snapshot,p.product_name) product_name,
+           i.received_qty,i.order_unit,i.unit_price,i.supply_amount,i.vat_amount,i.total_amount,
+           i.tax_type,i.amount_source,i.amount_check_status,DATE_FORMAT(i.amount_checked_at,'%Y-%m-%d %H:%i') amount_checked_at,
+           (SELECT COALESCE(SUM(b.supply_amount),0) FROM tb_supplier_bill_line b WHERE b.purchase_order_item_id=i.purchase_order_item_id
+             AND i.purchase_order_item_id IS NOT NULL) bill_supply_amount,
+           (SELECT COALESCE(SUM(b.billed_qty),0) FROM tb_supplier_bill_line b WHERE b.purchase_order_item_id=i.purchase_order_item_id
+             AND i.purchase_order_item_id IS NOT NULL) bill_qty,
+           i.ingredient_id,COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,
+           (SELECT COUNT(*) FROM tb_purchase_tax_invoice_line tl WHERE tl.goods_receipt_item_id=i.goods_receipt_item_id) invoice_linked
+      <include refid="ledgerFrom"/>
+      LEFT JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
+      LEFT JOIN tb_supplier_account_site ss ON ss.supplier_account_site_id=r.supplier_account_site_id
+      LEFT JOIN tb_account_purchase_order po ON po.purchase_order_id=r.purchase_order_id
+      LEFT JOIN tb_account_purchase_order_item oi ON oi.purchase_order_item_id=i.purchase_order_item_id
+      LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=i.ingredient_id
+      <include refid="ledgerWhere"/>
+     ORDER BY r.receipt_date DESC,s.supplier_id,r.goods_receipt_id,i.goods_receipt_item_id
+     LIMIT #{limit} OFFSET #{offset}
+  </select>
+  <select id="lineCount" parameterType="map" resultType="long">
+    SELECT COUNT(*) <include refid="ledgerFrom"/> <include refid="ledgerWhere"/>
+  </select>
+
+  <!-- 대조 -->
+  <select id="billTotals" parameterType="map" resultType="hashmap">
+    SELECT b.purchase_order_item_id,COUNT(*) bill_line_count,SUM(b.billed_qty) billed_qty,SUM(b.supply_amount) supply_amount,
+           SUM(b.vat_amount) vat_amount,SUM(b.total_amount) total_amount,
+           CASE WHEN COUNT(DISTINCT b.tax_type)=1 THEN MAX(b.tax_type) END tax_type
+      FROM tb_supplier_bill_line b
+     WHERE b.purchase_order_item_id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+     GROUP BY b.purchase_order_item_id
+  </select>
+  <select id="orderReceiptItems" parameterType="map" resultType="hashmap">
+    SELECT i.goods_receipt_item_id,i.goods_receipt_id,i.purchase_order_item_id,i.received_qty,i.unit_price,
+           i.supply_amount,i.vat_amount,i.total_amount,i.tax_type,i.amount_source,s.supplier_code
+      FROM tb_goods_receipt_item i
+      JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+      JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+     WHERE i.purchase_order_item_id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+     ORDER BY i.purchase_order_item_id,i.goods_receipt_item_id
+     FOR UPDATE
+  </select>
+  <update id="applyCheck" parameterType="map">
+    UPDATE tb_goods_receipt_item
+       SET <if test="supply_amount!=null">supply_amount=#{supply_amount},vat_amount=#{vat_amount},total_amount=#{total_amount},amount_source='SUPPLIER',</if>
+           tax_type=COALESCE(#{tax_type,jdbcType=VARCHAR},tax_type),
+           amount_check_status=#{amount_check_status},amount_checked_at=NOW()
+     WHERE goods_receipt_item_id=#{goods_receipt_item_id}
+  </update>
+  <update id="refreshReceiptTotals" parameterType="map">
+    UPDATE tb_goods_receipt r
+       SET total_supply_amount=(SELECT COALESCE(SUM(i.supply_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_vat=(SELECT COALESCE(SUM(i.vat_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_amount=(SELECT COALESCE(SUM(i.total_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id)
+     WHERE r.goods_receipt_id=#{goods_receipt_id}
+  </update>
+  <select id="billedOrderItems" parameterType="map" resultType="long">
+    SELECT DISTINCT b.purchase_order_item_id FROM tb_supplier_bill_line b
+     WHERE b.purchase_order_item_id IS NOT NULL AND b.bill_date&gt;=#{from_date} AND b.bill_date&lt;=#{to_date}
+     <if test="account_id!=null and account_id!=''">AND b.account_id=#{account_id}</if>
+  </select>
+
+  <!-- 단가 기준 확인. 과세 줄만(면세는 포함·별도 차이가 없음). 1원 이하 차이는 같은 것으로 본다 -->
+  <select id="priceCheckOrders" parameterType="map" resultType="hashmap">
+    SELECT s.supplier_id,s.supplier_code,s.supplier_name,COUNT(*) line_count,
+           SUM(CASE WHEN ABS(oi.unit_price_snapshot*b.billed_qty-b.supply_amount)&lt;=1 THEN 1 ELSE 0 END) excludes_vat_count,
+           SUM(CASE WHEN ABS(oi.unit_price_snapshot*b.billed_qty-b.supply_amount)&gt;1 AND ABS(oi.unit_price_snapshot*b.billed_qty-b.total_amount)&lt;=1 THEN 1 ELSE 0 END) includes_vat_count
+      FROM tb_supplier_bill_line b
+      JOIN tb_account_purchase_order_item oi ON oi.purchase_order_item_id=b.purchase_order_item_id
+      JOIN tb_supplier s ON s.supplier_id=b.supplier_id
+     WHERE b.bill_date&gt;=#{from_date} AND b.bill_date&lt;=#{to_date} AND b.billed_qty&gt;0 AND b.vat_amount&gt;0
+     <if test="account_id!=null and account_id!=''">AND b.account_id=#{account_id}</if>
+     GROUP BY s.supplier_id,s.supplier_code,s.supplier_name
+  </select>
+  <select id="priceCheckHistory" parameterType="map" resultType="hashmap">
+    SELECT s.supplier_id,s.supplier_code,s.supplier_name,COUNT(*) line_count,
+           SUM(CASE WHEN ABS(i.unit_price*i.received_qty-i.supply_amount)&lt;=1 THEN 1 ELSE 0 END) excludes_vat_count,
+           SUM(CASE WHEN ABS(i.unit_price*i.received_qty-i.supply_amount)&gt;1 AND ABS(i.unit_price*i.received_qty-i.total_amount)&lt;=1 THEN 1 ELSE 0 END) includes_vat_count
+      FROM tb_goods_receipt_item i
+      JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+      JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+     WHERE r.purchase_order_id IS NULL AND i.amount_source='SUPPLIER' AND i.received_qty&gt;0 AND i.vat_amount&gt;0
+       AND r.receipt_date&gt;=#{from_date} AND r.receipt_date&lt;=#{to_date}
+     <if test="account_id!=null and account_id!=''">AND r.account_id=#{account_id}</if>
+     GROUP BY s.supplier_id,s.supplier_code,s.supplier_name
+  </select>
+  <select id="priceCheckSamples" parameterType="map" resultType="hashmap">
+    SELECT s.supplier_code,s.supplier_name,DATE_FORMAT(b.bill_date,'%Y-%m-%d') bill_date,b.account_id,b.client_ord,b.client_ord_item,
+           b.supplier_item_code,COALESCE(oi.product_name_snapshot,'') product_name,b.billed_qty,
+           oi.unit_price_snapshot order_unit_price,b.unit_price bill_unit_price,b.supply_amount,b.vat_amount,b.total_amount
+      FROM tb_supplier_bill_line b
+      JOIN tb_account_purchase_order_item oi ON oi.purchase_order_item_id=b.purchase_order_item_id
+      JOIN tb_supplier s ON s.supplier_id=b.supplier_id
+     WHERE b.bill_date&gt;=#{from_date} AND b.bill_date&lt;=#{to_date} AND b.billed_qty&gt;0
+       AND ABS(oi.unit_price_snapshot*b.billed_qty-b.supply_amount)&gt;1 AND ABS(oi.unit_price_snapshot*b.billed_qty-b.total_amount)&gt;1
+     <if test="account_id!=null and account_id!=''">AND b.account_id=#{account_id}</if>
+     ORDER BY b.bill_date DESC,b.supplier_bill_line_id DESC LIMIT 30
+  </select>
+  <select id="unlinkedBillLines" parameterType="map" resultType="hashmap">
+    SELECT s.supplier_code,s.supplier_name,DATE_FORMAT(b.bill_date,'%Y-%m-%d') bill_date,b.account_id,b.client_ord,b.client_ord_item,
+           b.supplier_item_code,b.billed_qty,b.supply_amount,b.vat_amount,b.total_amount
+      FROM tb_supplier_bill_line b JOIN tb_supplier s ON s.supplier_id=b.supplier_id
+     WHERE b.purchase_order_item_id IS NULL AND b.bill_date&gt;=#{from_date} AND b.bill_date&lt;=#{to_date}
+     <if test="account_id!=null and account_id!=''">AND b.account_id=#{account_id}</if>
+     ORDER BY b.bill_date DESC LIMIT 100
+  </select>
+  <select id="billedNotReceived" parameterType="map" resultType="hashmap">
+    SELECT s.supplier_code,s.supplier_name,b.account_id,po.client_ord,oi.client_ord_item,oi.purchase_order_item_id,
+           COALESCE(oi.product_name_snapshot,'') product_name,oi.item_status,
+           DATE_FORMAT(MAX(b.bill_date),'%Y-%m-%d') bill_date,SUM(b.billed_qty) billed_qty,SUM(b.total_amount) total_amount
+      FROM tb_supplier_bill_line b
+      JOIN tb_account_purchase_order_item oi ON oi.purchase_order_item_id=b.purchase_order_item_id
+      JOIN tb_account_purchase_order po ON po.purchase_order_id=oi.purchase_order_id
+      JOIN tb_supplier s ON s.supplier_id=b.supplier_id
+     WHERE b.bill_date&gt;=#{from_date} AND b.bill_date&lt;=#{to_date}
+       AND NOT EXISTS (SELECT 1 FROM tb_goods_receipt_item gi WHERE gi.purchase_order_item_id=b.purchase_order_item_id)
+     <if test="account_id!=null and account_id!=''">AND b.account_id=#{account_id}</if>
+     GROUP BY s.supplier_code,s.supplier_name,b.account_id,po.client_ord,oi.client_ord_item,oi.purchase_order_item_id,oi.product_name_snapshot,oi.item_status
+     HAVING SUM(b.billed_qty)&lt;&gt;0
+     ORDER BY bill_date DESC LIMIT 100
+  </select>
+</mapper>

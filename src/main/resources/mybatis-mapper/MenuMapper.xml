@@ -388,6 +388,11 @@
                   JOIN tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
                  WHERE po.account_id=ai.account_id AND i.source_ingredient_id=ai.ingredient_id AND i.supplier_product_id IS NOT NULL
                  ORDER BY po.ordered_at DESC,po.purchase_order_id DESC LIMIT 1),
+               <!-- 구매 이력(공급사 사이트 등에서 산 입고)에서 이 식재료로 연결한 가장 최근 상품(2026-11-19) -->
+               (SELECT gi.supplier_product_id FROM tb_goods_receipt_item gi
+                  JOIN tb_goods_receipt gr ON gr.goods_receipt_id=gi.goods_receipt_id
+                 WHERE gr.account_id=ai.account_id AND gi.ingredient_id=ai.ingredient_id AND gi.received_qty&gt;0
+                 ORDER BY gr.receipt_date DESC,gi.goods_receipt_item_id DESC LIMIT 1),
                (SELECT sp.supplier_product_id FROM tb_supplier_ingredient_product sp
                  WHERE sp.ingredient_id=ai.ingredient_id AND sp.active_yn='Y'
                    AND EXISTS(SELECT 1 FROM tb_supplier_site_product_offer o

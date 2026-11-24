@@ -8,7 +8,9 @@
          COALESCE(i.ingredient_name_std,i.ingredient_name_raw,hai.ingredient_name_std,hai.ingredient_name_raw,hi.ingredient_name_std,hi.ingredient_name_raw,ar.ingredient_name_raw,hr.ingredient_name_raw) ingredient_name,
          COALESCE(i.base_unit,hai.base_unit,hi.base_unit) master_unit,COALESCE(ar.base_unit,hr.base_unit) base_unit,
          CASE WHEN COALESCE(ar.review_flag,hr.review_flag)=0 THEN COALESCE(ar.qty_per_person,hr.qty_per_person)*d.planned_servings END quantity,
-         COALESCE(m.menu_name,hm.menu_name) menu_name,d.menu_id,d.meal_date
+         COALESCE(m.menu_name,hm.menu_name,hq.menu_name) menu_name,d.menu_id,d.meal_date,
+         <!-- 레시피 없음 허용(거래처 메뉴 또는 본사 메뉴) — 레시피 없는 줄을 조용히 건너뛸지(2026-11-23) -->
+         CASE WHEN COALESCE(m.no_recipe_yn,'N')='Y' OR COALESCE(hq.no_recipe_yn,'N')='Y' THEN 'Y' ELSE 'N' END no_recipe_yn
     FROM (
       <foreach collection="draft_meals" item="meal" separator=" UNION ALL ">
        SELECT #{meal.menu_id} menu_id,#{meal.planned_servings} planned_servings,
@@ -23,6 +25,7 @@
     LEFT JOIN tb_ingredient_master hi ON hi.ingredient_id=hr.ingredient_id
     <!-- 저장 전 본사 메뉴도 이 거래처에 이미 있는 식재료면 거래처 기준단위로 센다(재고·발주가 그 단위, 2026-10-28) -->
     LEFT JOIN tb_account_ingredient_master hai ON hai.account_id=#{account_id} AND hai.ingredient_id=hr.ingredient_id
+    LEFT JOIN tb_menu_master hq ON hq.menu_id=d.menu_id
  </select>
  <!-- 이미 지난 날짜인데 아직 사용 확정하지 않은 식사(주 단위 확정 전). 실제로는 소비됐으므로 재고에서 뺀다.
       조회 기간(date_from 이후)은 demand에서 세므로 제외하고, 2주 넘게 방치된 식단은 계산하지 않는다. 식단표 필터와 무관하게 거래처 전체. -->
@@ -35,6 +38,17 @@
    WHERE ms.account_id=#{account_id} AND ms.status NOT IN ('CANCELED','COMPLETED') AND t.status&lt;&gt;'CANCELED'
      AND ms.meal_date&lt;CURRENT_DATE AND ms.meal_date&gt;=DATE_SUB(CURRENT_DATE,INTERVAL 14 DAY) AND ms.meal_date&lt;#{date_from}
  </select>
+ <!-- 조회 기간 전에 남은 식단(오늘~조회 시작일 전날)의 사용 예정량. 기간 안 부족량을 계산하기 전에 이만큼 재고를 먼저 쓴다.
+      주마다 식단표가 달라도 재고는 같이 쓰므로 table_id로 거르지 않는다. 지난 식사(unconfirmedUsage, 오늘 전)와 겹치지 않는다(2026-11-19) -->
+ <select id="upcomingUsage" resultType="map">
+  SELECT <include refid="ingredientColumns"/>,r.total_required_qty quantity,r.base_unit,ms.meal_date
+    FROM tb_account_meal_ingredient_requirement r
+    JOIN tb_account_meal_service ms ON ms.meal_service_id=r.meal_service_id
+    JOIN tb_account_table_meals t ON t.table_id=ms.table_id AND t.account_id=ms.account_id
+    JOIN tb_account_ingredient_master i ON i.account_id=ms.account_id AND i.ingredient_id=r.ingredient_id
+   WHERE ms.account_id=#{account_id} AND ms.status NOT IN ('CANCELED','COMPLETED') AND t.status&lt;&gt;'CANCELED'
+     AND ms.meal_date&gt;=CURRENT_DATE AND ms.meal_date&lt;#{date_from}
+ </select>
  <select id="demand" resultType="map">
   SELECT <include refid="ingredientColumns"/>,r.total_required_qty quantity,r.base_unit,ms.meal_date,m.menu_name
     FROM tb_account_meal_ingredient_requirement r
@@ -44,7 +58,8 @@
     LEFT JOIN tb_account_menu_master m ON m.account_id=ms.account_id AND m.menu_id=r.menu_id
    WHERE ms.account_id=#{account_id} AND ms.status NOT IN ('CANCELED','COMPLETED') AND t.status&lt;&gt;'CANCELED'
      AND ms.meal_date BETWEEN #{date_from} AND #{date_to}
-   <if test="table_id!=null and table_id!=''">AND ms.table_id=#{table_id}</if>
+   <!-- all_tables=Y(발주하기의 납품일 기준 기간): 기간이 이번 주·다음 주 식단표에 걸쳐도 날짜로만 센다(한 주 식단표는 하나, 재고는 같이 씀). 없으면 고른 식단표만 -->
+   <if test='table_id!=null and table_id!="" and (all_tables==null or all_tables!="Y")'>AND ms.table_id=#{table_id}</if>
  </select>
  <!-- 식재료별 사용 가능 재고(격리·반품·유통기한 지난 LOT 제외) -->
  <select id="stock" resultType="map">
@@ -73,7 +88,7 @@
  <!-- 입고 예정: 재고에 넣을 식재료가 정해진 발주 품목만(상품만 발주한 줄은 입고 때 식재료를 정하므로 여기서 세지 않는다) -->
  <select id="incoming" resultType="map">
   SELECT <include refid="ingredientColumns"/>,
-         GREATEST(oi.order_qty-COALESCE(oi.received_order_qty,0),0)*oi.base_qty_per_order_unit quantity,oi.base_unit,
+         GREATEST(oi.order_qty-COALESCE(oi.received_order_qty,0)-COALESCE(oi.shortage_order_qty,0),0)*oi.base_qty_per_order_unit quantity,oi.base_unit,
          po.requested_delivery_date delivery_date,po.status order_status,oi.item_status,
          po.purchase_order_id
     FROM tb_account_purchase_order po

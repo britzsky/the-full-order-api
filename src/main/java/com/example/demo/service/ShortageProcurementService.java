@@ -84,7 +84,11 @@ public class ShortageProcurementService {
 		BigDecimal demand = BigDecimal.ZERO, stock = BigDecimal.ZERO, incoming = BigDecimal.ZERO,
 				safety = BigDecimal.ZERO, history = BigDecimal.ZERO, unconfirmed = BigDecimal.ZERO;
 		Set<String> dates = new HashSet<>(), menus = new TreeSet<>(), issues = new LinkedHashSet<>();
-		NavigableMap<LocalDate,BigDecimal> demandByDate = new TreeMap<>(), incomingByDate = new TreeMap<>();
+		NavigableMap<LocalDate,BigDecimal> demandByDate = new TreeMap<>(), incomingByDate = new TreeMap<>(), priorByDate = new TreeMap<>();
+		/** 조회 기간 전에 남은 식단이 쓸 양(먼저 뺀다) */
+		BigDecimal prior = BigDecimal.ZERO;
+		/** 발주를 막지 않는 안내(기간 전 식단 부족 등) */
+		Set<String> notices = new LinkedHashSet<>();
 		BigDecimal pending = BigDecimal.ZERO, overdue = BigDecimal.ZERO;
 		Set<String> pendingOrders = new LinkedHashSet<>();
 
@@ -106,6 +110,7 @@ public class ShortageProcurementService {
 
 	public Map<String, Object> shortages(Map<String, Object> input) {
 		Map<String, Object> p = criteria(input);
+		Map<String, Map<String, Object>> missingRecipeMenus = new java.util.LinkedHashMap<>();
 		Map<String, Bucket> buckets = new TreeMap<>();
 		for (var row : mapper.targets(p)) {
 			Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
@@ -145,8 +150,13 @@ public class ShortageProcurementService {
 		if (Set.of("PLAN", "DRAFT").contains(source)) {
 			var demand = "DRAFT".equals(p.get("source")) ? mapper.draftDemand(p) : mapper.demand(p);
 			for (var row : demand) {
-				if (text(row.get("ingredient_id")).isBlank())
-					throw new IllegalArgumentException("레시피 없는 메뉴 · 필요량 계산 불가 · 레시피 등록 요망: " + text(row.get("menu_id")));
+				// 2026-11-23: 레시피 없는 메뉴 하나 때문에 부족량 조회 전체를 멈추지 않는다. 그 메뉴만 빼고 missing_recipe_menus로 알린다.
+				// '레시피 없음 허용'(no_recipe_yn=Y) 메뉴는 조용히 건너뛴다(발주·재고와 무관).
+				if (text(row.get("ingredient_id")).isBlank()) {
+					if (!"Y".equals(text(row.get("no_recipe_yn"))))
+						missingRecipeMenus.putIfAbsent(text(row.get("menu_id")), Map.of("menu_id", text(row.get("menu_id")), "menu_name", text(row.get("menu_name"))));
+					continue;
+				}
 				Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
 				if (row.get("quantity") == null || number(row.get("quantity")).signum() <= 0)
 					b.issues.add("레시피 1인분 수량·단위 확인 요망");
@@ -154,6 +164,15 @@ public class ShortageProcurementService {
 				b.demand = b.demand.add(quantity);
 				b.demandByDate.merge(rowDate(row.get("meal_date"),LocalDate.parse(text(p.get("date_from")))),quantity,BigDecimal::add);
 				b.menus.add(text(row.get("menu_name")));
+			}
+			// 조회 기간 전(오늘~시작일 전날)에 남은 식단이 쓸 재고를 먼저 뺀다. 안 빼면 앞날이 쓸 재고·입고를 이 기간도 쓸 수 있다고 봐서
+			// 하루씩 나눠 발주할 때 모자라게 나온다(2026-11-19). 식단표가 달라도 재고는 같이 쓰므로 모든 식단표.
+			for (var row : mapper.upcomingUsage(p)) {
+				if (text(row.get("ingredient_id")).isBlank()) continue;
+				Bucket b = buckets.computeIfAbsent(text(row.get("ingredient_id")), k -> new Bucket(row));
+				BigDecimal quantity = b.quantity(row);
+				b.prior = b.prior.add(quantity);
+				b.priorByDate.merge(rowDate(row.get("meal_date"),LocalDate.now()),quantity,BigDecimal::add);
 			}
 		} else if ("FAVORITE_MENU".equals(source)) {
 			if (text(p.get("favorite_owner_type")).isBlank()) throw new IllegalArgumentException("나만의 메뉴 주인 확인 요망");
@@ -199,18 +218,30 @@ public class ShortageProcurementService {
 			LocalDate delivery = LocalDate.parse(text(p.get("delivery_date")));
 			if ("INVENTORY".equals(p.get("source"))) b.demandByDate.put(delivery,b.demand);
 			BigDecimal available = b.stock.subtract(b.unconfirmed);
-			BigDecimal balance = available, shortage = BigDecimal.ZERO, lowest = available;
+			BigDecimal balance = available, shortage = BigDecimal.ZERO, lowest = null;
 			LocalDate neededBy = null;
+			// 식단 기준(PLAN·DRAFT)만: 조회 시작일 전 날짜는 앞날 식단 사용·입고로 잔량만 넘긴다(부족량에 넣지 않음)
+			LocalDate periodFrom = Set.of("PLAN", "DRAFT").contains(source) ? LocalDate.parse(text(p.get("date_from"))) : LocalDate.MIN;
 			Set<LocalDate> timeline = new TreeSet<>(b.demandByDate.keySet());
 			timeline.addAll(b.incomingByDate.keySet());
+			timeline.addAll(b.priorByDate.keySet());
 			if (timeline.isEmpty()) timeline.add(delivery);
 			for (LocalDate date : timeline) {
 				balance = balance.add(b.incomingByDate.getOrDefault(date,BigDecimal.ZERO))
-						.subtract(b.demandByDate.getOrDefault(date,BigDecimal.ZERO));
+						.subtract(b.demandByDate.getOrDefault(date,BigDecimal.ZERO))
+						.subtract(b.priorByDate.getOrDefault(date,BigDecimal.ZERO));
+				if (date.isBefore(periodFrom)) {
+					// 앞날 식단에서 이미 모자라면 그 날짜 발주로 채울 몫 — 이번 발주량에 섞지 않고 알린다
+					if (balance.signum() < 0) {
+						b.notices.add(date + " 식단에 이미 " + balance.negate().stripTrailingZeros().toPlainString() + b.unit + " 부족 · 그 날짜 발주 먼저 확인");
+						balance = BigDecimal.ZERO;
+					}
+					continue;
+				}
 				BigDecimal deficit = b.safety.subtract(balance).max(BigDecimal.ZERO);
 				if (deficit.signum()>0 && neededBy==null) neededBy=date;
 				shortage=shortage.max(deficit);
-				lowest=lowest.min(balance);
+				lowest=lowest==null ? balance : lowest.min(balance);
 				if (balance.signum()<0 && date.isBefore(delivery))
 					b.issues.add("필요일이 납품일보다 빠름 · 납품일자 확인 요망");
 			}
@@ -234,13 +265,15 @@ public class ShortageProcurementService {
 			row.put("current_qty", b.stock);
 			row.put("unconfirmed_usage_qty", b.unconfirmed);
 			row.put("available_qty", available);
+			row.put("prior_usage_qty", b.prior);
+			row.put("notices", b.notices);
 			row.put("incoming_qty", b.incoming);
 			row.put("pending_incoming_qty", b.pending);
 			row.put("overdue_incoming_qty", b.overdue);
 			row.put("pending_order_ids", b.pendingOrders);
 			row.put("needed_by", neededBy == null ? "" : neededBy.toString());
 			row.put("shortage_qty", shortage);
-			row.put("stock_status", manual ? "RED" : stockStatus(shortage, lowest));
+			row.put("stock_status", manual ? "RED" : stockStatus(shortage, lowest == null ? balance : lowest));
 			row.put("quantity_basis", manual ? "MANUAL" : "CALCULATED");
 			row.put("menu_names", b.menus);
 			row.put("issues", b.issues);
@@ -274,7 +307,7 @@ public class ShortageProcurementService {
 		}
 		rows.sort(Comparator.comparing(r -> text(r.get("ingredient_name"))));
 		return Map.of("criteria", p, "ingredients", rows, "unconfigured_count", unknown, "checked_at",
-				java.time.LocalDateTime.now().toString());
+				java.time.LocalDateTime.now().toString(), "missing_recipe_menus", new java.util.ArrayList<>(missingRecipeMenus.values()));
 	}
 
 	/**

@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  공급사 구매 이력 가져오기·단가 이력(2026-11-19).
+  저장 위치는 기존 입고 테이블. 발주서 없이(purchase_order_id NULL), 재고에 넣지 않는다(inventory_movement_id NULL).
+  status: HISTORY = 재고 시작일 전, UNMATCHED = 재고 시작일 후(공급사 사이트 등에서 직접 산 것). RECEIVED = 기존 발주서 입고.
+-->
+<mapper namespace="com.example.demo.mapper.PurchaseHistoryMapper">
+  <select id="inventoryStartDate" parameterType="map" resultType="string">
+    SELECT DATE_FORMAT(inventory_start_date,'%Y-%m-%d') FROM tb_account_inventory_setting WHERE account_id=#{account_id}
+  </select>
+  <insert id="saveInventorySetting" parameterType="map">
+    INSERT INTO tb_account_inventory_setting(account_id,inventory_start_date,user_id)
+    VALUES(#{account_id},#{inventory_start_date,jdbcType=DATE},#{user_id})
+    ON DUPLICATE KEY UPDATE inventory_start_date=VALUES(inventory_start_date),user_id=VALUES(user_id)
+  </insert>
+  <!-- 재고 시작일이 바뀌면 이미 가져온 이력도 다시 나눈다(발주서 입고 RECEIVED는 건드리지 않음) -->
+  <update id="reclassifyHistory" parameterType="map">
+    UPDATE tb_goods_receipt
+       SET status=CASE WHEN #{inventory_start_date,jdbcType=DATE} IS NULL OR receipt_date&lt;#{inventory_start_date,jdbcType=DATE} THEN 'HISTORY' ELSE 'UNMATCHED' END
+     WHERE account_id=#{account_id} AND purchase_order_id IS NULL AND status IN ('HISTORY','UNMATCHED')
+  </update>
+
+  <select id="importSites" parameterType="map" resultType="hashmap">
+    SELECT ss.supplier_account_site_id,ss.supplier_id,ss.external_site_code,ss.external_site_name,s.supplier_code,s.supplier_name
+      FROM tb_supplier_account_site ss JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
+     WHERE ss.account_id=#{account_id} AND ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
+     <if test="supplier_code!=null and supplier_code!=''">AND s.supplier_code=#{supplier_code}</if>
+     ORDER BY s.supplier_code,ss.external_site_code
+  </select>
+
+  <select id="purchaseOrderCount" parameterType="map" resultType="int">
+    SELECT COUNT(*) FROM tb_account_purchase_order
+     WHERE account_id=#{account_id} AND supplier_id=#{supplier_id} AND client_ord=#{client_ord}
+  </select>
+
+  <select id="productForHistory" parameterType="map" resultType="hashmap">
+    SELECT supplier_product_id,product_name,order_unit,base_qty,base_unit,alt_base_qty,alt_base_unit
+      FROM tb_supplier_ingredient_product WHERE supplier_id=#{supplier_id} AND supplier_item_code=#{supplier_item_code}
+  </select>
+  <select id="product" parameterType="map" resultType="hashmap">
+    SELECT supplier_product_id,supplier_id,supplier_item_code,product_name,order_unit,base_qty,base_unit,alt_base_qty,alt_base_unit
+      FROM tb_supplier_ingredient_product WHERE supplier_product_id=#{supplier_product_id}
+  </select>
+  <insert id="insertHistoryProduct" parameterType="map">
+    INSERT IGNORE INTO tb_supplier_ingredient_product
+      (supplier_id,ingredient_id,supplier_item_code,product_name,order_unit,package_qty,package_unit,base_qty,base_unit,
+       alt_base_qty,alt_base_unit,tax_type,active_yn,user_id)
+    VALUES(#{supplier_id},NULL,#{supplier_item_code},#{product_name},#{order_unit},#{base_qty},#{base_unit},#{base_qty},#{base_unit},
+       #{alt_base_qty},#{alt_base_unit},#{tax_type},'N',#{user_id})
+  </insert>
+
+  <insert id="upsertHistoryReceipt" parameterType="map">
+    INSERT INTO tb_goods_receipt
+      (goods_receipt_id,account_id,supplier_id,supplier_account_site_id,purchase_order_id,provider_receipt_key,receipt_date,
+       status,reconciliation_status,provider_attributes)
+    VALUES(#{goods_receipt_id},#{account_id},#{supplier_id},#{supplier_account_site_id},NULL,#{provider_receipt_key},#{receipt_date},
+       #{status},'UNMATCHED',#{receipt_attributes})
+    ON DUPLICATE KEY UPDATE status=IF(status IN ('HISTORY','UNMATCHED'),VALUES(status),status)
+  </insert>
+  <!--
+    다시 가져오면 공급사 값(반품·정정)으로 덮어쓴다. 재고에 넣은 줄은 그대로.
+    이미 식재료를 고른 줄은 기준수량을 같은 환산 비율로 다시 계산한다. MySQL은 왼쪽부터 대입하므로 base_received_qty를 received_qty보다 먼저 둔다.
+  -->
+  <insert id="upsertHistoryReceiptItem" parameterType="map">
+    INSERT INTO tb_goods_receipt_item
+      (goods_receipt_id,purchase_order_item_id,supplier_product_id,provider_line_key,ordered_qty,received_qty,
+       order_unit,base_received_qty,base_unit,unit_price,supply_amount,vat_amount,total_amount,tax_type,amount_source,
+       traceability_no,traceability_type,lot_no,expiration_date,ingredient_id,reconciliation_status,provider_attributes)
+    VALUES(#{goods_receipt_id},NULL,#{supplier_product_id},#{provider_line_key},#{ordered_qty},#{received_qty},
+       #{order_unit},#{base_received_qty},#{base_unit},#{unit_price},#{supply_amount},#{vat_amount},#{total_amount},
+       #{tax_type,jdbcType=VARCHAR},'SUPPLIER',
+       #{traceability_no},#{traceability_type},NULL,#{expiration_date,jdbcType=DATE},NULL,'UNMATCHED',#{provider_attributes})
+    ON DUPLICATE KEY UPDATE
+      tax_type=IF(inventory_movement_id IS NULL,VALUES(tax_type),tax_type),
+      base_received_qty=IF(inventory_movement_id IS NOT NULL,base_received_qty,
+        IF(ingredient_id IS NULL OR received_qty=0,VALUES(base_received_qty),base_received_qty/received_qty*VALUES(received_qty))),
+      base_unit=IF(inventory_movement_id IS NULL AND ingredient_id IS NULL,VALUES(base_unit),base_unit),
+      ordered_qty=IF(inventory_movement_id IS NULL,VALUES(ordered_qty),ordered_qty),
+      received_qty=IF(inventory_movement_id IS NULL,VALUES(received_qty),received_qty),
+      order_unit=IF(inventory_movement_id IS NULL,VALUES(order_unit),order_unit),
+      unit_price=IF(inventory_movement_id IS NULL,VALUES(unit_price),unit_price),
+      supply_amount=IF(inventory_movement_id IS NULL,VALUES(supply_amount),supply_amount),
+      vat_amount=IF(inventory_movement_id IS NULL,VALUES(vat_amount),vat_amount),
+      total_amount=IF(inventory_movement_id IS NULL,VALUES(total_amount),total_amount),
+      traceability_no=IF(inventory_movement_id IS NULL,VALUES(traceability_no),traceability_no),
+      traceability_type=IF(inventory_movement_id IS NULL,VALUES(traceability_type),traceability_type),
+      expiration_date=IF(inventory_movement_id IS NULL,VALUES(expiration_date),expiration_date),
+      provider_attributes=IF(inventory_movement_id IS NULL,VALUES(provider_attributes),provider_attributes)
+  </insert>
+  <update id="refreshHistoryReceiptTotals" parameterType="map">
+    UPDATE tb_goods_receipt r
+       SET total_supply_amount=(SELECT COALESCE(SUM(i.supply_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_vat=(SELECT COALESCE(SUM(i.vat_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_amount=(SELECT COALESCE(SUM(i.total_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id)
+     WHERE r.goods_receipt_id=#{goods_receipt_id}
+  </update>
+
+  <!-- ASP(2026-11-23): 웰스토리 clientOrd+clientOrdItem, 아워홈 extnOrderKey+extnOrderNo = 우리 client_ord + client_ord_item.
+       웰스토리는 순번을 000001처럼 앞에 0을 붙여 줄 수 있어 숫자로도 비교한다 -->
+  <select id="orderItemForBill" parameterType="map" resultType="hashmap">
+    SELECT po.purchase_order_id,oi.purchase_order_item_id
+      FROM tb_account_purchase_order po
+      JOIN tb_account_purchase_order_item oi ON oi.purchase_order_id=po.purchase_order_id
+     WHERE po.account_id=#{account_id} AND po.supplier_id=#{supplier_id} AND po.client_ord=#{client_ord}
+       AND (oi.client_ord_item=#{client_ord_item} OR (oi.client_ord_item REGEXP '^[0-9]+$' AND #{client_ord_item} REGEXP '^[0-9]+$'
+            AND CAST(oi.client_ord_item AS UNSIGNED)=CAST(#{client_ord_item} AS UNSIGNED)))
+     ORDER BY oi.client_ord_item=#{client_ord_item} DESC LIMIT 1
+  </select>
+  <insert id="upsertBillLine" parameterType="map">
+    INSERT INTO tb_supplier_bill_line
+      (account_id,supplier_id,supplier_account_site_id,purchase_order_id,purchase_order_item_id,provider_line_key,bill_date,
+       client_ord,client_ord_item,supplier_item_code,billed_qty,unit_price,supply_amount,vat_amount,total_amount,tax_type,provider_attributes)
+    VALUES(#{account_id},#{supplier_id},#{supplier_account_site_id},#{purchase_order_id,jdbcType=VARCHAR},#{purchase_order_item_id,jdbcType=BIGINT},
+       #{provider_line_key},#{bill_date},#{client_ord},#{client_ord_item},#{supplier_item_code},#{billed_qty},#{unit_price},
+       #{supply_amount},#{vat_amount},#{total_amount},#{tax_type,jdbcType=VARCHAR},#{provider_attributes})
+    ON DUPLICATE KEY UPDATE purchase_order_id=VALUES(purchase_order_id),purchase_order_item_id=VALUES(purchase_order_item_id),
+       bill_date=VALUES(bill_date),billed_qty=VALUES(billed_qty),unit_price=VALUES(unit_price),supply_amount=VALUES(supply_amount),
+       vat_amount=VALUES(vat_amount),total_amount=VALUES(total_amount),tax_type=VALUES(tax_type),provider_attributes=VALUES(provider_attributes)
+  </insert>
+
+  <!-- 상품별 가장 최근에 고른 식재료와 환산(발주서 입고 줄 포함) -->
+  <select id="knownLinks" parameterType="map" resultType="hashmap">
+    SELECT supplier_product_id,ingredient_id,base_unit,per_unit FROM (
+      SELECT i.supplier_product_id,i.ingredient_id,i.base_unit,i.base_received_qty/i.received_qty per_unit,
+             ROW_NUMBER() OVER (PARTITION BY i.supplier_product_id ORDER BY r.receipt_date DESC,i.goods_receipt_item_id DESC) rn
+        FROM tb_goods_receipt_item i JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+       WHERE r.account_id=#{account_id} AND i.ingredient_id IS NOT NULL AND i.received_qty&gt;0 AND i.base_received_qty&gt;0
+    ) k WHERE k.rn=1
+  </select>
+  <update id="linkProductLines" parameterType="map">
+    UPDATE tb_goods_receipt_item i JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+       SET i.ingredient_id=#{ingredient_id,jdbcType=VARCHAR},i.base_unit=#{base_unit},i.base_received_qty=i.received_qty*#{per_unit}
+     WHERE r.account_id=#{account_id} AND r.status IN ('HISTORY','UNMATCHED') AND i.inventory_movement_id IS NULL
+       AND i.supplier_product_id=#{supplier_product_id}
+       <if test="only_unlinked">AND i.ingredient_id IS NULL</if>
+  </update>
+  <select id="accountIngredient" parameterType="map" resultType="hashmap">
+    SELECT ingredient_id,base_unit,COALESCE(ingredient_name_std,ingredient_name_raw) ingredient_name
+      FROM tb_account_ingredient_master WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
+  </select>
+
+  <sql id="receiptRange">
+    <if test="from_date!=null and from_date!=''">AND r.receipt_date&gt;=#{from_date}</if>
+    <if test="to_date!=null and to_date!=''">AND r.receipt_date&lt;=#{to_date}</if>
+    <if test="supplier_code!=null and supplier_code!=''">AND s.supplier_code=#{supplier_code}</if>
+  </sql>
+
+  <!-- 산 상품 목록. 식재료가 하나로 정해진 상품만 ingredient_id를 채운다(여럿이면 ingredient_ids로 보여 줌) -->
+  <select id="purchasedProducts" parameterType="map" resultType="hashmap">
+    SELECT x.*,COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,ai.base_unit ingredient_base_unit FROM (
+      SELECT p.supplier_product_id,s.supplier_code,s.supplier_name,p.supplier_item_code,p.product_name,p.order_unit,
+             p.base_qty product_base_qty,p.base_unit product_base_unit,p.alt_base_qty,p.alt_base_unit,p.active_yn product_active_yn,
+             COUNT(*) line_count,SUM(i.received_qty) total_received_qty,SUM(i.supply_amount) total_supply_amount,SUM(i.total_amount) total_amount,
+             SUM(i.supply_amount)/NULLIF(SUM(i.received_qty),0) avg_unit_price,
+             MIN(CASE WHEN i.received_qty&gt;0 THEN i.supply_amount/i.received_qty END) min_unit_price,
+             MAX(CASE WHEN i.received_qty&gt;0 THEN i.supply_amount/i.received_qty END) max_unit_price,
+             DATE_FORMAT(MIN(r.receipt_date),'%Y-%m-%d') first_receipt_date,DATE_FORMAT(MAX(r.receipt_date),'%Y-%m-%d') last_receipt_date,
+             COUNT(DISTINCT r.receipt_date) receipt_day_count,
+             SUM(CASE WHEN i.ingredient_id IS NULL THEN 1 ELSE 0 END) unlinked_line_count,
+             GROUP_CONCAT(DISTINCT i.ingredient_id ORDER BY i.ingredient_id) ingredient_ids,
+             CASE WHEN COUNT(DISTINCT i.ingredient_id)=1 THEN MAX(i.ingredient_id) END ingredient_id
+        FROM tb_goods_receipt_item i
+        JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+        JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+        JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
+       WHERE r.account_id=#{account_id} <include refid="receiptRange"/>
+       GROUP BY p.supplier_product_id,s.supplier_code,s.supplier_name
+    ) x LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=x.ingredient_id
+    <if test="unlinked_only">WHERE x.unlinked_line_count&gt;0</if>
+    ORDER BY x.total_supply_amount DESC,x.supplier_product_id
+  </select>
+
+  <!-- 식재료별 기준단위당 단가(공급가액 ÷ 기준수량, 부가세 제외 — 재고 이동평균과 같은 기준). 반품(음수) 줄은 합계에만 반영 -->
+  <select id="ingredientPrices" parameterType="map" resultType="hashmap">
+    SELECT i.ingredient_id,MAX(COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw)) ingredient_name,i.base_unit,
+           COUNT(*) line_count,COUNT(DISTINCT i.supplier_product_id) product_count,
+           SUM(i.base_received_qty) total_base_qty,SUM(i.supply_amount) total_supply_amount,
+           SUM(i.supply_amount)/NULLIF(SUM(i.base_received_qty),0) weighted_unit_cost,
+           MIN(CASE WHEN i.received_qty&gt;0 AND i.base_received_qty&gt;0 THEN i.supply_amount/i.base_received_qty END) min_unit_cost,
+           MAX(CASE WHEN i.received_qty&gt;0 AND i.base_received_qty&gt;0 THEN i.supply_amount/i.base_received_qty END) max_unit_cost,
+           DATE_FORMAT(MIN(r.receipt_date),'%Y-%m-%d') first_receipt_date,DATE_FORMAT(MAX(r.receipt_date),'%Y-%m-%d') last_receipt_date
+      FROM tb_goods_receipt_item i
+      JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+      JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+      LEFT JOIN tb_account_ingredient_master ai ON ai.account_id=r.account_id AND ai.ingredient_id=i.ingredient_id
+     WHERE r.account_id=#{account_id} AND i.ingredient_id IS NOT NULL <include refid="receiptRange"/>
+     <if test="ingredient_id!=null and ingredient_id!=''">AND i.ingredient_id=#{ingredient_id}</if>
+     GROUP BY i.ingredient_id,i.base_unit
+     ORDER BY total_supply_amount DESC,i.ingredient_id
+  </select>
+  <select id="ingredientPriceLines" parameterType="map" resultType="hashmap">
+    SELECT i.goods_receipt_item_id,DATE_FORMAT(r.receipt_date,'%Y-%m-%d') receipt_date,r.status receipt_status,
+           s.supplier_code,s.supplier_name,p.supplier_product_id,p.supplier_item_code,p.product_name,
+           i.received_qty,i.order_unit,i.unit_price,i.supply_amount,i.vat_amount,i.total_amount,i.base_received_qty,i.base_unit,
+           CASE WHEN i.received_qty&gt;0 AND i.base_received_qty&gt;0 THEN i.supply_amount/i.base_received_qty END unit_cost
+      FROM tb_goods_receipt_item i
+      JOIN tb_goods_receipt r ON r.goods_receipt_id=i.goods_receipt_id
+      JOIN tb_supplier s ON s.supplier_id=r.supplier_id
+      JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=i.supplier_product_id
+     WHERE r.account_id=#{account_id} AND i.ingredient_id=#{ingredient_id} <include refid="receiptRange"/>
+     ORDER BY r.receipt_date DESC,i.goods_receipt_item_id DESC
+  </select>
+</mapper>

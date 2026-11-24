@@ -240,6 +240,18 @@ public class OurhomeSiteService {
                         "ordStatYn", "prcsStatYn", "delYn", "idenNo", "expireInfo", "depositDt")));
     }
 
+    /**
+     * 구매 이력 가져오기용: 사업장 한 곳의 입고일 하루 주문·입고 내역 원문(금액·분류 칸 포함).
+     * 날짜마다 사업장 목록을 다시 받지 않도록 사업장은 requireSite로 한 번 받아 넘긴다.
+     */
+    public List<JsonNode> orderRows(Site site, LocalDate date) {
+        Map<String, Object> params = baseParams(site, date);
+        params.put("goodcd", "");
+        List<JsonNode> rows = new ArrayList<>();
+        call("/api/chaeum/v1/getOrderList", params).path("data").forEach(rows::add);
+        return rows;
+    }
+
     private Site site(String code) {
         if (code == null || code.isBlank() || code.length() > 100)
             throw new IllegalArgumentException("사업장을 선택해 주세요.");

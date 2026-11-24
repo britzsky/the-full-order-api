@@ -41,6 +41,14 @@ public class AccountMenuRegistrationController {
 	}
 
 	/*
+	 * part : 거래처 메뉴관리 method : noRecipe comment : '레시피 없는 메뉴' 표시(Y면 식재료 없이 식단 저장·부족량 계산에서 건너뜀)
+	 */
+	@PostMapping("/menus/no-recipe")
+	public ResponseEntity<?> noRecipe(@RequestBody Map<String, Object> b) {
+		return run(() -> service.setNoRecipe(b));
+	}
+
+	/*
 	 * part : 거래처 메뉴관리 method : resetToStandard comment : 이 업장 레시피를 본사 레시피로 되돌리기(거래처 레시피 줄 삭제 후 본사 레시피 복사, 메뉴 정보는 유지)
 	 */
 	@PostMapping("/menus/reset-to-standard")

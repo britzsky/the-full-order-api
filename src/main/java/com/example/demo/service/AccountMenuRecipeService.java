@@ -109,6 +109,8 @@ public class AccountMenuRecipeService {
 	}
 
 	public Map<String, Object> createRecipe(Map<String, Object> b) {
+		// 레시피가 하나도 없던 메뉴(완제품 등)에 첫 줄을 넣을 때는 recipe_id 없이 온다(2026-11-23)
+		ensureRecipeId(b);
 		require(b, "account_id", "recipe_id", "menu_id", "ingredient_id", "qty_base", "base_unit");
 		normalize(b);
 		mapper.insertRecipeDetail(b);

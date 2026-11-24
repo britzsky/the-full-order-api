@@ -23,6 +23,10 @@
    WHERE r.account_id=#{account_id} AND r.menu_id=#{menu_id}
    ORDER BY r.ingredient_seq,r.account_recipe_detail_id
  </select>
+ <!-- 레시피 없는 메뉴 표시(2026-11-23) -->
+ <update id="updateAccountMenuNoRecipe" parameterType="map">
+  UPDATE tb_account_menu_master SET no_recipe_yn=#{no_recipe_yn},user_id=#{user_id},mod_at=NOW() WHERE account_id=#{account_id} AND menu_id=#{menu_id}
+ </update>
  <!-- 삭제 여부와 상관없이 본사 메뉴 한 건 (같은 ID 반영 여부 판단) -->
  <select id="standardMenu" parameterType="map" resultType="hashmap">
   SELECT * FROM tb_menu_master WHERE menu_id=#{menu_id}

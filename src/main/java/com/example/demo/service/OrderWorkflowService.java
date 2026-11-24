@@ -175,6 +175,8 @@ public class OrderWorkflowService {
 			snapshot.set("provider_realtime_product", data.deepCopy());
 			row.put("product_snapshot", snapshot.toString());
 			row.put("client_ord_item", String.valueOf(rows.size() + 1));
+			// 사업장 상품 조건의 배송 구분(웰스토리 CD/VD, 아워홈 문구)을 발주 품목에 남긴다 — 검수 때 배송 묶음별로 본다
+			row.put("delivery_type_code", DeliveryTypes.normalize(row.get("delivery_type")));
 			row.put("menu_id", item.path("menu_id").asText(""));
 			row.put("order_qty", qty);
 			BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);

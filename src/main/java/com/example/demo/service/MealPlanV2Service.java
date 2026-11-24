@@ -281,12 +281,13 @@ public class MealPlanV2Service {
 			throw new IllegalArgumentException("Meal service was not found.");
 
 		int menuCount = integer(result.get("menu_count"));
-		int recipeMenuCount = integer(result.get("recipe_menu_count"));
-		int ingredientCount = integer(result.get("ingredient_count"));
 		if (menuCount == 0)
 			return;
-		if (recipeMenuCount != menuCount || ingredientCount == 0) {
-			throw new IllegalArgumentException("메뉴에 1인분 식재료 레시피가 등록되어 있어야 합니다.");
+		// 2026-11-23: 1인분 식재료가 없는 메뉴는 이름을 알려 주고 막는다. '레시피 없음 허용'(no_recipe_yn=Y) 메뉴는 통과(필요량·원가 0).
+		// 완제품(요구르트·바나나 등)은 자기 자신을 식재료 1줄로 넣어야 발주·재고가 맞다.
+		if (integer(result.get("missing_menu_count")) > 0) {
+			throw new IllegalArgumentException("1인분 식재료(레시피)가 없는 메뉴가 있어 저장할 수 없습니다: " + result.get("missing_menu_names")
+					+ " · 식단표에서 메뉴를 눌러 '이 업장 레시피 수정'에서 식재료를 넣거나, 완제품이면 '완제품' 버튼, 발주·재고와 무관하면 '레시피 없는 메뉴'로 표시해 주세요.");
 		}
 		// 레시피 단위를 식재료 기준단위로 바꿀 수 없으면 필요량(재고 차감·발주)을 계산할 수 없으므로 막는다.
 		if (integer(result.get("unit_problem_count")) > 0) {

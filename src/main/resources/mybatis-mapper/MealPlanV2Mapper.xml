@@ -18,7 +18,7 @@
  <select id="accountMenuExists" parameterType="map" resultType="int">SELECT COUNT(*) FROM tb_account_menu_master WHERE account_id=#{account_id} AND menu_id=#{menu_id} AND del_yn='N'</select>
  <!-- 메뉴의 식단유형은 해당 날짜·식사의 식단유형과 일치해야 한다. -->
  <select id="countCompatibleMenu" parameterType="map" resultType="int">SELECT COUNT(*) FROM tb_account_meal_service s JOIN tb_account_menu_master m ON m.account_id=s.account_id AND m.menu_id=#{menu_id} AND m.del_yn='N' WHERE s.meal_service_id=#{meal_service_id} AND s.account_id=#{account_id} AND s.meal_plan_type=m.meal_plan_type</select>
- <!-- 저장 전 검사용: 레시피 없는 메뉴·단위 확인 식재료는 막고, 단가 미등록·식단가 초과는 경고만(2026-10-22) -->
+ <!-- 저장 전 검사용: 레시피 없는 메뉴(레시피 없음 허용 표시 제외)·단위 확인 식재료는 막고, 단가 미등록·식단가 초과는 경고만(2026-10-22) -->
  <select id="selectServiceCostValidation" parameterType="map" resultType="hashmap">
   SELECT s.meal_service_id,s.meal_budget_per_person,s.budget_source,s.special_yn,
          COUNT(DISTINCT d.meal_detail_id) AS menu_count,
@@ -27,9 +27,14 @@
          COALESCE(SUM(r.priced_count),0) AS priced_ingredient_count,
          COALESCE(SUM(r.unit_problem_count),0) AS unit_problem_count,
          GROUP_CONCAT(r.unit_problem_names SEPARATOR ', ') AS unit_problem_names,
-         ROUND(COALESCE(SUM(r.menu_cost),0),4) AS meal_cost_per_person
+         ROUND(COALESCE(SUM(r.menu_cost),0),4) AS meal_cost_per_person,
+         <!-- 레시피(1인분 식재료)가 없는데 '레시피 없음 허용'(거래처 메뉴 또는 본사 메뉴 no_recipe_yn)도 아닌 메뉴 — 저장을 막고 이름을 알려 준다(2026-11-23) -->
+         COUNT(DISTINCT CASE WHEN d.meal_detail_id IS NOT NULL AND COALESCE(r.recipe_count,0)=0 AND COALESCE(am.no_recipe_yn,'N')&lt;&gt;'Y' AND COALESCE(hm.no_recipe_yn,'N')&lt;&gt;'Y' THEN d.meal_detail_id END) AS missing_menu_count,
+         GROUP_CONCAT(DISTINCT CASE WHEN d.meal_detail_id IS NOT NULL AND COALESCE(r.recipe_count,0)=0 AND COALESCE(am.no_recipe_yn,'N')&lt;&gt;'Y' AND COALESCE(hm.no_recipe_yn,'N')&lt;&gt;'Y' THEN COALESCE(am.menu_name,hm.menu_name,d.menu_id) END SEPARATOR ', ') AS missing_menu_names
     FROM tb_account_meal_service s
     LEFT JOIN tb_account_table_meals_detail d ON d.meal_service_id=s.meal_service_id
+    LEFT JOIN tb_account_menu_master am ON am.account_id=d.account_id AND am.menu_id=d.menu_id
+    LEFT JOIN tb_menu_master hm ON hm.menu_id=d.menu_id
     LEFT JOIN (
       SELECT c.account_id,c.menu_id,COUNT(*) recipe_count,COUNT(c.cost_per_person) priced_count,SUM(c.cost_per_person) menu_cost,
              SUM(CASE WHEN c.missing_reason='단위 확인' THEN 1 ELSE 0 END) unit_problem_count,

@@ -32,6 +32,9 @@
     JOIN tb_supplier s ON s.supplier_id=po.supplier_id
    WHERE po.account_id=#{account_id} AND po.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')
      AND po.requested_delivery_date&lt;=#{date_to}
+     <!-- 남은 품목을 모두 결품으로 닫은 발주서는 입고 확정 대상이 아니다(결품이 없으면 조건이 항상 참) -->
+     AND (NOT EXISTS(SELECT 1 FROM tb_account_purchase_order_item x WHERE x.purchase_order_id=po.purchase_order_id AND x.shortage_order_qty&gt;0)
+          OR EXISTS(SELECT 1 FROM tb_account_purchase_order_item x WHERE x.purchase_order_id=po.purchase_order_id AND x.received_order_qty+x.shortage_order_qty&lt;x.order_qty))
    ORDER BY po.requested_delivery_date,po.purchase_order_id LIMIT 50
  </select>
  <!-- 식재료 재고 행(보관 위치별). 어느 공급사 상품으로 들어왔든 같은 식재료 재고에서 차감한다 -->

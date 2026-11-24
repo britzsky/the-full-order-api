@@ -10,6 +10,9 @@ public interface ShortageProcurementMapper {
 
 	List<Map<String, Object>> unconfirmedUsage(Map<String, Object> params);
 
+	/** 오늘부터 조회 시작일 전날까지 남은 식단의 사용 예정량(식단표 구분 없이) */
+	List<Map<String, Object>> upcomingUsage(Map<String, Object> params);
+
 	List<Map<String, Object>> draftDemand(Map<String, Object> params);
 
 	List<Map<String, Object>> stock(Map<String, Object> params);

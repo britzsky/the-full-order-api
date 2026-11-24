@@ -45,7 +45,8 @@
            NULLIF(i.source_ingredient_id,'') ingredient_id,
            COALESCE(ai.ingredient_name_std,ai.ingredient_name_raw) ingredient_name,ai.base_unit ingredient_base_unit,
            COALESCE(i.product_name_snapshot,p.product_name) product_name,p.base_qty product_base_qty,p.base_unit product_base_unit,
-           p.alt_base_qty,p.alt_base_unit,ai.default_location_id,ss.supplier_account_site_id,
+           p.alt_base_qty,p.alt_base_unit,p.tax_type product_tax_type,ai.default_location_id,ss.supplier_account_site_id,
+           (SELECT su.supplier_code FROM tb_supplier su WHERE su.supplier_id=po.supplier_id) supplier_code,
            <choose><when test="favorite_owner_type != null">CASE WHEN fp.favorite_product_id IS NULL THEN 'N' ELSE 'Y' END</when><otherwise>NULL</otherwise></choose> favorite_yn
     FROM tb_account_purchase_order_item i
     JOIN tb_account_purchase_order po ON po.purchase_order_id=i.purchase_order_id
@@ -68,10 +69,10 @@
     INSERT INTO tb_account_purchase_order_item
     (purchase_order_id,client_ord_item,supplier_product_id,menu_id,supplier_item_code,order_qty,order_unit,
      base_qty_per_order_unit,base_unit,unit_price_snapshot,line_amount,item_status,
-     source_ingredient_id,product_name_snapshot,product_snapshot)
+     source_ingredient_id,product_name_snapshot,product_snapshot,delivery_type,delivery_type_raw)
     VALUES(#{purchase_order_id},#{client_ord_item},#{supplier_product_id},NULLIF(#{menu_id},''),#{supplier_item_code},#{order_qty},#{order_unit},
       #{base_qty},#{base_unit},#{purchase_price},#{line_amount},'SENDING',
-      NULLIF(#{source_ingredient_id},''),#{product_name_snapshot},#{product_snapshot})
+      NULLIF(#{source_ingredient_id},''),#{product_name_snapshot},#{product_snapshot},#{delivery_type_code},NULLIF(TRIM(#{delivery_type}),''))
   </insert>
   <update id="updateOrder">
     UPDATE tb_account_purchase_order SET status=#{status},supplier_result_code=#{supplier_result_code},
@@ -84,7 +85,7 @@
     UPDATE tb_account_purchase_order_item SET item_status=#{item_status},supplier_result_code=#{supplier_result_code},
       supplier_error_message=#{supplier_error_message},mod_at=NOW()
     WHERE purchase_order_id=#{purchase_order_id} AND client_ord_item=#{client_ord_item}
-      AND received_order_qty=0 AND item_status!='CANCELED'
+      AND received_order_qty=0 AND shortage_order_qty=0 AND item_status!='CANCELED'
   </update>
   <insert id="insertExchange">
     INSERT INTO tb_supplier_api_exchange(supplier_id,operation_type,correlation_id,request_fingerprint,request_payload,exchange_status,requested_at)

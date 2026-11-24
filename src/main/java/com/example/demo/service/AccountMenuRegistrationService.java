@@ -104,6 +104,29 @@ public class AccountMenuRegistrationService {
 				"ingredient_count", seq, "standard_yn", "N");
 	}
 
+	/**
+	 * '레시피 없는 메뉴' 표시(2026-11-23). Y면 1인분 식재료가 없어도 식단 저장·부족량 계산에서 건너뛴다(원가·필요량 0).
+	 * 거래처 메뉴가 아직 없으면(식단표를 저장하기 전 본사 메뉴) 먼저 거래처 메뉴로 가져온다.
+	 */
+	@Transactional
+	public Map<String, Object> setNoRecipe(Map<String, Object> b) {
+		String accountId = required(b, "account_id", "거래처");
+		String menuId = required(b, "menu_id", "메뉴");
+		String yn = "Y".equals(text(b.get("no_recipe_yn"))) ? "Y" : "N";
+		Map<String, Object> key = new HashMap<>(Map.of("account_id", accountId, "menu_id", menuId));
+		if (recipeMapper.menus(key).isEmpty()) {
+			if (menuId.startsWith("AM-"))
+				throw new IllegalArgumentException("이 업장 메뉴를 찾을 수 없습니다.");
+			Map<String, Object> importKey = new HashMap<>(Map.of("account_id", accountId, "menu_id", menuId));
+			importKey.put("user_id", b.get("user_id")); // 없을 수 있음(Map.of는 null 불가)
+			importStandard(importKey);
+		}
+		key.put("no_recipe_yn", yn);
+		key.put("user_id", b.get("user_id"));
+		mapper.updateAccountMenuNoRecipe(key);
+		return Map.of("code", 200, "message", "Y".equals(yn) ? "레시피 없는 메뉴로 표시했습니다." : "레시피 없는 메뉴 표시를 풀었습니다.", "menu_id", menuId, "no_recipe_yn", yn);
+	}
+
 	/** 본사 메뉴를 거래처 메뉴로 가져온다. 거래처에 레시피가 없을 때만 본사 레시피를 복사한다 */
 	@Transactional
 	public Map<String, Object> importStandard(Map<String, Object> b) {
@@ -115,8 +138,8 @@ public class AccountMenuRegistrationService {
 		Map<String, Object> key = Map.of("account_id", accountId, "menu_id", menuId);
 		boolean hasRecipe = !recipeMapper.recipeDetails(key).isEmpty();
 		List<Map<String, Object>> recipe = hasRecipe ? List.of() : mapper.standardRecipe(Map.of("menu_id", menuId));
-		if (!hasRecipe && recipe.isEmpty())
-			throw new IllegalArgumentException("본사 메뉴(" + standard.get("menu_name") + ")에 식재료가 없어 가져올 수 없습니다. 본사 메뉴 관리에서 식재료를 먼저 등록해주세요.");
+		// 2026-11-23: 본사 레시피(식재료)가 없는 메뉴(완제품·소스 등)도 거래처 메뉴로는 만든다. 식재료는 '이 업장 레시피 수정'에서
+		// 넣거나(완제품 = 자기 자신 1줄) '레시피 없는 메뉴'로 표시한다. 식단 저장 검사가 그런 메뉴 이름을 알려 준다.
 
 		Map<String, Object> menu = new HashMap<>(key);
 		menu.put("menu_name_raw", standard.get("menu_name"));

@@ -198,6 +198,8 @@
       FROM tb_goods_receipt r JOIN tb_supplier s ON s.supplier_id=r.supplier_id
       LEFT JOIN tb_goods_receipt_item ri ON ri.goods_receipt_id=r.goods_receipt_id
      WHERE r.account_id=#{account_id}
+     <!-- 구매 이력(재고 시작일 전, 재고에 안 넣음)은 입고 목록에서 뺀다. include_history=Y면 함께 -->
+     <if test='include_history==null or include_history!="Y"'>AND r.status&lt;&gt;'HISTORY'</if>
      <if test="from_date!=null and from_date!=''">AND r.receipt_date&gt;=#{from_date}</if>
      <if test="to_date!=null and to_date!=''">AND r.receipt_date&lt;=#{to_date}</if>
      GROUP BY r.goods_receipt_id ORDER BY r.receipt_date DESC,r.created_at DESC
@@ -293,11 +295,21 @@
     INSERT IGNORE INTO tb_goods_receipt_item
       (goods_receipt_id,purchase_order_item_id,supplier_product_id,provider_line_key,ordered_qty,received_qty,
        order_unit,base_received_qty,base_unit,unit_price,supply_amount,vat_amount,total_amount,
+       tax_type,amount_source,amount_check_status,
        traceability_no,traceability_type,lot_no,expiration_date,ingredient_id,reconciliation_status,provider_attributes)
     VALUES(#{goods_receipt_id},#{purchase_order_item_id},#{supplier_product_id},#{provider_line_key},#{ordered_qty},#{received_qty},
        #{order_unit},#{base_received_qty},#{base_unit},#{unit_price},#{supply_amount},#{vat_amount},#{total_amount},
+       #{tax_type,jdbcType=VARCHAR},COALESCE(#{amount_source,jdbcType=VARCHAR},'SUPPLIER'),#{amount_check_status,jdbcType=VARCHAR},
        #{traceability_no},#{traceability_type},#{lot_no},#{expiration_date},#{ingredient_id},#{reconciliation_status},#{provider_attributes})
   </insert>
+  <!-- 입고 머리 합계 = 줄 합계(ASP 2026-11-23: insertGoodsReceipt는 INSERT IGNORE라 첫 줄 금액만 들어갔다) -->
+  <update id="refreshReceiptTotals" parameterType="map">
+    UPDATE tb_goods_receipt r
+       SET total_supply_amount=(SELECT COALESCE(SUM(i.supply_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_vat=(SELECT COALESCE(SUM(i.vat_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id),
+           total_amount=(SELECT COALESCE(SUM(i.total_amount),0) FROM tb_goods_receipt_item i WHERE i.goods_receipt_id=r.goods_receipt_id)
+     WHERE r.goods_receipt_id=#{goods_receipt_id}
+  </update>
   <select id="inventoryBalanceForUpdate" parameterType="map" resultType="hashmap">
     SELECT * FROM tb_account_inventory_balance
      WHERE account_id=#{account_id} AND ingredient_id=#{ingredient_id}
@@ -337,7 +349,7 @@
   </update>
   <update id="addReceivedOrderQty" parameterType="map">
     UPDATE tb_account_purchase_order_item
-       SET item_status=CASE WHEN received_order_qty+#{received_qty}&gt;=order_qty THEN 'RECEIVED' ELSE 'PARTIAL_RECEIVED' END,
+       SET item_status=CASE WHEN received_order_qty+shortage_order_qty+#{received_qty}&gt;=order_qty THEN 'RECEIVED' ELSE 'PARTIAL_RECEIVED' END,
            received_order_qty=received_order_qty+#{received_qty}
      WHERE purchase_order_item_id=#{purchase_order_item_id}
   </update>
@@ -345,11 +357,11 @@
     UPDATE tb_account_purchase_order po
        SET po.status=CASE WHEN NOT EXISTS(
          SELECT 1 FROM tb_account_purchase_order_item x
-          WHERE x.purchase_order_id=po.purchase_order_id AND x.received_order_qty&lt;x.order_qty
+          WHERE x.purchase_order_id=po.purchase_order_id AND x.received_order_qty+x.shortage_order_qty&lt;x.order_qty
        ) THEN 'RECEIVED' ELSE 'PARTIAL_RECEIVED' END,
        po.received_at=CASE WHEN NOT EXISTS(
          SELECT 1 FROM tb_account_purchase_order_item x
-          WHERE x.purchase_order_id=po.purchase_order_id AND x.received_order_qty&lt;x.order_qty
+          WHERE x.purchase_order_id=po.purchase_order_id AND x.received_order_qty+x.shortage_order_qty&lt;x.order_qty
        ) THEN NOW() ELSE po.received_at END
      WHERE po.purchase_order_id=#{purchase_order_id}
   </update>

@@ -32,6 +32,18 @@ class MealPlanV2ServiceTest {
         assertThatThrownBy(()->service.saveCompletePlan(payload())).hasMessageContaining("2026-09-15").hasMessageContaining("쌀밥");
         verify(mapper,never()).insertRequirements(anyMap());
     }
+    /** 2026-11-23: 레시피 없는 메뉴는 이름을 알려 주며 막는다('레시피 없음 허용' 메뉴는 쿼리에서 빠져 missing_menu_count에 안 셈) */
+    @Test void menuWithoutRecipeIsNamedAndBlocked() {
+        setup();
+        when(mapper.selectServiceCostValidation(anyMap())).thenReturn(Map.of("menu_count",1,"recipe_menu_count",0,"ingredient_count",0,"missing_menu_count",1,"missing_menu_names","요구르트"));
+        assertThatThrownBy(()->service.saveCompletePlan(payload())).hasMessageContaining("요구르트").hasMessageContaining("완제품");
+        verify(mapper,never()).insertRequirements(anyMap());
+    }
+    @Test void flaggedMenuWithoutRecipeIsSaved() {
+        setup();
+        when(mapper.selectServiceCostValidation(anyMap())).thenReturn(Map.of("menu_count",1,"recipe_menu_count",0,"ingredient_count",0,"missing_menu_count",0));
+        assertThat(service.saveCompletePlan(payload()).get("id")).isEqualTo("PLAN");
+    }
     @Test void missingServingsDoesNotCreateAHeader() {
         var p=payload();p.remove("planned_servings");
         assertThatThrownBy(()->service.saveCompletePlan(p)).hasMessageContaining("예정 식수");

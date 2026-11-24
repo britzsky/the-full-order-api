@@ -158,8 +158,12 @@ class ShortageProcurementServiceTest {
         criteria.put("source","DRAFT");criteria.put("draft_meals",List.of(Map.of("menu_id","M","planned_servings",0)));
         assertThatThrownBy(this::result).hasMessageContaining("예정 식수");
         criteria.put("draft_meals",List.of(Map.of("menu_id","M","planned_servings",10)));
-        when(mapper.draftDemand(anyMap())).thenReturn(List.of(Map.of("menu_id","M")));
-        assertThatThrownBy(this::result).hasMessageContaining("레시피").hasMessageContaining("M");
+        // 2026-11-23: 레시피 없는 메뉴 하나로 조회 전체를 멈추지 않고, 그 메뉴만 빼고 missing_recipe_menus로 알린다.
+        // '레시피 없음 허용'(no_recipe_yn=Y) 메뉴는 알리지 않는다.
+        when(mapper.draftDemand(anyMap())).thenReturn(List.of(Map.of("menu_id","M","menu_name","요구르트"),Map.of("menu_id","W","menu_name","물","no_recipe_yn","Y")));
+        var missing=result().path("missing_recipe_menus");
+        assertThat(missing.size()).isEqualTo(1);
+        assertThat(missing.get(0).path("menu_name").asText()).isEqualTo("요구르트");
     }
     @Test void lateDeliveryDoesNotHideEarlierShortage() {
         var incoming=raw(500);incoming.put("delivery_date",LocalDate.now().plusDays(3).toString());
@@ -216,5 +220,43 @@ class ShortageProcurementServiceTest {
         criteria.put("skip_offers",true);
         assertThat(result().path("ingredients").get(0).path("offers").size()).isZero();
         verify(suppliers,never()).offers(anyMap());
+    }
+
+    // 2026-11-19 하루씩 나눠 발주: 화요일 식단 계산 때 월요일(조회 시작일 전) 식단이 쓸 재고·입고를 먼저 뺀다
+    private Map<String,Object> dated(int quantity,LocalDate date){var r=raw(quantity);r.put("meal_date",date.toString());r.put("delivery_date",date.toString());return r;}
+    private void tuesdayOnly(LocalDate mon,LocalDate tue){
+        criteria.put("date_from",tue.toString());criteria.put("date_to",tue.toString());criteria.put("delivery_date",mon.toString());
+        when(mapper.targets(anyMap())).thenReturn(List.of());
+        when(mapper.demand(anyMap())).thenReturn(List.of(dated(6000,tue)));
+    }
+    @Test void earlierMealsInTheWeekConsumeStockBeforeThisPeriod() {
+        LocalDate mon=LocalDate.now().plusDays(2),tue=mon.plusDays(1);tuesdayOnly(mon,tue);
+        when(mapper.stock(anyMap())).thenReturn(List.of(raw(10000)));when(mapper.incoming(anyMap())).thenReturn(List.of());
+        when(mapper.upcomingUsage(anyMap())).thenReturn(List.of(dated(6000,mon)));
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("required_qty").decimalValue()).as("이 기간(화) 필요량만").isEqualByComparingTo("6000");
+        assertThat(row.path("prior_usage_qty").decimalValue()).isEqualByComparingTo("6000");
+        assertThat(row.path("shortage_qty").decimalValue()).as("재고 10kg − 월 6kg = 4kg, 화 6kg → 2kg").isEqualByComparingTo("2000");
+        assertThat(row.path("issues").isEmpty()).isTrue();
+    }
+    @Test void earlierDeliveryForEarlierMealIsNotCountedTwice() {
+        LocalDate mon=LocalDate.now().plusDays(2),tue=mon.plusDays(1);tuesdayOnly(mon,tue);
+        when(mapper.stock(anyMap())).thenReturn(List.of(raw(4000)));
+        when(mapper.incoming(anyMap())).thenReturn(List.of(dated(2000,LocalDate.now().plusDays(1)))); // 토요일에 받는 월요일분
+        when(mapper.upcomingUsage(anyMap())).thenReturn(List.of(dated(6000,mon)));
+        assertThat(result().path("ingredients").get(0).path("shortage_qty").decimalValue()).isEqualByComparingTo("6000");
+    }
+    @Test void earlierShortfallIsNoticedButNotMixedIntoThisOrder() {
+        LocalDate mon=LocalDate.now().plusDays(2),tue=mon.plusDays(1);tuesdayOnly(mon,tue);
+        when(mapper.stock(anyMap())).thenReturn(List.of());when(mapper.incoming(anyMap())).thenReturn(List.of());
+        when(mapper.upcomingUsage(anyMap())).thenReturn(List.of(dated(6000,mon)));
+        var row=result().path("ingredients").get(0);
+        assertThat(row.path("shortage_qty").decimalValue()).as("화요일 몫만").isEqualByComparingTo("6000");
+        assertThat(row.path("notices").get(0).asText()).contains(mon.toString()).contains("6000g 부족");
+        assertThat(row.path("offers").get(0).path("orderable").asBoolean()).as("안내는 발주를 막지 않음").isTrue();
+    }
+    @Test void wholeWeekAtOnceIsUnchangedWhenNothingComesBefore() {
+        when(mapper.upcomingUsage(anyMap())).thenReturn(List.of());
+        assertThat(result().path("ingredients").get(0).path("shortage_qty").decimalValue()).isEqualByComparingTo("220");
     }
 }

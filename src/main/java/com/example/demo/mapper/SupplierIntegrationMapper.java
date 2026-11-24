@@ -44,6 +44,8 @@ public interface SupplierIntegrationMapper {
 
 	int insertGoodsReceiptItem(Map<String, Object> params);
 
+	int refreshReceiptTotals(Map<String, Object> params);
+
 	Map<String, Object> inventoryBalanceForUpdate(Map<String, Object> params);
 
 	int upsertInventoryAtAverageCost(Map<String, Object> params);
