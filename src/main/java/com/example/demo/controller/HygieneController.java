@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import com.example.demo.security.WorkspaceAccess;
 import com.example.demo.security.WorkspaceUser;
+import com.example.demo.service.HygieneCheckService;
 import com.example.demo.service.HygieneService;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -20,9 +21,11 @@ import jakarta.servlet.http.HttpServletRequest;
 @RequestMapping("/v2/hygiene")
 public class HygieneController {
 	private final HygieneService service;
+	private final HygieneCheckService checks;
 
-	public HygieneController(HygieneService service) {
+	public HygieneController(HygieneService service, HygieneCheckService checks) {
 		this.service = service;
+		this.checks = checks;
 	}
 
 	/*
@@ -66,6 +69,26 @@ public class HygieneController {
 	public ResponseEntity<?> uploadPhoto(@RequestParam(name = "account_id", defaultValue = "") String accountId,
 			@RequestParam("file") MultipartFile file) {
 		return run(() -> service.uploadPhoto(accountId, file));
+	}
+
+	/*
+	 * part : 위생관리 method : checks comment : 점검 완료(이상 없음) 표시 — year·month 규칙은 records와 같음(발주 DB tb_hygiene_check)
+	 */
+	@GetMapping("/checks")
+	public ResponseEntity<?> checks(@RequestParam(name = "account_id", defaultValue = "") String accountId,
+			@RequestParam(name = "year", defaultValue = "") String year, @RequestParam(name = "month", defaultValue = "") String month) {
+		return run(() -> checks.checks(accountId, year, month));
+	}
+
+	/*
+	 * part : 위생관리 method : markCheck comment : { account_id, category_key, check_date?, done: Y|N, year?, month? } — Y 표시, N 그 기간 표시 취소
+	 */
+	@PostMapping("/checks")
+	public ResponseEntity<?> markCheck(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+		WorkspaceUser user = WorkspaceAccess.user(request);
+		return run(() -> checks.mark(Objects.toString(body.get("account_id"), ""), Objects.toString(body.get("category_key"), ""),
+				Objects.toString(body.get("check_date"), ""), !"N".equals(Objects.toString(body.get("done"), "Y")), user.userId(),
+				Objects.toString(body.get("year"), ""), Objects.toString(body.get("month"), "")));
 	}
 
 	private ResponseEntity<?> run(Supplier<?> action) {
