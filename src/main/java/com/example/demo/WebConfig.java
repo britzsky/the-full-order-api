@@ -35,7 +35,10 @@ public class WebConfig implements WebMvcConfigurer {
 						"http://localhost:8092",
 						"http://172.30.1.48:8081",
 						"http://13.236.127.178:8080",
-						"http://13.236.127.178:8090")
+						"http://13.236.127.178:8090",
+						// 운영 서버(2026-11-25): 화면 8080, API 8090
+						"http://3.24.238.111:8080",
+						"http://3.24.238.111:8090")
 				.allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 				.allowedHeaders("Authorization", "x-refresh-token", "Content-Type", "guid", "X-Workspace-Request")
 				.exposedHeaders("Authorization", "x-refresh-token")
