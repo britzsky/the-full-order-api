@@ -49,6 +49,7 @@ public class WelstoryCycleSyncService {
 
 	/** 새벽 배치: 웰스토리 사업장이 지정된 모든 거래처. 사업장 하나가 실패해도 나머지는 계속한다. */
 	public List<Map<String, Object>> syncAll(String actor) {
+		forgetNotOpen();
 		List<Map<String, Object>> results = new ArrayList<>();
 		Map<String, Map<String, Cycle>> probes = new HashMap<>();
 		Set<Object> done = new HashSet<>();
@@ -71,6 +72,7 @@ public class WelstoryCycleSyncService {
 		if (accountId == null || accountId.isBlank()) throw new IllegalArgumentException("거래처를 선택해주세요.");
 		List<Map<String, Object>> sites = sites(accountId);
 		if (sites.isEmpty()) throw new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 없습니다. 공급사 사업장 매핑에서 먼저 지정해 주세요.");
+		forgetNotOpen();
 		List<Map<String, Object>> results = new ArrayList<>();
 		Map<String, Map<String, Cycle>> probes = new HashMap<>();
 		for (Map<String, Object> site : sites) results.add(syncSite(site, today(), actor, probes));
@@ -187,12 +189,40 @@ public class WelstoryCycleSyncService {
 		return c != null && c.covers(start) ? c : null;
 	}
 
+	/** 아직 안 열린 순기를 다시 묻지 않는 시간. 차순기는 D-N일에 열리므로 이 정도 늦게 알아도 된다. */
+	static final java.time.Duration NOT_OPEN_TTL = java.time.Duration.ofMinutes(30);
+	/** 열린 순기의 기간은 바뀌지 않는다 — 하루 동안 기억(서버 재시작하면 다시 묻는다) */
+	static final java.time.Duration OPEN_TTL = java.time.Duration.ofHours(24);
+
+	private record ProbeResult(Cycle cycle, java.time.Instant expiresAt) {
+	}
+
+	/**
+	 * 대표 사업장·순기별 1행 조회 결과(서버 전체 공용, 2026-11-27). 예전엔 요청 하나 안에서만 기억해서,
+	 * 아직 안 열린 차순기 납품일이면 같은 대표 사업장을 쓰는 거래처(법인 46곳)마다 웰스토리에 3~4번씩 다시 물었다.
+	 */
+	private final Map<String, ProbeResult> probeCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** 새벽 배치·본사 '순기 자동 동기화'는 새로 열린 순기를 바로 알아야 하니 '아직 안 열림' 기억을 지우고 다시 묻는다 */
+	void forgetNotOpen() {
+		probeCache.values().removeIf(r -> r.cycle() == null);
+	}
+
 	private Cycle probe(Map<String, Object> site, int year, int group, Map<String, Cycle> probes) {
 		String key = year + "-" + String.format("%02d", group);
 		if (probes.containsKey(key)) return probes.get(key);
-		LocalDate[] dates = sync.periodDates(text(site.get("external_site_code")), String.valueOf(year), String.format("%02d", group));
+		String soldTo = text(site.get("external_site_code"));
+		String sharedKey = soldTo + "|" + key;
+		ProbeResult cached = probeCache.get(sharedKey);
+		java.time.Instant now = java.time.Instant.now();
+		if (cached != null && now.isBefore(cached.expiresAt())) {
+			probes.put(key, cached.cycle());
+			return cached.cycle();
+		}
+		LocalDate[] dates = sync.periodDates(soldTo, String.valueOf(year), String.format("%02d", group));
 		Cycle c = dates == null ? null : new Cycle(year, group, dates[0], dates[1]);
 		probes.put(key, c);
+		probeCache.put(sharedKey, new ProbeResult(c, now.plus(c == null ? NOT_OPEN_TTL : OPEN_TTL)));
 		return c;
 	}
 

@@ -112,6 +112,30 @@ class WelstoryRepresentativeSiteTest {
 		verify(jdbc).update(contains("INSERT INTO tb_supplier_sync_checkpoint"), eq(1L), eq(99L), eq("CYCLE_2026-16"));
 	}
 
+	/** 아직 안 열린 차순기 납품일: 같은 대표 사업장을 쓰는 거래처가 여럿이어도 웰스토리에는 한 번만 묻는다 */
+	@Test
+	void notOpenCycleIsAskedOnceAcrossAccountsUntilManualSync() {
+		var jdbc = dbWithRepresentative();
+		var sync = mock(WelstoryCatalogSyncService.class);
+		LocalDate from = LocalDate.of(2026, 11, 23), to = LocalDate.of(2026, 12, 13);
+		when(sync.periodDates(eq("A0275536"), eq("2026"), eq("16"))).thenReturn(new LocalDate[] { from, to });
+		var service = new WelstoryCycleSyncService(jdbc, sync);
+		var other = new HashMap<String, Object>(SITE);
+		other.put("account_id", "B");
+		LocalDate next = LocalDate.of(2026, 12, 20);
+
+		for (var site : List.of(SITE, other, SITE))
+			assertThatThrownBy(() -> service.ensureCycle(site, next, "SYSTEM")).hasMessageContaining("아직 받을 수 없습니다");
+		verify(sync, times(1)).periodDates("A0275536", "2026", "17");
+		verify(sync, times(1)).periodDates("A0275536", "2026", "16");
+
+		// 본사 '순기 자동 동기화'·새벽 배치는 '안 열림' 기억을 지우고 다시 묻는다(열린 순기 기간은 그대로 기억)
+		service.forgetNotOpen();
+		assertThatThrownBy(() -> service.ensureCycle(SITE, next, "SYSTEM")).hasMessageContaining("아직 받을 수 없습니다");
+		verify(sync, times(2)).periodDates("A0275536", "2026", "17");
+		verify(sync, times(1)).periodDates("A0275536", "2026", "16");
+	}
+
 	@Test
 	void siteWithoutRepresentativeStaysAsIs() {
 		var jdbc = mock(JdbcTemplate.class);
