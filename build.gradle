@@ -68,4 +68,7 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// DDL·운영 반영 SQL만 바뀌어도 RealSchemaSqlTest·RealMigrationSqlTest가 다시 돌게(ddl-source는 git 제외라 없을 수 있음)
+	inputs.files(fileTree('ddl-source') { include '**/*.sql', '**/*.txt' }).withPropertyName('ddlSource').withPathSensitivity(PathSensitivity.RELATIVE)
+	inputs.property('runRealMigrationDb', System.getenv('RUN_REAL_MIGRATION_DB') ?: '')
 }
