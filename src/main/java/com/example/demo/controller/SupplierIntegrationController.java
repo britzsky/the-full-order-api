@@ -55,6 +55,14 @@ public class SupplierIntegrationController {
 	}
 
 	/*
+	 * part : 공급사 연동 method : offersPage comment : 공급사 통합 연동 상품·판가 표 한 페이지(page·size·keyword·unavailable_only) + 전체·주문 불가 건수
+	 */
+	@GetMapping("/offers/page")
+	public ResponseEntity<?> offersPage(@RequestParam Map<String, Object> params, jakarta.servlet.http.HttpServletRequest request) {
+		return execute(() -> service.offersPage(com.example.demo.security.FavoriteOwner.of(request, params).applyTo(params)));
+	}
+
+	/*
 	 * part : 공급사 연동 method : favorite comment : 나만의 식재료 지정·해제(상품 하트). body: supplier_product_id, favorite(Y/N)
 	 */
 	@PostMapping("/favorites")

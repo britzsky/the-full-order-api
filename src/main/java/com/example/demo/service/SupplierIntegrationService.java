@@ -52,6 +52,51 @@ public class SupplierIntegrationService {
 		return words.stream().limit(20).map(word -> word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")).toList();
 	}
 
+	/** 공급사 통합 연동 상품·판가 표 한 페이지(2026-11-27): 웰스토리 사업장 판가가 2만여 건이라 전체를 화면에 보내면 브라우저가 멈췄다. */
+	public static final int OFFER_PAGE_MAX = 200;
+
+	/**
+	 * offers와 같은 조회·판정(검색 관련도 순, 주문 가능 판정)을 한 뒤 한 페이지만 돌려준다.
+	 * page는 1부터, size 기본 100(최대 200). unavailable_only=Y면 주문 불가 상품만. total_count·unavailable_count는 페이지와 상관없는 전체 건수.
+	 */
+	public Map<String, Object> offersPage(Map<String, Object> params) {
+		int page = positiveInt(params.remove("page"), 1, Integer.MAX_VALUE, "page");
+		int size = positiveInt(params.remove("size"), 100, OFFER_PAGE_MAX, "size");
+		boolean unavailableOnly = "Y".equals(java.util.Objects.toString(params.remove("unavailable_only"), ""));
+		params.remove("limit");
+		List<Map<String, Object>> rows = offers(params);
+		int unavailable = 0;
+		List<Map<String, Object>> unavailableRows = new java.util.ArrayList<>();
+		for (Map<String, Object> row : rows)
+			if ("N".equals(row.get("orderable_yn")) || !"ACTIVE".equals(row.get("product_status"))) {
+				unavailable++;
+				unavailableRows.add(row);
+			}
+		List<Map<String, Object>> list = unavailableOnly ? unavailableRows : rows;
+		int from = (int) Math.min((long) (page - 1) * size, list.size());
+		Map<String, Object> result = new java.util.LinkedHashMap<>();
+		result.put("rows", new java.util.ArrayList<>(list.subList(from, Math.min(from + size, list.size()))));
+		result.put("total_count", list.size());
+		result.put("all_count", rows.size());
+		result.put("unavailable_count", unavailable);
+		result.put("page", page);
+		result.put("size", size);
+		return result;
+	}
+
+	private static int positiveInt(Object value, int fallback, int max, String name) {
+		if (value == null || value.toString().isBlank())
+			return fallback;
+		try {
+			int number = Integer.parseInt(value.toString().trim());
+			if (number >= 1 && number <= max)
+				return number;
+		} catch (NumberFormatException e) {
+			// 아래 오류
+		}
+		throw new IllegalArgumentException(name + "은 1~" + max + "이어야 합니다.");
+	}
+
 	public List<Map<String, Object>> offers(Map<String, Object> params) {
 		require(params, "account_id");
 		// ingredient_ids는 서버 내부(부족량 계산)에서 목록으로만 넘긴다. 요청 파라미터 문자열이면 무시.

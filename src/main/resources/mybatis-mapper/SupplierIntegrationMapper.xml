@@ -88,7 +88,8 @@
      <if test="supplier_offer_id!=null and supplier_offer_id!=''">AND o.supplier_offer_id=#{supplier_offer_id}</if>
      <if test="supplier_product_id!=null and supplier_product_id!=''">AND p.supplier_product_id=#{supplier_product_id}</if>
      <if test="orderable_only != null and orderable_only.equals(&quot;Y&quot;)">AND o.product_status='ACTIVE' AND (av.orderable_yn IS NULL OR av.orderable_yn='Y')</if>
-     ORDER BY CASE WHEN fp.favorite_product_id IS NULL THEN 1 ELSE 0 END,pr.purchase_price/NULLIF(p.base_qty,0),s.supplier_name
+     <!-- 마지막 supplier_offer_id: 같은 값끼리 순서가 고정돼야 페이지를 넘겨도 줄이 겹치거나 빠지지 않는다 -->
+     ORDER BY CASE WHEN fp.favorite_product_id IS NULL THEN 1 ELSE 0 END,pr.purchase_price/NULLIF(p.base_qty,0),s.supplier_name,o.supplier_offer_id
   </select>
   <!-- 상품 검색 발주의 재고 식재료 추정(ProductIngredientGuess)용 거래처 활성 식재료 -->
   <select id="ingredientGuessIngredients" parameterType="map" resultType="hashmap">
