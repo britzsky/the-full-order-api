@@ -42,8 +42,9 @@ public class MealPlanAlertService {
         List<Object> args = new ArrayList<>(List.of(today.minusDays(RECENT_DAYS), monday.minusDays(1), monday, sunday));
         if (!account.isBlank()) args.add(account);
         var rows = jdbc.queryForList("""
-            SELECT a.account_id, a.account_name FROM the_full.tb_account a
-            WHERE a.del_yn='N'
+            SELECT a.account_id, a.account_name FROM """ + com.example.demo.mapper.AccountSource.TABLE + """
+                  a
+            WHERE a.del_yn='N' AND a.meal_plan_yn='Y'
               AND EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                 AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')
               AND NOT EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id

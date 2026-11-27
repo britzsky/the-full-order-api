@@ -31,7 +31,8 @@ public interface DistOrderAdminMapper {
 		          JOIN tb_dist_partner pt ON pt.partner_id=i.partner_id WHERE i.order_id=o.order_id) partner_names,
 		""" + ORDER_FLAGS + """
 		  FROM tb_dist_order o
-		  LEFT JOIN the_full.tb_account a ON a.account_id=o.account_id
+		  LEFT JOIN """ + AccountSource.TABLE + """
+                  a ON a.account_id=o.account_id
 		  LEFT JOIN tb_dist_customer cu ON cu.customer_id=o.customer_id
 		 <where>
 		   <if test="status != null and status != ''">AND o.order_status=#{status}</if>
@@ -60,7 +61,8 @@ public interface DistOrderAdminMapper {
 	@Select("""
 		SELECT o.*,DATE_FORMAT(o.ordered_at,'%Y-%m-%d %H:%i') ordered_at,DATE_FORMAT(o.paid_at,'%Y-%m-%d %H:%i') paid_at,
 		       DATE_FORMAT(o.canceled_at,'%Y-%m-%d %H:%i') canceled_at,DATE(o.ordered_at) order_date,a.account_name
-		  FROM tb_dist_order o LEFT JOIN the_full.tb_account a ON a.account_id=o.account_id WHERE o.order_id=#{order_id}""")
+		  FROM tb_dist_order o LEFT JOIN """ + AccountSource.TABLE + """
+                  a ON a.account_id=o.account_id WHERE o.order_id=#{order_id}""")
 	Map<String, Object> order(Map<String, Object> p);
 
 	@Select("SELECT * FROM tb_dist_order WHERE order_id=#{order_id} FOR UPDATE")
@@ -262,7 +264,8 @@ public interface DistOrderAdminMapper {
 		       (SELECT COALESCE(SUM(o.total_amount-o.paid_amount-o.refunded_amount),0) FROM tb_dist_order o
 		         WHERE o.account_id=a.account_id AND o.payment_status='CREDIT' AND o.order_status&lt;&gt;'CANCELED') outstanding_credit,
 		       (SELECT COUNT(*) FROM tb_dist_order o WHERE o.account_id=a.account_id) order_count
-		  FROM the_full.tb_account a
+		  FROM """ + AccountSource.TABLE + """
+                  a
 		  LEFT JOIN tb_dist_account_profile pf ON pf.account_id=a.account_id
 		 WHERE (a.del_yn IS NULL OR a.del_yn&lt;&gt;'Y')
 		   <if test="keyword != null and keyword != ''">AND (a.account_name LIKE CONCAT('%',#{keyword},'%') OR a.account_id LIKE CONCAT('%',#{keyword},'%'))</if>
@@ -271,7 +274,7 @@ public interface DistOrderAdminMapper {
 		</script>""")
 	List<Map<String, Object>> accountProfiles(Map<String, Object> p);
 
-	@Select("SELECT pf.*,a.account_name FROM the_full.tb_account a LEFT JOIN tb_dist_account_profile pf ON pf.account_id=a.account_id WHERE a.account_id=#{account_id}")
+	@Select("SELECT pf.*,a.account_name FROM " + AccountSource.TABLE + " a LEFT JOIN tb_dist_account_profile pf ON pf.account_id=a.account_id WHERE a.account_id=#{account_id}")
 	Map<String, Object> accountProfile(Map<String, Object> p);
 
 	@Insert("""

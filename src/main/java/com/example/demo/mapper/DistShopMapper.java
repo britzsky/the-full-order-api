@@ -82,7 +82,7 @@ public interface DistShopMapper {
 	List<Map<String, Object>> categories();
 
 	/* ---------- 주문 준비 ---------- */
-	@Select("SELECT account_id,account_name FROM the_full.tb_account WHERE account_id=#{account_id}")
+	@Select("SELECT a.account_id,a.account_name FROM " + AccountSource.TABLE + " a WHERE a.account_id=#{account_id}")
 	Map<String, Object> account(Map<String, Object> p);
 
 	@Select("SELECT * FROM tb_dist_account_profile WHERE account_id=#{account_id}")
@@ -186,7 +186,8 @@ public interface DistShopMapper {
 	@Select("""
 		SELECT o.*,DATE_FORMAT(o.ordered_at,'%Y-%m-%d %H:%i') ordered_at,DATE_FORMAT(o.paid_at,'%Y-%m-%d %H:%i') paid_at,
 		       DATE_FORMAT(o.canceled_at,'%Y-%m-%d %H:%i') canceled_at,DATE(o.ordered_at) order_date,a.account_name
-		  FROM tb_dist_order o LEFT JOIN the_full.tb_account a ON a.account_id=o.account_id
+		  FROM tb_dist_order o LEFT JOIN """ + AccountSource.TABLE + """
+                  a ON a.account_id=o.account_id
 		 WHERE o.order_id=#{order_id} AND o.orderer_user_id=#{user_id}""")
 	Map<String, Object> myOrder(Map<String, Object> p);
 

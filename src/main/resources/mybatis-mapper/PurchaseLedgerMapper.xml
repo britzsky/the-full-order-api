@@ -49,7 +49,7 @@
   <select id="summary" parameterType="map" resultType="hashmap">
     SELECT g.*,
            <choose>
-             <when test="group_by=='account'">(SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=g.group_key LIMIT 1)</when>
+             <when test="group_by=='account'">COALESCE((SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=g.group_key LIMIT 1),(SELECT oa.account_name FROM tb_order_account oa WHERE oa.account_id=g.group_key LIMIT 1))</when>
              <when test="group_by=='supplier'">(SELECT su.supplier_name FROM tb_supplier su WHERE su.supplier_id=g.group_key)</when>
              <otherwise>g.group_key</otherwise>
            </choose> group_name
@@ -77,7 +77,7 @@
   <select id="lines" parameterType="map" resultType="hashmap">
     SELECT i.goods_receipt_item_id,i.goods_receipt_id,DATE_FORMAT(r.receipt_date,'%Y-%m-%d') receipt_date,r.status receipt_status,
            <include refid="sourceExpr"/> source,
-           r.account_id,(SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=r.account_id LIMIT 1) account_name,
+           r.account_id,COALESCE((SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=r.account_id LIMIT 1),(SELECT oa.account_name FROM tb_order_account oa WHERE oa.account_id=r.account_id LIMIT 1)) account_name,
            s.supplier_id,s.supplier_code,s.supplier_name,ss.external_site_code site_code,ss.external_site_name site_name,
            r.purchase_order_id,po.client_ord,oi.client_ord_item,
            p.supplier_item_code,COALESCE(oi.product_name_snapshot,p.product_name) product_name,

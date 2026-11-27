@@ -18,7 +18,7 @@ public interface AiUsageMapper {
     BigDecimal todayCost();
 
     /** 기간 이력(최신순, 최대 500건). account_id가 있으면 그 거래처만 */
-    @Select("<script>SELECT l.*,a.account_name FROM tb_ai_usage_log l LEFT JOIN the_full.tb_account a ON a.account_id=l.account_id"
+    @Select("<script>SELECT l.*,a.account_name FROM tb_ai_usage_log l LEFT JOIN " + AccountSource.TABLE + " a ON a.account_id=l.account_id"
             + " WHERE l.created_at&gt;=#{from} AND l.created_at&lt;DATE_ADD(#{to},INTERVAL 1 DAY)<if test='account_id!=null and account_id!=\"\"'> AND l.account_id=#{account_id}</if>"
             + " ORDER BY l.ai_usage_log_id DESC LIMIT 500</script>")
     List<Map<String,Object>> list(Map<String,Object> p);

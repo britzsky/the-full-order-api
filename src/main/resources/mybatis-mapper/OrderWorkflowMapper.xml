@@ -21,9 +21,9 @@
     WHERE account_id=#{account_id} AND purchase_order_id=#{purchase_order_id} FOR UPDATE
   </select>
   <select id="orders" resultType="map">
-    <!-- 발주서 화면·인쇄용 이름: 거래처명(기존 거래처 조회와 같은 the_full.tb_account, 읽기만)·공급사 사업장명 -->
+    <!-- 발주서 화면·인쇄용 이름: 거래처명(ERP the_full.tb_account, 없으면 발주 앱 전용 tb_order_account)·공급사 사업장명 -->
     SELECT po.*,s.supplier_code,s.supplier_name,
-           (SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=po.account_id LIMIT 1) account_name,
+           COALESCE((SELECT a.account_name FROM the_full.tb_account a WHERE a.account_id=po.account_id LIMIT 1),(SELECT oa.account_name FROM tb_order_account oa WHERE oa.account_id=po.account_id LIMIT 1)) account_name,
            (SELECT ss.external_site_name FROM tb_supplier_account_site ss
              WHERE ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
              ORDER BY ss.active_yn DESC LIMIT 1) site_name

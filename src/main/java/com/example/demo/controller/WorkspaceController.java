@@ -53,7 +53,8 @@ public class WorkspaceController {
               (SELECT COUNT(*) FROM tb_supplier_account_site s WHERE s.account_id=a.account_id AND s.active_yn='Y') mapped_suppliers,
               (SELECT COUNT(*) FROM tb_workspace_notification n WHERE n.account_id=a.account_id
                 AND n.event_type='SUPPLIER_STATUS' AND n.status<>'RESOLVED') supplier_notices
-            FROM the_full.tb_account a WHERE a.del_yn='N'
+            FROM """+com.example.demo.mapper.AccountSource.TABLE+"""
+                  a WHERE a.del_yn='N'
             """+scope+" ORDER BY pending_orders DESC,due_receipts DESC,a.account_name LIMIT 500",args);
         return Map.of("role",user.headquarters()?"HEADQUARTERS":"SITE","accounts",rows,"checked_at",java.time.LocalDateTime.now().toString());
     }
@@ -78,7 +79,7 @@ public class WorkspaceController {
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("account_id",account);
         result.put("month",month.toString());
-        result.put("account_name",first("SELECT account_name FROM the_full.tb_account WHERE account_id=?",account));
+        result.put("account_name",first("SELECT a.account_name FROM "+com.example.demo.mapper.AccountSource.TABLE+" a WHERE a.account_id=?",account));
         result.put("user_name",first("SELECT user_name FROM the_full.tb_user WHERE user_id=?",user.userId()));
         var info=jdbc.queryForList("SELECT manager_name,manager_tel,manager_name2,manager_tel2 FROM the_full.tb_account_info WHERE account_id=? LIMIT 1",account);
         result.put("manager_name",info.isEmpty()?null:info.get(0).get("manager_name"));

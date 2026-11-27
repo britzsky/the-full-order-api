@@ -235,7 +235,7 @@ public class KakaoNotificationService {
 	}
 
 	private String accountName(String account) {
-		var rows = jdbc.queryForList("SELECT account_name FROM the_full.tb_account WHERE account_id=?", account);
+		var rows = jdbc.queryForList("SELECT a.account_name FROM " + com.example.demo.mapper.AccountSource.TABLE + " a WHERE a.account_id=?", account);
 		return rows.isEmpty() || rows.get(0).get("account_name") == null ? account : rows.get(0).get("account_name").toString();
 	}
 

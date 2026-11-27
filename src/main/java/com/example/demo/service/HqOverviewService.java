@@ -56,8 +56,9 @@ public class HqOverviewService {
         List<Object> args = new ArrayList<>(List.of(monday, monday.plusDays(6)));
         if (!account.isBlank()) args.add(account);
         return jdbc.queryForList("""
-            SELECT a.account_id, a.account_name FROM the_full.tb_account a
-            WHERE a.del_yn='N'
+            SELECT a.account_id, a.account_name FROM """ + com.example.demo.mapper.AccountSource.TABLE + """
+                  a
+            WHERE a.del_yn='N' AND a.meal_plan_yn='Y'
               AND NOT EXISTS (SELECT 1 FROM tb_account_meal_service m WHERE m.account_id=a.account_id
                      AND m.meal_date BETWEEN ? AND ? AND m.status<>'CANCELED')
             """ + scope(account) + " ORDER BY a.account_name LIMIT 500", args.toArray());
@@ -77,7 +78,8 @@ public class HqOverviewService {
         LocalDate to = today.plusDays(DeadlineAlertService.SEARCH_DAYS);
         // 계산할 식사가 있는 업장만 부족량을 계산한다(식사가 없으면 식단 기준 부족도 없다)
         var accounts = jdbc.queryForList("""
-            SELECT a.account_id, a.account_name FROM the_full.tb_account a
+            SELECT a.account_id, a.account_name FROM """ + com.example.demo.mapper.AccountSource.TABLE + """
+                  a
             WHERE a.del_yn='N' AND EXISTS (
               SELECT 1 FROM tb_account_meal_service m
               JOIN tb_account_table_meals t ON t.table_id=m.table_id AND t.account_id=m.account_id

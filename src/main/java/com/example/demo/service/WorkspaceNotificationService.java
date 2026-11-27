@@ -57,7 +57,9 @@ public class WorkspaceNotificationService {
         return list(account);
     }
     private void lock(String account) {
-        if(jdbc.queryForList("SELECT account_id FROM the_full.tb_account WHERE account_id=? AND del_yn='N' FOR UPDATE",account).isEmpty())
+        // ERP 거래처, 없으면 발주 앱 전용 거래처(더채움 본사 등) 줄을 잠근다
+        if(jdbc.queryForList("SELECT account_id FROM the_full.tb_account WHERE account_id=? AND del_yn='N' FOR UPDATE",account).isEmpty()
+           && jdbc.queryForList("SELECT account_id FROM tb_order_account WHERE account_id=? AND del_yn='N' FOR UPDATE",account).isEmpty())
             throw new IllegalArgumentException("거래처를 찾을 수 없습니다.");
     }
     private void put(String account,String key,String type,String title,String path,String facts) {

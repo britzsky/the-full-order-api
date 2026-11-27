@@ -210,7 +210,8 @@ public interface DistAdminMapper {
 		       DATE_FORMAT(s.end_at,'%Y-%m-%d %H:%i') end_at,s.change_reason,s.user_id,
 		       (s.start_at<=NOW() AND (s.end_at IS NULL OR s.end_at>NOW())) current_yn
 		  FROM tb_dist_sale_price_history s
-		  LEFT JOIN the_full.tb_account a ON a.account_id=s.account_id
+		  LEFT JOIN """ + AccountSource.TABLE + """
+                  a ON a.account_id=s.account_id
 		 WHERE s.product_id=#{product_id}
 		 ORDER BY s.price_type,s.account_id,s.start_at DESC""")
 	List<Map<String, Object>> salePrices(Map<String, Object> p);
@@ -237,7 +238,7 @@ public interface DistAdminMapper {
 	@Select("SELECT COUNT(*) FROM tb_dist_sale_price_history WHERE product_id=#{product_id} AND account_id IS NULL AND start_at<=NOW() AND (end_at IS NULL OR end_at>NOW())")
 	int currentSalePriceCount(Map<String, Object> p);
 
-	@Select("SELECT COUNT(*) FROM the_full.tb_account WHERE account_id=#{account_id}")
+	@Select("SELECT COUNT(*) FROM " + AccountSource.TABLE + " a WHERE a.account_id=#{account_id}")
 	int accountExists(Map<String, Object> p);
 
 	/* ---------- 매입가(날짜 단위 이력) ---------- */
