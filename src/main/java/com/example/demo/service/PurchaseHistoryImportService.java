@@ -186,7 +186,120 @@ public class PurchaseHistoryImportService {
 		} finally {
 			job.current = null;
 			job.finishedAt = LocalDateTime.now(SEOUL);
+			recordProgress(job);
 		}
+	}
+
+	/* ---------- 매일 밤 자동 구매 이력(2026-11-27) ---------- */
+
+	/** 자동으로 받기 시작하는 날(계약 시작). 받은 적 없는 사업장은 이날부터. */
+	private LocalDate historyStart = LocalDate.of(2026, 9, 1);
+	/** 이미 받은 사업장도 마지막 날 며칠 전부터 다시 받는다(공급사가 늦게 고친 입고). 다시 받아도 중복되지 않는다. */
+	static final int NIGHTLY_OVERLAP_DAYS = 2;
+
+	@Value("${purchase-history.nightly.from-date:2026-09-01}")
+	public void setHistoryStart(String value) {
+		if (value != null && !value.isBlank())
+			historyStart = LocalDate.parse(value.trim());
+	}
+
+	LocalDate historyStart() {
+		return historyStart;
+	}
+
+	/**
+	 * 작업이 끝나면 사업장별로 '빠짐없이 받은 마지막 날'(synced_through)을 남긴다. 화면에서 직접 돌린 가져오기도
+	 * 이미 받은 날(없으면 시작일)에 이어지는 범위면 반영한다. 중간에 멈춘·통째로 실패한 작업은 결과만 남긴다.
+	 */
+	void recordProgress(Job job) {
+		boolean completed = "DONE".equals(job.status) || "DONE_WITH_ERRORS".equals(job.status);
+		for (Map<String, Object> site : job.sites) {
+			try {
+				String siteCode = text(site.get("external_site_code"));
+				Map<String, Object> key = new HashMap<>();
+				key.put("account_id", job.accountId);
+				key.put("supplier_id", site.get("supplier_id"));
+				key.put("external_site_code", siteCode);
+				String saved = mapper.historySyncedThrough(key);
+				LocalDate needFrom = saved == null ? historyStart : LocalDate.parse(saved).plusDays(1);
+				LocalDate failed = job.firstFailureBySite.get(siteCode);
+				LocalDate through = null;
+				if (completed && !job.from.isAfter(needFrom)) {
+					LocalDate candidate = failed == null ? job.to : failed.minusDays(1);
+					if (!candidate.isBefore(job.from.minusDays(1)) && !candidate.isBefore(historyStart))
+						through = candidate;
+				}
+				// 밤 작업이 아니고 이어지지도 않으면(예전 기간만 다시 받기) 기록을 건드리지 않는다
+				if (!job.nightly && through == null)
+					continue;
+				Map<String, Object> p = new HashMap<>(key);
+				p.put("synced_through", through == null ? null : through.toString());
+				p.put("started_at", job.startedAt);
+				p.put("finished_at", job.finishedAt);
+				p.put("status", job.status);
+				p.put("message", abbreviate(job.from + "~" + job.to + (failed == null ? " 완료" : " · " + failed + " 실패"), 500));
+				p.put("failed", failed != null || !completed);
+				mapper.saveHistorySync(p);
+			} catch (RuntimeException e) {
+				log.warn("구매 이력 진행 기록 실패 account={} site={}: {}", job.accountId, site.get("external_site_code"), e.toString());
+			}
+		}
+	}
+
+	/** 이 거래처의 가져오기가 진행 중인지(화면·밤 작업 겹치지 않게) */
+	boolean busy(String accountId) {
+		return jobs.values().stream().anyMatch(j -> j.accountId.equals(accountId) && j.active());
+	}
+
+	/**
+	 * 매일 밤(기본 22:00 서울) 모든 거래처의 연결된 사업장 구매 이력을 받는다. 사업장마다 받은 적 없으면 historyStart부터,
+	 * 받았으면 마지막 날 NIGHTLY_OVERLAP_DAYS일 전부터 오늘까지(한 번에 MAX_DAYS일). 공급사 부담 때문에 화면 작업과 같은
+	 * 한 줄 대기열에서 하나씩 돌고, stopAt이 지나면 남은 사업장은 다음 날 밤에 이어서 한다.
+	 */
+	public Map<String, Object> runNightly(LocalDateTime stopAt) {
+		LocalDate today = LocalDate.now(SEOUL);
+		int done = 0, skipped = 0, failed = 0, left = 0;
+		for (Map<String, Object> target : mapper.historySyncTargets()) {
+			if (LocalDateTime.now(SEOUL).isAfter(stopAt)) {
+				left++;
+				continue;
+			}
+			String accountId = text(target.get("account_id"));
+			String saved = text(target.get("synced_through"));
+			LocalDate from = saved.isBlank() ? historyStart : LocalDate.parse(saved).minusDays(NIGHTLY_OVERLAP_DAYS);
+			if (from.isBefore(historyStart))
+				from = historyStart;
+			LocalDate to = today;
+			if (from.isAfter(to) || busy(accountId)) {
+				skipped++;
+				continue;
+			}
+			if (ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS)
+				to = from.plusDays(MAX_DAYS - 1);
+			String start = mapper.inventoryStartDate(Map.of("account_id", accountId));
+			Job job = new Job(accountId, from, to, List.of(target), start == null ? null : LocalDate.parse(start), "SYSTEM");
+			job.nightly = true;
+			jobs.put(job.id, job);
+			try {
+				executor.submit(() -> run(job)).get();
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				job.cancel = true;
+				break;
+			} catch (java.util.concurrent.ExecutionException e) {
+				log.warn("밤 구매 이력 실패 account={} site={}: {}", accountId, target.get("external_site_code"), e.toString());
+			}
+			if ("DONE".equals(job.status))
+				done++;
+			else
+				failed++;
+		}
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("done", done);
+		result.put("with_errors", failed);
+		result.put("skipped", skipped);
+		result.put("left_for_next_night", left);
+		return result;
 	}
 
 	/** 이미 식재료를 고른 상품은 새로 받은 줄에도 같은 식재료·환산을 붙인다. */
@@ -587,6 +700,9 @@ public class PurchaseHistoryImportService {
 		final Map<String, Map<String, Object>> products = new HashMap<>();
 		final Set<Long> billedOrderItems = Collections.synchronizedSet(new LinkedHashSet<>());
 		final List<Map<String, Object>> failures = Collections.synchronizedList(new ArrayList<>());
+		/** 사업장별 첫 실패일(사업장 자체 실패는 시작일) — 어디까지 빠짐없이 받았는지 기록용. failures는 50건까지만 남겨 따로 둔다. */
+		final Map<String, LocalDate> firstFailureBySite = new ConcurrentHashMap<>();
+		volatile boolean nightly;
 		volatile String status = "QUEUED", current;
 		volatile boolean cancel;
 		volatile LocalDateTime startedAt, finishedAt;
@@ -617,6 +733,8 @@ public class PurchaseHistoryImportService {
 
 		void fail(String supplier, String site, LocalDate day, String message) {
 			failureCount++;
+			if (site != null)
+				firstFailureBySite.merge(site, day == null ? from : day, (a, b) -> a.isBefore(b) ? a : b);
 			if (failures.size() >= MAX_FAILURES_KEPT)
 				return;
 			Map<String, Object> f = new LinkedHashMap<>();
@@ -635,6 +753,7 @@ public class PurchaseHistoryImportService {
 			m.put("to_date", to.toString());
 			m.put("inventory_start_date", inventoryStartDate == null ? null : inventoryStartDate.toString());
 			m.put("status", status);
+			m.put("nightly", nightly);
 			m.put("current", current);
 			m.put("site_count", sites.size());
 			m.put("total_steps", sites.size() * days());

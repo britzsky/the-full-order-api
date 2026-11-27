@@ -21,6 +21,13 @@ public interface PurchaseHistoryMapper {
 	/** 거래처에 연결된 사용 중 웰스토리·아워홈 사업장 */
 	List<Map<String, Object>> importSites(Map<String, Object> params);
 
+	/** 매일 밤 자동 구매 이력: 대상 사업장(거래처 × 사업장)과 synced_through */
+	List<Map<String, Object>> historySyncTargets();
+
+	String historySyncedThrough(Map<String, Object> params);
+
+	int saveHistorySync(Map<String, Object> params);
+
 	/** 우리 발주서(외부 주문번호 = client_ord)가 있는 주문인지. 있으면 발주서 입고 흐름이 맡으므로 이력으로 넣지 않는다 */
 	int purchaseOrderCount(Map<String, Object> params);
 

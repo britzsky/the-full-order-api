@@ -29,6 +29,39 @@
      ORDER BY s.supplier_code,ss.external_site_code
   </select>
 
+  <!--
+    매일 밤 자동 구매 이력(2026-11-27): 삭제 안 된 거래처(ERP + 발주 앱 전용)의 연결된 웰스토리·아워홈 사업장과 어디까지 받았는지.
+    받은 적 없는 사업장 먼저, 그다음 오래전까지만 받은 순.
+  -->
+  <select id="historySyncTargets" resultType="hashmap">
+    SELECT ss.account_id,ss.supplier_account_site_id,ss.supplier_id,ss.external_site_code,ss.external_site_name,s.supplier_code,s.supplier_name,
+           DATE_FORMAT(h.synced_through,'%Y-%m-%d') synced_through
+      FROM tb_supplier_account_site ss
+      JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
+      JOIN ${@com.example.demo.mapper.AccountSource@TABLE} a ON a.account_id=ss.account_id AND a.del_yn='N'
+      LEFT JOIN tb_purchase_history_sync h ON h.account_id=ss.account_id AND h.supplier_id=ss.supplier_id AND h.external_site_code=ss.external_site_code
+     WHERE ss.active_yn='Y' AND s.supplier_code IN ('WELSTORY','OURHOME')
+     ORDER BY h.synced_through IS NOT NULL,h.synced_through,ss.account_id,s.supplier_code,ss.external_site_code
+  </select>
+  <select id="historySyncedThrough" parameterType="map" resultType="string">
+    SELECT DATE_FORMAT(synced_through,'%Y-%m-%d') FROM tb_purchase_history_sync
+     WHERE account_id=#{account_id} AND supplier_id=#{supplier_id} AND external_site_code=#{external_site_code}
+  </select>
+  <!-- synced_through는 뒤로 가지 않는다(NULL이면 그대로). 실패하면 연속 실패 수를 올린다. -->
+  <insert id="saveHistorySync" parameterType="map">
+    INSERT INTO tb_purchase_history_sync
+      (account_id,supplier_id,external_site_code,synced_through,last_started_at,last_finished_at,last_status,last_message,consecutive_failures)
+    VALUES (#{account_id},#{supplier_id},#{external_site_code},#{synced_through},#{started_at},#{finished_at},#{status},#{message},
+            CASE WHEN #{failed} THEN 1 ELSE 0 END)
+    ON DUPLICATE KEY UPDATE
+      synced_through=CASE WHEN VALUES(synced_through) IS NULL THEN synced_through
+                          WHEN synced_through IS NULL OR VALUES(synced_through)&gt;synced_through THEN VALUES(synced_through)
+                          ELSE synced_through END,
+      last_started_at=VALUES(last_started_at),last_finished_at=VALUES(last_finished_at),
+      last_status=VALUES(last_status),last_message=VALUES(last_message),
+      consecutive_failures=CASE WHEN #{failed} THEN consecutive_failures+1 ELSE 0 END
+  </insert>
+
   <select id="purchaseOrderCount" parameterType="map" resultType="int">
     SELECT COUNT(*) FROM tb_account_purchase_order
      WHERE account_id=#{account_id} AND supplier_id=#{supplier_id} AND client_ord=#{client_ord}
