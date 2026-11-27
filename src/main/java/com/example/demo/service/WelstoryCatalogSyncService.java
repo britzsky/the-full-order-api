@@ -379,7 +379,8 @@ public class WelstoryCatalogSyncService {
 		int pages = 0;
 		boolean initialRequest = true;
 		boolean retriedWithNewQueryFlag = false;
-		do {
+		// while(true): do-while 안의 continue는 조건(contYn=Y)을 먼저 보므로 contYn=N 재요청이 나가지 않고 0건으로 끝났다
+		while (true) {
 			ObjectNode request = objectMapper.createObjectNode();
 			request.putObject("dataHeader").put("pageRow", PAGE_SIZE).put("contYn", contYn).put("nextKey", nextKey);
 			request.set("dataBody", body.deepCopy());
@@ -388,8 +389,10 @@ public class WelstoryCatalogSyncService {
 			String code = responseBody.path("resCd").asText("");
 			if (!code.isBlank() && !"S0000".equals(code)) {
 				String message = responseBody.path("resMsg").asText(code);
-				if (initialRequest && !retriedWithNewQueryFlag && nextKey.isBlank()
-						&& message.contains("조회 데이터가 존재하지 않습니다")) {
+				if (initialRequest && nextKey.isBlank() && message.contains("조회 데이터가 존재하지 않습니다")) {
+					// N으로 다시 물어도 없으면 진짜 0건(사업장 없는 계정·변경 없는 날)
+					if (retriedWithNewQueryFlag)
+						return rows;
 					contYn = "N";
 					retriedWithNewQueryFlag = true;
 					continue;
@@ -405,8 +408,9 @@ public class WelstoryCatalogSyncService {
 			initialRequest = false;
 			if (++pages > 1000)
 				throw new IllegalStateException("웰스토리 페이지 조회가 1000회를 초과했습니다.");
-		} while ("Y".equals(contYn) && !nextKey.isBlank());
-		return rows;
+			if (!"Y".equals(contYn) || nextKey.isBlank())
+				return rows;
+		}
 	}
 
 	private Long ensureSupplier(Map<String, Object> command) {
