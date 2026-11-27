@@ -81,7 +81,8 @@ public class WelstoryCycleSyncService {
 	 * 납품일 상품 준비용: 그 날짜의 순기를 찾아 아직 안 받았으면 전체 판가를 받는다.
 	 * 찾지 못하면(아직 웰스토리가 열지 않은 순기 등) IllegalArgumentException.
 	 */
-	public Cycle ensureCycle(Map<String, Object> site, LocalDate date, String actor) {
+	public Cycle ensureCycle(Map<String, Object> accountSite, LocalDate date, String actor) {
+		Map<String, Object> site = priceSite(accountSite);
 		Cycle cycle = find(site, date, new HashMap<>());
 		if (cycle == null)
 			throw new IllegalArgumentException("웰스토리에서 " + date + " 납품일의 순기 판가를 아직 받을 수 없습니다. 차순기 판가 전송일 이후 다시 시도해주세요.");
@@ -89,9 +90,32 @@ public class WelstoryCycleSyncService {
 		return cycle;
 	}
 
+	/**
+	 * 판가를 받고 저장하는 사업장 = 그 지급처의 대표 사업장. 웰스토리 판가(payer-allitem-price 등)는 대표 사업장 코드로만 조회되고
+	 * (2026-11-27 운영: 대표가 아닌 사업장은 모든 순기 E1103), 같은 지급처 사업장은 판가가 같다.
+	 * 대표 사업장을 모르면(사업장 목록 동기화 전) 그 사업장 그대로. account_id는 원래 거래처를 유지한다(syncCatalog 권한 확인용).
+	 */
+	Map<String, Object> priceSite(Map<String, Object> site) {
+		List<Map<String, Object>> reps = jdbc.queryForList("""
+				SELECT r.supplier_site_id,r.external_site_code
+				  FROM tb_supplier_site m
+				  JOIN tb_supplier_site r ON r.supplier_id=m.supplier_id AND r.external_site_code=m.representative_site_code
+				 WHERE m.supplier_site_id=? AND m.representative_site_code<>''
+				""", site.get("supplier_site_id"));
+		if (reps.isEmpty())
+			return site;
+		Map<String, Object> resolved = new LinkedHashMap<>(site);
+		resolved.put("supplier_site_id", reps.get(0).get("supplier_site_id"));
+		resolved.put("external_site_code", reps.get(0).get("external_site_code"));
+		resolved.put("own_site_code", site.get("external_site_code"));
+		return resolved;
+	}
+
 	Map<String, Object> syncSite(Map<String, Object> site, LocalDate today, String actor, Map<String, Map<String, Cycle>> probes) {
 		Map<String, Object> result = new LinkedHashMap<>();
 		result.put("sold_to", text(site.get("external_site_code")));
+		if (site.get("own_site_code") != null)
+			result.put("own_sold_to", text(site.get("own_site_code")));
 		result.put("account_id", text(site.get("account_id")));
 		Cycle current = find(site, today, probes.computeIfAbsent(text(site.get("external_site_code")), k -> new HashMap<>()));
 		if (current == null) {
@@ -199,8 +223,20 @@ public class WelstoryCycleSyncService {
 		return !watermark.isEmpty() && today.format(BASIC_DATE).equals(watermark.get(0));
 	}
 
+	/** 대표 사업장·순기별 잠금: 여러 거래처의 상품 준비가 동시에 같은 대표 사업장 전체 판가(10분 남짓)를 받지 않게 한다. */
+	private final Map<String, Object> fullSyncLocks = new java.util.concurrent.ConcurrentHashMap<>();
+
 	private Map<String, Object> fullSync(Map<String, Object> site, Cycle cycle, String actor) {
 		String type = "CYCLE_" + cycle.revision();
+		synchronized (fullSyncLocks.computeIfAbsent(site.get("supplier_site_id") + ":" + type, k -> new Object())) {
+			// 기다리는 동안 다른 거래처가 받았으면 다시 받지 않는다
+			if (fullySynced(site, cycle))
+				return Map.of("saved_count", 0, "skipped", "ALREADY_SYNCED");
+			return fullSyncLocked(site, cycle, actor, type);
+		}
+	}
+
+	private Map<String, Object> fullSyncLocked(Map<String, Object> site, Cycle cycle, String actor, String type) {
 		started(site, type);
 		try {
 			Map<String, Object> command = command(site, cycle, actor);
@@ -245,8 +281,13 @@ public class WelstoryCycleSyncService {
 				  JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
 				 WHERE s.supplier_code='WELSTORY' AND ss.active_yn='Y'
 				""";
-		return accountId == null ? jdbc.queryForList(sql + " ORDER BY ss.account_id")
+		List<Map<String, Object>> rows = accountId == null ? jdbc.queryForList(sql + " ORDER BY ss.account_id")
 				: jdbc.queryForList(sql + " AND ss.account_id=? ORDER BY ss.external_site_code", accountId);
+		// 판가는 대표 사업장으로 받는다 → 같은 대표 사업장을 쓰는 사업장은 한 번만(syncAll은 supplier_site_id로 거른다)
+		List<Map<String, Object>> resolved = new ArrayList<>();
+		for (Map<String, Object> row : rows)
+			resolved.add(priceSite(row));
+		return resolved;
 	}
 
 	private String checkpointCode(Map<String, Object> site, String type) {

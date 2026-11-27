@@ -53,8 +53,9 @@
            o.decimal_order_allowed,o.product_status,o.status_reason,o.valid_from,o.valid_to,o.last_synced_at,
            pr.purchase_price,pr.currency,pr.effective_from price_effective_from,pr.effective_to price_effective_to,
            av.orderable_yn,av.status_code availability_status,av.status_reason availability_reason,av.checked_at
-      FROM tb_supplier_site_product_offer o
-      JOIN tb_supplier_account_site ss ON ss.supplier_site_id=o.supplier_site_id
+      FROM tb_supplier_account_site ss
+      <include refid="priceSiteJoin"><property name="site" value="ss"/></include>
+      JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="priceSiteId"><property name="site" value="ss"/></include>
       JOIN tb_supplier s ON s.supplier_id=ss.supplier_id
       JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=o.supplier_product_id
       LEFT JOIN tb_favorite_product fp ON fp.supplier_product_id=p.supplier_product_id
@@ -114,6 +115,28 @@
       FROM tb_supplier_ingredient_product p
       JOIN tb_account_ingredient_master ai ON ai.account_id=#{account_id} AND ai.ingredient_id=p.ingredient_id AND ai.active_yn='Y'
      WHERE p.supplier_product_id IN <foreach collection="product_ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+  <!--
+    판가를 읽을 사업장(2026-11-27). 웰스토리 판가는 지급처의 대표 사업장(repSoldtoYn=Y) 코드로만 조회되고 같은 지급처는 판가가 같아,
+    대표 사업장 마스터에만 저장한다. 웰스토리 사업장은 대표 사업장 판가를 읽는다. 아워홈은 대표 코드가 있어도 사업장 그대로(판가가 사업장별).
+    쓰는 법: FROM tb_supplier_account_site a + include priceSiteJoin(site=a) → JOIN offer o ON o.supplier_site_id=include priceSiteId(site=a)
+  -->
+  <sql id="priceSiteJoin">
+    LEFT JOIN tb_supplier_site ${site}_pm ON ${site}_pm.supplier_site_id=${site}.supplier_site_id AND ${site}_pm.representative_site_code&lt;&gt;''
+          AND ${site}_pm.supplier_id IN (SELECT ws.supplier_id FROM tb_supplier ws WHERE ws.supplier_code='WELSTORY')
+    LEFT JOIN tb_supplier_site ${site}_pr ON ${site}_pr.supplier_id=${site}_pm.supplier_id AND ${site}_pr.external_site_code=${site}_pm.representative_site_code
+  </sql>
+  <sql id="priceSiteId">COALESCE(${site}_pr.supplier_site_id,${site}.supplier_site_id)</sql>
+  <!-- 웰스토리 판가 동기화: 이 거래처 사업장(자기 코드 또는 대표 코드) → 판가를 조회·저장할 대표 사업장(모르면 그 사업장) -->
+  <select id="priceSite" parameterType="map" resultType="hashmap">
+    SELECT COALESCE(r.supplier_site_id,ss.supplier_site_id) supplier_site_id,COALESCE(r.external_site_code,ss.external_site_code) external_site_code
+      FROM tb_supplier_account_site ss
+      LEFT JOIN tb_supplier_site m ON m.supplier_site_id=ss.supplier_site_id AND m.representative_site_code&lt;&gt;''
+      LEFT JOIN tb_supplier_site r ON r.supplier_id=m.supplier_id AND r.external_site_code=m.representative_site_code
+     WHERE ss.account_id=#{account_id} AND ss.supplier_id=#{supplier_id} AND ss.active_yn='Y'
+       AND (ss.external_site_code=#{sold_to} OR r.external_site_code=#{sold_to})
+     ORDER BY CASE WHEN ss.external_site_code=#{sold_to} THEN 0 ELSE 1 END
+     LIMIT 1
   </select>
   <!-- 거래처 매핑 ID → 상품·판가를 저장하는 사업장 마스터 ID -->
   <select id="siteIdOfMapping" parameterType="map" resultType="long">

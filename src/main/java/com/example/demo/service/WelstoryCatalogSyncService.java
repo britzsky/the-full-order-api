@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,7 @@ public class WelstoryCatalogSyncService {
 			api.rememberSoldTos(clientKey, clientRows.stream().map(row -> first(row, "soldTo", "solTo")).toList());
 			rows.addAll(clientRows);
 		}
+		Map<String, String> representatives = representativesByPayer(rows);
 		List<Map<String, Object>> sites = new ArrayList<>();
 		for (JsonNode row : rows) {
 			String soldTo = first(row, "soldTo", "solTo");
@@ -63,7 +65,9 @@ public class WelstoryCatalogSyncService {
 			Map<String, Object> site = new LinkedHashMap<>();
 			site.put("external_site_code", soldTo);
 			site.put("external_site_name", first(row, "soldToNm", "solToNm"));
-			site.put("representative_site_code", first(row, "repSoldTo", "repSoldto", "repSoldtoCode"));
+			// 웰스토리는 대표 사업장 코드를 주지 않고 repSoldtoYn만 준다 → 같은 지급처(payerCode)의 repSoldtoYn=Y 사업장
+			String representative = first(row, "repSoldTo", "repSoldto", "repSoldtoCode");
+			site.put("representative_site_code", representative.isBlank() ? representatives.getOrDefault(first(row, "payerCode"), "") : representative);
 			site.put("representative_site_name", null);
 			site.put("center_code", first(row, "logisCd", "centerCode"));
 			site.put("center_name", null);
@@ -75,9 +79,35 @@ public class WelstoryCatalogSyncService {
 		return Map.of("code", 200, "received_count", rows.size(), "saved_count", saved);
 	}
 
+	/** 지급처(payerCode) → 대표 사업장(repSoldtoYn=Y) 코드. 판가는 대표 사업장 코드로만 조회된다. */
+	Map<String, String> representativesByPayer(List<JsonNode> rows) {
+		Map<String, String> representatives = new HashMap<>();
+		for (JsonNode row : rows) {
+			String payer = first(row, "payerCode");
+			String soldTo = first(row, "soldTo", "solTo");
+			if (!payer.isBlank() && !soldTo.isBlank() && "Y".equalsIgnoreCase(first(row, "repSoldtoYn", "repSoldToYn")))
+				representatives.putIfAbsent(payer, soldTo);
+		}
+		return representatives;
+	}
+
+	/**
+	 * 이 거래처 사업장(자기 코드 또는 그 대표 사업장 코드로 요청 가능) → 판가를 조회·저장할 대표 사업장.
+	 * 대표 사업장을 모르면 그 사업장 그대로.
+	 */
+	private Map<String, Object> priceSite(String accountId, Long supplierId, String soldTo) {
+		Map<String, Object> query = new LinkedHashMap<>();
+		query.put("account_id", accountId);
+		query.put("supplier_id", supplierId);
+		query.put("sold_to", soldTo);
+		Map<String, Object> site = mapper.priceSite(query);
+		if (site == null || site.get("supplier_site_id") == null || text(site.get("external_site_code")).isBlank())
+			throw new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다. 사업장 매핑에서 먼저 지정해 주세요: " + soldTo);
+		return site;
+	}
+
 	public Map<String, Object> syncCatalog(Map<String, Object> command) {
 		String accountId = required(command, "account_id");
-		String soldTo = required(command, "sold_to");
 		String year = required(command, "period_group_year");
 		String period = required(command, "period_group");
 		if (!year.matches("\\d{4}"))
@@ -85,14 +115,9 @@ public class WelstoryCatalogSyncService {
 		if (!period.matches("\\d{2}"))
 			throw new IllegalArgumentException("period_group은 2자리여야 합니다.");
 		Long supplierId = ensureSupplier(command);
-		Map<String, Object> siteQuery = new LinkedHashMap<>();
-		siteQuery.put("account_id", accountId);
-		siteQuery.put("supplier_id", supplierId);
-		siteQuery.put("active_yn", "Y");
-		Map<String, Object> site = mapper.sites(siteQuery).stream()
-				.filter(row -> soldTo.equals(text(row.get("external_site_code")))).findFirst()
-				.orElseThrow(() -> new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다. 사업장 매핑에서 먼저 지정해 주세요: " + soldTo));
-		// 상품·판가·동기화 기록은 사업장 마스터 단위(같은 사업장을 쓰는 거래처가 함께 쓴다)
+		// 상품·판가·동기화 기록은 대표 사업장 마스터 단위(같은 지급처 사업장·거래처가 함께 쓴다)
+		Map<String, Object> site = priceSite(accountId, supplierId, required(command, "sold_to"));
+		String soldTo = text(site.get("external_site_code"));
 		Long siteId = Long.valueOf(site.get("supplier_site_id").toString());
 		Map<String, Object> checkpoint = checkpoint(supplierId, siteId, "FULL_CATALOG");
 		mapper.markSyncStarted(checkpoint);
@@ -154,19 +179,13 @@ public class WelstoryCatalogSyncService {
 	 */
 	public Map<String, Object> syncChangedPrices(Map<String, Object> command) {
 		String accountId = required(command, "account_id");
-		String soldTo = required(command, "sold_to");
 		String year = required(command, "period_group_year");
 		String period = required(command, "period_group");
 		String reqDate = required(command, "req_date");
 		Long supplierId = ensureSupplier(command);
-		Map<String, Object> siteQuery = new LinkedHashMap<>();
-		siteQuery.put("account_id", accountId);
-		siteQuery.put("supplier_id", supplierId);
-		siteQuery.put("active_yn", "Y");
-		Map<String, Object> site = mapper.sites(siteQuery).stream()
-				.filter(row -> soldTo.equals(text(row.get("external_site_code")))).findFirst()
-				.orElseThrow(() -> new IllegalArgumentException("이 거래처에 지정된 웰스토리 사업장이 아닙니다: " + soldTo));
-		// 상품·판가·동기화 기록은 사업장 마스터 단위(같은 사업장을 쓰는 거래처가 함께 쓴다)
+		// 상품·판가는 대표 사업장 마스터 단위(같은 지급처 사업장·거래처가 함께 쓴다)
+		Map<String, Object> site = priceSite(accountId, supplierId, required(command, "sold_to"));
+		String soldTo = text(site.get("external_site_code"));
 		Long siteId = Long.valueOf(site.get("supplier_site_id").toString());
 		ObjectNode body = objectMapper.createObjectNode();
 		body.put("soldTo", soldTo).put("periodGroupYear", year).put("periodGroup", period).put("reqDate", reqDate);

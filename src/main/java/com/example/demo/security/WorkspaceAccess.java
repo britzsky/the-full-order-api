@@ -96,7 +96,9 @@ public class WorkspaceAccess {
         if("supplier_offer_id".equals(key)) {
             // 상품 제공 조건은 사업장 단위로 여러 거래처가 함께 쓴다 → 내 거래처가 그 사업장에 연결된 적이 있으면 허용
             var exists=jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_offer WHERE supplier_offer_id=?",Integer.class,value);
-            var mine=jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_site_product_offer o JOIN tb_supplier_account_site s ON s.supplier_site_id=o.supplier_site_id WHERE o.supplier_offer_id=? AND s.account_id=?",Integer.class,value,user.accountId());
+            var mine=jdbc.queryForObject("SELECT COUNT(*) FROM tb_supplier_account_site s"+com.example.demo.service.SupplierPriceSite.join("s")
+                +"JOIN tb_supplier_site_product_offer o ON o.supplier_site_id="+com.example.demo.service.SupplierPriceSite.id("s")
+                +" WHERE o.supplier_offer_id=? AND s.account_id=?",Integer.class,value,user.accountId());
             if(exists!=null && exists>0 && (mine==null || mine==0))
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,"다른 거래처의 업무에 접근할 수 없습니다.");
         }

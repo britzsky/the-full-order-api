@@ -73,6 +73,9 @@ public interface SupplierIntegrationMapper {
 
 	List<Map<String, Object>> scheduledCatalogTargets();
 
+	/** 웰스토리 판가 동기화: 거래처 사업장(자기 코드 또는 대표 코드) → 판가를 조회·저장할 대표 사업장 */
+	Map<String, Object> priceSite(Map<String, Object> params);
+
 	List<Map<String, Object>> scheduledReceiptTargets();
 
 	// 아워홈 동기화 빠른 경로: 기존 상태 일괄 조회, 변경 없는 판매조건 일괄 갱신, 가격·판매상태 묶음 저장

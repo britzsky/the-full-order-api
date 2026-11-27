@@ -17,7 +17,7 @@ class WelstoryPagedRetryTest {
         var mapper = mock(SupplierIntegrationMapper.class);
         var api = mock(WelstoryItemLookupService.class);
         when(mapper.supplierIdByCode(anyMap())).thenReturn(1L);
-        when(mapper.sites(anyMap())).thenReturn(List.of(Map.of("external_site_code","SITE","supplier_account_site_id",2L,"supplier_site_id",4L)));
+        when(mapper.priceSite(anyMap())).thenReturn(new HashMap<>(Map.of("external_site_code","SITE","supplier_site_id",4L)));
         when(mapper.supplierProductId(anyMap())).thenReturn(3L);
         when(api.call(anyString(),any())).thenReturn(
             json.readTree("""
@@ -42,7 +42,7 @@ class WelstoryPagedRetryTest {
         var mapper = mock(SupplierIntegrationMapper.class);
         var api = mock(WelstoryItemLookupService.class);
         when(mapper.supplierIdByCode(anyMap())).thenReturn(1L);
-        when(mapper.sites(anyMap())).thenReturn(List.of(Map.of("external_site_code","SITE","supplier_account_site_id",2L,"supplier_site_id",4L)));
+        when(mapper.priceSite(anyMap())).thenReturn(new HashMap<>(Map.of("external_site_code","SITE","supplier_site_id",4L)));
         var noData = json.readTree("""
             {"dataHeader":{"contYn":"N","nextKey":""},"dataBody":{"resCd":"E1103","resMsg":"조회 데이터가 존재하지 않습니다.","data":[]}}
             """);

@@ -3,6 +3,13 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.demo.mapper.MenuMapper">
+  <!-- 판가를 읽을 사업장: SupplierIntegrationMapper.xml priceSiteJoin·priceSiteId와 같은 SQL(매퍼별로 따로 읽는 테스트가 있어 복사본). 웰스토리는 지급처 대표 사업장 판가 -->
+  <sql id="priceSiteJoin">
+    LEFT JOIN tb_supplier_site ${site}_pm ON ${site}_pm.supplier_site_id=${site}.supplier_site_id AND ${site}_pm.representative_site_code&lt;&gt;''
+          AND ${site}_pm.supplier_id IN (SELECT ws.supplier_id FROM tb_supplier ws WHERE ws.supplier_code='WELSTORY')
+    LEFT JOIN tb_supplier_site ${site}_pr ON ${site}_pr.supplier_id=${site}_pm.supplier_id AND ${site}_pr.external_site_code=${site}_pm.representative_site_code
+  </sql>
+  <sql id="priceSiteId">COALESCE(${site}_pr.supplier_site_id,${site}.supplier_site_id)</sql>
 	
 	<select id="ingredientBaseUnit" parameterType="map" resultType="string">SELECT base_unit FROM tb_ingredient_master WHERE ingredient_id=#{ingredient_id}</select>
 	<!-- 거래처 레시피 기준단위: 거래처 식재료 우선, 없으면 본사 식자재 -->
@@ -360,15 +367,15 @@
               WHEN c.receipt_cost IS NOT NULL THEN c.receipt_date WHEN c.standard_cost IS NOT NULL THEN c.standard_date END auto_source_date
     FROM (
       SELECT q.*,pr.product_name price_product_name,
-             (SELECT h.purchase_price FROM tb_supplier_site_product_price h
-                JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+             (SELECT h.purchase_price FROM tb_supplier_account_site a <include refid="com.example.demo.mapper.MenuMapper.priceSiteJoin"><property name="site" value="a"/></include>
+                JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="com.example.demo.mapper.MenuMapper.priceSiteId"><property name="site" value="a"/></include>
+                JOIN tb_supplier_site_product_price h ON h.supplier_offer_id=o.supplier_offer_id
                WHERE a.account_id=q.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
                /NULLIF(pr.base_qty,0)*<include refid="com.example.demo.mapper.MenuMapper.unitCostFactor"><property name="fromUnit" value="pr.base_unit"/><property name="toUnit" value="q.base_unit"/></include> site_cost,
-             (SELECT DATE(h.effective_from) FROM tb_supplier_site_product_price h
-                JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+             (SELECT DATE(h.effective_from) FROM tb_supplier_account_site a <include refid="com.example.demo.mapper.MenuMapper.priceSiteJoin"><property name="site" value="a"/></include>
+                JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="com.example.demo.mapper.MenuMapper.priceSiteId"><property name="site" value="a"/></include>
+                JOIN tb_supplier_site_product_price h ON h.supplier_offer_id=o.supplier_offer_id
                WHERE a.account_id=q.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1) site_date,
              (SELECT h.purchase_price FROM tb_supplier_ingredient_price_history h
@@ -395,8 +402,8 @@
                  ORDER BY gr.receipt_date DESC,gi.goods_receipt_item_id DESC LIMIT 1),
                (SELECT sp.supplier_product_id FROM tb_supplier_ingredient_product sp
                  WHERE sp.ingredient_id=ai.ingredient_id AND sp.active_yn='Y'
-                   AND EXISTS(SELECT 1 FROM tb_supplier_site_product_offer o
-                                JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                   AND EXISTS(SELECT 1 FROM tb_supplier_account_site a <include refid="com.example.demo.mapper.MenuMapper.priceSiteJoin"><property name="site" value="a"/></include>
+                                JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="com.example.demo.mapper.MenuMapper.priceSiteId"><property name="site" value="a"/></include>
                                WHERE a.account_id=ai.account_id AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
                  ORDER BY sp.supplier_product_id LIMIT 1)) price_product_id,
              CASE WHEN pc.source_type='MANUAL' AND pc.unit_cost&gt;0
@@ -466,9 +473,9 @@
         <!-- 판가는 레시피 줄(3만여 줄)마다가 아니라 본사 식재료마다 한 번만 찾는다 -->
         LEFT JOIN (
           SELECT q.ingredient_id,pr.base_unit price_unit,
-                 (SELECT h.purchase_price FROM tb_supplier_site_product_price h
-                    JOIN tb_supplier_site_product_offer o ON o.supplier_offer_id=h.supplier_offer_id
-                    JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                 (SELECT h.purchase_price FROM tb_supplier_account_site a <include refid="com.example.demo.mapper.MenuMapper.priceSiteJoin"><property name="site" value="a"/></include>
+                    JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="com.example.demo.mapper.MenuMapper.priceSiteId"><property name="site" value="a"/></include>
+                    JOIN tb_supplier_site_product_price h ON h.supplier_offer_id=o.supplier_offer_id
                    WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=q.price_product_id AND h.purchase_price&gt;0
                    ORDER BY <include refid="com.example.demo.mapper.MenuMapper.priceDistance"><property name="row" value="h"/></include>,h.effective_from DESC,h.supplier_price_id DESC LIMIT 1)
                    /NULLIF(pr.base_qty,0) site_cost,
@@ -480,8 +487,8 @@
               SELECT im.ingredient_id,
                      (SELECT sp.supplier_product_id FROM tb_supplier_ingredient_product sp
                        WHERE sp.ingredient_id=im.ingredient_id AND sp.active_yn='Y'
-                         AND EXISTS(SELECT 1 FROM tb_supplier_site_product_offer o
-                                      JOIN tb_supplier_account_site a ON a.supplier_site_id=o.supplier_site_id
+                         AND EXISTS(SELECT 1 FROM tb_supplier_account_site a <include refid="com.example.demo.mapper.MenuMapper.priceSiteJoin"><property name="site" value="a"/></include>
+                                      JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=<include refid="com.example.demo.mapper.MenuMapper.priceSiteId"><property name="site" value="a"/></include>
                                      WHERE a.account_id=#{account_id} AND a.active_yn='Y' AND o.active_yn='Y' AND o.supplier_product_id=sp.supplier_product_id)
                        ORDER BY sp.supplier_product_id LIMIT 1) price_product_id
                 FROM tb_ingredient_master im

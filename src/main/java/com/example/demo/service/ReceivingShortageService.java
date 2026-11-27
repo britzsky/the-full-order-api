@@ -164,14 +164,16 @@ public class ReceivingShortageService {
 				  JOIN tb_account_purchase_order_item oi ON oi.purchase_order_id=po.purchase_order_id
 				  JOIN tb_supplier_ingredient_product p ON p.supplier_product_id=oi.supplier_product_id
 				  LEFT JOIN tb_supplier_account_site ss ON ss.account_id=po.account_id AND ss.supplier_id=po.supplier_id AND ss.external_site_code=po.sold_to
-				  LEFT JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=ss.supplier_site_id AND o.supplier_product_id=oi.supplier_product_id
+				  @PRICE_SITE_JOIN@
+				  LEFT JOIN tb_supplier_site_product_offer o ON o.supplier_site_id=@PRICE_SITE_ID@ AND o.supplier_product_id=oi.supplier_product_id
 				 WHERE po.account_id=? AND po.requested_delivery_date<=?
 				   AND po.status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')
 				   AND oi.item_status IN ('ORDERED','CONFIRMED','PARTIAL_RECEIVED','NOT_RECEIVED')
 				   AND oi.received_order_qty+oi.shortage_order_qty<oi.order_qty
 				 ORDER BY po.requested_delivery_date,po.purchase_order_id,oi.purchase_order_item_id
 				 LIMIT 2000
-				""", account, to.toString());
+				""".replace("@PRICE_SITE_JOIN@", SupplierPriceSite.join("ss")).replace("@PRICE_SITE_ID@", SupplierPriceSite.id("ss")),
+				account, to.toString());
 		Map<Object, List<Map<String, Object>>> situations = situationsByItem(account);
 		int waiting = 0, check = 0, reported = 0;
 		List<Map<String, Object>> items = new ArrayList<>();
